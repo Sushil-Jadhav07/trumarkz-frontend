@@ -33,9 +33,12 @@ export const OrgRegistration = () => {
     if (form.mobile && !/^\d{10,15}$/.test(form.mobile.replace(/\D/g, ''))) {
       newErrors.mobile = 'Enter a valid 10-15 digit number';
     }
-    if (form.gstNumber && form.gstNumber.trim().length !== 15) {
+    if (!form.gstNumber.trim()) newErrors.gstNumber = 'GST number is required';
+    else if (form.gstNumber.trim().length !== 15) {
       newErrors.gstNumber = 'GST number must be 15 characters';
     }
+    if (!form.businessRegNo.trim()) newErrors.businessRegNo = 'Business registration number is required';
+    if (!form.address.trim()) newErrors.address = 'Registered address is required';
     if (!form.password) newErrors.password = 'Password is required';
     else if (form.password.length < 8) newErrors.password = 'Minimum 8 characters';
     setErrors(newErrors);
@@ -118,7 +121,7 @@ export const OrgRegistration = () => {
               icon={Phone}
             />
             <Input
-              label="GST Number (optional)"
+              label="GST Number"
               placeholder="e.g. 27ABCDE1234F1Z5"
               value={form.gstNumber}
               onChange={(e) => updateField('gstNumber', e.target.value.toUpperCase())}
@@ -126,7 +129,7 @@ export const OrgRegistration = () => {
               icon={FileText}
             />
             <Input
-              label="Business Registration Number (optional)"
+              label="Business Registration Number"
               placeholder="e.g. U74999MH2020PTC123456"
               value={form.businessRegNo}
               onChange={(e) => updateField('businessRegNo', e.target.value)}
@@ -134,7 +137,7 @@ export const OrgRegistration = () => {
               icon={FileText}
             />
             <Input
-              label="Registered Address (optional)"
+              label="Registered Address"
               placeholder="Full business address"
               value={form.address}
               onChange={(e) => updateField('address', e.target.value)}

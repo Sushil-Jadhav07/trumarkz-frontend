@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { StepWizard } from '@/components/ui/StepWizard';
 import { Card } from '@/components/ui/Card';
-import { User, Mail, Phone, Lock, ArrowLeft, ArrowRight } from 'lucide-react';
+import { User, Mail, Phone, Lock, MapPin, ArrowLeft, ArrowRight } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 export const IndividualRegistration = () => {
@@ -17,6 +17,7 @@ export const IndividualRegistration = () => {
     fullName: '',
     email: '',
     mobile: '',
+    address: '',
     password: '',
   });
   const [errors, setErrors] = useState({});
@@ -30,6 +31,7 @@ export const IndividualRegistration = () => {
     if (form.mobile && !/^\d{10,15}$/.test(form.mobile.replace(/\D/g, ''))) {
       newErrors.mobile = 'Enter a valid 10-15 digit number';
     }
+    if (!form.address.trim()) newErrors.address = 'Address is required';
     if (!form.password) newErrors.password = 'Password is required';
     else if (form.password.length < 8) newErrors.password = 'Minimum 8 characters';
     setErrors(newErrors);
@@ -101,6 +103,16 @@ export const IndividualRegistration = () => {
               onChange={(e) => updateField('mobile', e.target.value)}
               error={errors.mobile}
               icon={Phone}
+            />
+            <Input
+              label="Address"
+              placeholder="Enter your full address"
+              name="street-address"
+              autoComplete="street-address"
+              value={form.address}
+              onChange={(e) => updateField('address', e.target.value)}
+              error={errors.address}
+              icon={MapPin}
             />
             <Input
               label="Password"

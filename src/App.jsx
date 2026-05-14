@@ -6,6 +6,7 @@ import { AuthProvider } from '@/context/AuthContext';
 import { AppProvider } from '@/context/AppContext';
 import SplashScreen from '@/pages/public/SplashScreen';
 import LoginRegister from '@/pages/public/LoginRegister';
+import DocumentUpload from '@/pages/public/DocumentUpload';
 import OrgRegistration from '@/pages/org/OrgRegistration';
 import IndividualRegistration from '@/pages/individual/IndividualRegistration';
 import OTPVerification from '@/pages/org/OTPVerification';
@@ -62,6 +63,7 @@ const AnimatedRoutes = () => {
         <Routes location={location}>
           <Route path="/" element={<SplashScreen />} />
           <Route path="/login" element={<LoginRegister />} />
+          <Route path="/upload" element={<DocumentUpload />} />
 
           {/* ── Registration routes ── */}
           <Route path="/register" element={<OrgRegistration />} />
