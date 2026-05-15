@@ -42,7 +42,7 @@ export const ShareCredential = () => {
       label: 'Download QR',
       desc: 'Use for print and offline scan',
       icon: Download,
-      color: 'bg-purple-50 text-purple-700 border-purple-100',
+      color: 'bg-blue-50 text-brand-blue border-blue-100',
     },
   ];
 

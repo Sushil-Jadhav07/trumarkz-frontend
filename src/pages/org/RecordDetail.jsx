@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate, useParams } from 'react-router-dom';
 import { AuthLayout } from '@/components/layout/AuthLayout';
@@ -9,15 +9,41 @@ import { Badge } from '@/components/ui/Badge';
 import { verificationAPI, getApiError } from '@/services/api';
 import { useAuth } from '@/context/AuthContext';
 import {
-  ArrowLeft, User, FileText, CheckCircle, XCircle, Clock,
-  Download, QrCode, ExternalLink, RefreshCw, AlertTriangle
+  AlertTriangle,
+  ArrowLeft,
+  CheckCircle,
+  Download,
+  ExternalLink,
+  FileText,
+  Package,
+  QrCode,
+  RefreshCw,
+  User,
+  XCircle,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 const StatusBadge = ({ status }) => {
-  if (status === 'verified') return <Badge status="success">✓ Verified</Badge>;
-  if (status === 'failed')   return <Badge status="error">✗ Failed</Badge>;
+  if (status === 'verified') return <Badge status="success">Verified</Badge>;
+  if (status === 'failed') return <Badge status="error">Failed</Badge>;
   return <Badge status="pending">Pending</Badge>;
+};
+
+const isProductRecord = (record) =>
+  record?.entity_type === 'product' ||
+  !!record?.product_name ||
+  !!record?.category_name ||
+  !!record?.custom_fields;
+
+const formatDate = (value) => {
+  if (!value) return '-';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString('en-IN');
+};
+
+const readable = (value) => {
+  if (value === null || value === undefined || value === '') return '-';
+  return String(value).replace(/_/g, ' ');
 };
 
 export const RecordDetail = () => {
@@ -25,7 +51,7 @@ export const RecordDetail = () => {
   const { id } = useParams();
   const { role } = useAuth();
 
-  const [user, setUser] = useState(null);
+  const [record, setRecord] = useState(null);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const [certLoading, setCertLoading] = useState(false);
@@ -37,27 +63,36 @@ export const RecordDetail = () => {
 
   useEffect(() => {
     if (!id) return;
-    const fetch = async () => {
+    let mounted = true;
+
+    const fetchRecord = async () => {
       setLoading(true);
       try {
         const { data } = await verificationAPI.getUserVerification(id);
-        setUser(data);
+        if (mounted) setRecord(data);
       } catch (err) {
-        toast.error(getApiError(err, 'Failed to load user details'));
+        toast.error(getApiError(err, 'Failed to load record details'));
       } finally {
-        setLoading(false);
+        if (mounted) setLoading(false);
       }
     };
-    fetch();
+
+    fetchRecord();
+    return () => { mounted = false; };
   }, [id]);
 
-  const handleApprove = async () => {
+  const updateStatus = async (status, reason = null) => {
     setActionLoading(true);
     try {
-      await verificationAPI.updateVerificationStatus(id, 'verified');
-      setUser((u) => ({ ...u, verification_status: 'verified' }));
-      toast.success('User verified successfully!');
+      await verificationAPI.updateVerificationStatus(id, status, reason);
+      setRecord((current) => ({
+        ...current,
+        verification_status: status,
+        verification_reason: reason,
+      }));
       setShowRejectForm(false);
+      setRejectReason('');
+      toast.success(status === 'verified' ? 'Record verified successfully.' : 'Record rejected.');
     } catch (err) {
       toast.error(getApiError(err, 'Failed to update status'));
     } finally {
@@ -65,32 +100,24 @@ export const RecordDetail = () => {
     }
   };
 
-  const handleReject = async () => {
-    if (!rejectReason.trim()) { toast.error('Please provide a reason for rejection'); return; }
-    setActionLoading(true);
-    try {
-      await verificationAPI.updateVerificationStatus(id, 'failed', rejectReason.trim());
-      setUser((u) => ({ ...u, verification_status: 'failed', verification_reason: rejectReason.trim() }));
-      toast.success('Verification rejected.');
-      setShowRejectForm(false);
-      setRejectReason('');
-    } catch (err) {
-      toast.error(getApiError(err, 'Failed to update status'));
-    } finally {
-      setActionLoading(false);
+  const handleReject = () => {
+    if (!rejectReason.trim()) {
+      toast.error('Please provide a reason for rejection');
+      return;
     }
+    updateStatus('failed', rejectReason.trim());
   };
 
   const handleGenerateCert = async () => {
-    if (user?.verification_status !== 'verified') {
-      toast.error('Certificate can only be generated for verified users');
+    if (record?.verification_status !== 'verified') {
+      toast.error('Certificate can only be generated for verified records');
       return;
     }
     setCertLoading(true);
     try {
       const { data } = await verificationAPI.generateQRAndCertificate(id);
       setCertificate(data);
-      toast.success('Certificate generated!');
+      toast.success('Certificate generated.');
     } catch (err) {
       toast.error(getApiError(err, 'Failed to generate certificate'));
     } finally {
@@ -103,18 +130,18 @@ export const RecordDetail = () => {
       <AuthLayout title="Record Detail">
         <div className="flex flex-col items-center justify-center py-20 gap-3">
           <RefreshCw size={28} className="animate-spin text-brand-blue" />
-          <p className="text-sm text-gray-400 font-inter">Loading record…</p>
+          <p className="text-sm text-gray-400 font-inter">Loading record...</p>
         </div>
       </AuthLayout>
     );
   }
 
-  if (!user) {
+  if (!record) {
     return (
       <AuthLayout title="Record Detail">
         <div className="flex flex-col items-center justify-center py-20 gap-3">
           <AlertTriangle size={28} className="text-orange-400" />
-          <p className="text-sm text-gray-500 font-inter">User not found</p>
+          <p className="text-sm text-gray-500 font-inter">Record not found</p>
           <Button variant="outline" onClick={() => navigate('/org/batch-status')} icon={ArrowLeft}>
             Back
           </Button>
@@ -122,6 +149,28 @@ export const RecordDetail = () => {
       </AuthLayout>
     );
   }
+
+  const productRecord = isProductRecord(record);
+  const recordTitle = record.product_name || record.full_name || record.email || record.id;
+  const recordTypeLabel = productRecord ? 'Product' : 'Human';
+  const customFields = record.custom_fields && typeof record.custom_fields === 'object'
+    ? Object.entries(record.custom_fields).filter(([, value]) => value !== null && value !== undefined && value !== '')
+    : [];
+  const detailRows = productRecord
+    ? [
+        { label: 'Category', value: record.category_name || record.category_id },
+        { label: 'Warranty', value: record.warranty_status || record.warranty_support || 'not_applicable' },
+        { label: 'Batch', value: record.batch_id },
+        { label: 'Created', value: formatDate(record.created_at) },
+      ]
+    : [
+        { label: 'Email', value: record.email },
+        { label: 'Phone', value: record.phone_number },
+        { label: 'DOB', value: formatDate(record.dob) },
+        { label: 'Aadhar', value: record.aadhar_number },
+        { label: 'PAN', value: record.pan_number },
+        { label: 'State', value: record.state ? `${record.state}${record.pincode ? ` - ${record.pincode}` : ''}` : null },
+      ];
 
   return (
     <AuthLayout title="Record Detail">
@@ -133,72 +182,75 @@ export const RecordDetail = () => {
           <ArrowLeft size={16} /> Back to Batch
         </button>
 
-        <PageHeader title={user.full_name} subtitle={`User ID: ${user.id}`} />
+        <PageHeader title={recordTitle} subtitle={`${recordTypeLabel} ID: ${record.id}`} />
 
-        {/* Profile Card */}
         <Card className="p-6 mb-4">
           <div className="flex items-center gap-4 mb-5">
-            {user.photo_url ? (
+            {record.photo_url ? (
               <img
-                src={user.photo_url}
-                alt={user.full_name}
+                src={record.photo_url}
+                alt={recordTitle}
                 className="w-16 h-16 rounded-full object-cover border-2 border-gray-100"
               />
             ) : (
               <div className="w-16 h-16 rounded-full bg-brand-blue/10 flex items-center justify-center">
-                <User size={32} className="text-brand-blue" />
+                {productRecord ? <Package size={32} className="text-brand-blue" /> : <User size={32} className="text-brand-blue" />}
               </div>
             )}
             <div>
-              <h2 className="font-sora font-bold text-lg text-brand-dark">{user.full_name}</h2>
-              <div className="flex items-center gap-2 mt-1">
-                <StatusBadge status={user.verification_status} />
-                {user.verified_at && (
-                  <span className="text-xs text-gray-400 font-inter">
-                    {new Date(user.verified_at).toLocaleDateString('en-IN')}
-                  </span>
+              <h2 className="font-sora font-bold text-lg text-brand-dark">{recordTitle}</h2>
+              <div className="flex items-center gap-2 mt-1 flex-wrap">
+                <Badge status="default">{recordTypeLabel}</Badge>
+                <StatusBadge status={record.verification_status} />
+                {record.verified_at && (
+                  <span className="text-xs text-gray-400 font-inter">{formatDate(record.verified_at)}</span>
                 )}
               </div>
             </div>
           </div>
 
-          {/* Details grid */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm font-inter">
-            {[
-              { label: 'Email',  value: user.email },
-              { label: 'Phone',  value: user.phone_number },
-              { label: 'DOB',    value: user.dob ? new Date(user.dob).toLocaleDateString('en-IN') : '—' },
-              { label: 'Aadhar', value: user.aadhar_number || '—' },
-              { label: 'PAN',    value: user.pan_number || '—' },
-              { label: 'State',  value: user.state ? `${user.state}${user.pincode ? ' - ' + user.pincode : ''}` : '—' },
-            ].map(({ label, value }) => (
+            {detailRows.map(({ label, value }) => (
               <div key={label} className="p-3 bg-gray-50 rounded-xl">
                 <p className="text-xs text-gray-400 mb-0.5">{label}</p>
-                <p className="font-medium text-brand-dark truncate">{value}</p>
+                <p className="font-medium text-brand-dark truncate capitalize">{readable(value)}</p>
               </div>
             ))}
           </div>
 
-          {user.verification_reason && (
+          {productRecord && customFields.length > 0 && (
+            <div className="mt-4">
+              <p className="text-xs font-semibold text-gray-400 font-inter uppercase tracking-wider mb-2">Custom Fields</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm font-inter">
+                {customFields.map(([key, value]) => (
+                  <div key={key} className="p-3 bg-blue-50 rounded-xl border border-blue-100">
+                    <p className="text-xs text-brand-blue mb-0.5 capitalize">{readable(key)}</p>
+                    <p className="font-medium text-brand-dark truncate">{String(value)}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {record.verification_reason && (
             <div className="mt-4 p-3 bg-red-50 rounded-xl border border-red-100">
               <p className="text-xs font-medium text-red-700 font-inter">
-                Rejection reason: {user.verification_reason}
+                Rejection reason: {record.verification_reason}
               </p>
             </div>
           )}
         </Card>
 
-        {/* Documents */}
-        {user.documents?.length > 0 && (
+        {record.documents?.length > 0 && (
           <Card className="p-5 mb-4">
             <h3 className="font-sora font-semibold text-brand-dark mb-3 flex items-center gap-2">
               <FileText size={16} className="text-brand-blue" />
-              Documents ({user.documents.length})
+              Documents ({record.documents.length})
             </h3>
             <div className="space-y-2">
-              {user.documents.map((doc, i) => (
+              {record.documents.map((doc, i) => (
                 <motion.div
-                  key={doc.id}
+                  key={doc.id || `${doc.document_label}-${i}`}
                   initial={{ opacity: 0, x: -10 }}
                   animate={{ opacity: 1, x: 0 }}
                   transition={{ delay: i * 0.06 }}
@@ -208,9 +260,9 @@ export const RecordDetail = () => {
                     <FileText size={16} className="text-gray-400 flex-shrink-0" />
                     <div className="min-w-0">
                       <p className="text-sm font-medium text-brand-dark font-inter capitalize">
-                        {doc.document_label.replace(/_/g, ' ')}
+                        {readable(doc.document_label)}
                       </p>
-                      <p className="text-xs text-gray-400 font-inter">Version {doc.version}</p>
+                      <p className="text-xs text-gray-400 font-inter">Version {doc.version || 1}</p>
                     </div>
                   </div>
                   <div className="flex items-center gap-2 flex-shrink-0">
@@ -231,8 +283,7 @@ export const RecordDetail = () => {
           </Card>
         )}
 
-        {/* Certificate Section */}
-        {user.verification_status === 'verified' && (
+        {record.verification_status === 'verified' && (
           <Card className="p-5 mb-4">
             <h3 className="font-sora font-semibold text-brand-dark mb-3 flex items-center gap-2">
               <QrCode size={16} className="text-green-600" />
@@ -241,7 +292,7 @@ export const RecordDetail = () => {
             {certificate ? (
               <div className="space-y-3">
                 <div className="p-3 bg-green-50 rounded-xl border border-green-200">
-                  <p className="text-xs text-green-700 font-inter font-medium mb-2">Certificate ready!</p>
+                  <p className="text-xs text-green-700 font-inter font-medium mb-2">Certificate ready</p>
                   <a
                     href={certificate.pdf_url}
                     target="_blank"
@@ -263,25 +314,24 @@ export const RecordDetail = () => {
                 disabled={certLoading}
                 icon={certLoading ? RefreshCw : QrCode}
               >
-                {certLoading ? 'Generating…' : 'Generate QR & PDF Certificate'}
+                {certLoading ? 'Generating...' : 'Generate QR & PDF Certificate'}
               </Button>
             )}
           </Card>
         )}
 
-        {/* Admin Actions */}
-        {isSuperAdmin && user.verification_status !== 'verified' && (
+        {isSuperAdmin && record.verification_status !== 'verified' && (
           <Card className="p-5 mb-4">
             <h3 className="font-sora font-semibold text-brand-dark mb-3">Admin Actions</h3>
             <div className="space-y-3">
               <Button
                 variant="success"
                 className="w-full"
-                onClick={handleApprove}
+                onClick={() => updateStatus('verified')}
                 disabled={actionLoading}
                 icon={CheckCircle}
               >
-                {actionLoading ? 'Processing…' : '✓ Approve Verification'}
+                {actionLoading ? 'Processing...' : 'Approve Verification'}
               </Button>
 
               {!showRejectForm ? (
@@ -291,7 +341,7 @@ export const RecordDetail = () => {
                   onClick={() => setShowRejectForm(true)}
                   icon={XCircle}
                 >
-                  ✗ Reject Verification
+                  Reject Verification
                 </Button>
               ) : (
                 <motion.div
@@ -300,10 +350,9 @@ export const RecordDetail = () => {
                   className="space-y-2"
                 >
                   <textarea
-                    className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm font-inter
-                               focus:outline-none focus:ring-2 focus:ring-red-300 resize-none"
+                    className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm font-inter focus:outline-none focus:ring-2 focus:ring-red-300 resize-none"
                     rows={3}
-                    placeholder="Reason for rejection (required)…"
+                    placeholder="Reason for rejection (required)"
                     value={rejectReason}
                     onChange={(e) => setRejectReason(e.target.value)}
                   />

@@ -2,8 +2,8 @@ import axios from 'axios';
 
 // ─── Base Configuration ───────────────────────────────────────────────────────
 const DEFAULT_API_BASE_URL = 'https://trumarkz-api-54038467488.asia-south1.run.app';
-const AUTH_BASE_URL = DEFAULT_API_BASE_URL;
-const VERIFICATION_BASE_URL = DEFAULT_API_BASE_URL;
+const AUTH_BASE_URL = import.meta.env.VITE_AUTH_API_URL || DEFAULT_API_BASE_URL;
+const VERIFICATION_BASE_URL = import.meta.env.VITE_VERIFICATION_API_URL || DEFAULT_API_BASE_URL;
 
 // ─── Auth API instance ────────────────────────────────────────────────────────
 const api = axios.create({
@@ -154,13 +154,74 @@ export const orgAPI = {
 
 // ─── Verification API ─────────────────────────────────────────────────────────
 export const verificationAPI = {
+
+  // ── Product Categories ──────────────────────────────────────────────────────
+  /**
+   * GET /verification/categories
+   * Public endpoint - no auth required.
+   * Returns all product categories with warranty support settings.
+   */
+  getCategories: () =>
+    verificationApi.get('/verification/categories'),
+
+  // ── Single Human ────────────────────────────────────────────────────────────
+  /**
+   * POST /verification/single/human
+   * Upload a single human for verification.
+   * Required: full_name, phone_number, email
+   * @param {object} data
+   */
+  uploadSingleHuman: (data) =>
+    verificationApi.post('/verification/single/human', {
+      full_name: data.full_name?.trim(),
+      dob: data.dob || undefined,
+      phone_number: data.phone_number?.trim(),
+      email: data.email?.trim(),
+      aadhar_number: data.aadhar_number?.trim() || undefined,
+      pan_number: data.pan_number?.trim() || undefined,
+      address_line1: data.address_line1?.trim() || undefined,
+      address_line2: data.address_line2?.trim() || undefined,
+      address_line3: data.address_line3?.trim() || undefined,
+      pincode: data.pincode?.trim() || undefined,
+      state: data.state?.trim() || undefined,
+      country: data.country?.trim() || undefined,
+    }),
+
+  // ── Single Product ──────────────────────────────────────────────────────────
+  /**
+   * POST /verification/single/product
+   * Upload a single product for verification.
+   * Required: category_id, product_name
+   * @param {object} data
+   */
+  uploadSingleProduct: (data) =>
+    verificationApi.post('/verification/single/product', {
+      category_id: data.category_id,
+      product_name: data.product_name?.trim(),
+      custom_fields: data.custom_fields || {},
+      warranty_status: data.warranty_status || undefined,
+    }),
+
+  // ── Bulk Upload (Human) ─────────────────────────────────────────────────────
   /**
    * POST /verification/bulk-upload
-   * Upload Excel file to create a batch. Auth: Required (org only).
+   * Organization bulk uploads user details with batch_id.
+   * Creates invite tokens for each user.
+   * @param {object} payload  { batch_name, description, users: [...] }
+   */
+  bulkUploadHumans: (payload) =>
+    verificationApi.post('/verification/bulk-upload', {
+      batch_name: payload.batch_name,
+      description: payload.description || '',
+      users: payload.users,
+    }),
+
+  /**
+   * POST /verification/bulk-upload  (legacy file-based wrapper kept for compat)
    * @param {File}     file
    * @param {string}   batchName
    * @param {string}   [description]
-   * @param {function} [onProgress]  - callback(percent: number)
+   * @param {function} [onProgress]
    */
   bulkUpload: (file, batchName, description = '', onProgress) => {
     const formData = new FormData();
@@ -175,11 +236,52 @@ export const verificationAPI = {
     });
   },
 
+  // ── Bulk Upload Products (Excel) ────────────────────────────────────────────
+  /**
+   * POST /verification/bulk-upload/products
+   * Upload multiple products from Excel file with dynamic custom fields.
+   * First row must be headers.
+   * @param {File}     file
+   * @param {string}   batchName
+   * @param {string}   categoryId
+   * @param {string}   [description]
+   * @param {function} [onProgress]
+   */
+  bulkUploadProducts: (file, batchName, categoryId, description = '', onProgress) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('batch_name', batchName);
+    formData.append('category_id', categoryId);
+    if (description) formData.append('description', description);
+    return verificationApi.post('/verification/bulk-upload/products', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      onUploadProgress: onProgress
+        ? (e) => onProgress(Math.round((e.loaded * 100) / (e.total || 1)))
+        : undefined,
+    });
+  },
+
+  // ── Generate Product Excel Template ────────────────────────────────────────
+  /**
+   * POST /verification/products/template
+   * Generate an Excel template for bulk product upload.
+   * @param {string}   categoryId
+   * @param {string[]} headers  - column names
+   */
+  generateProductTemplate: (categoryId, headers) => {
+    const params = new URLSearchParams();
+    params.append('category_id', categoryId);
+    params.append('headers', Array.isArray(headers) ? headers.join(',') : headers);
+    return verificationApi.post('/verification/products/template', params, {
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      responseType: 'blob',
+    });
+  },
+
+  // ── Document & Photo Upload ─────────────────────────────────────────────────
   /**
    * POST /verification/upload/photo
    * Auth: NOT required (uses invite token).
-   * @param {string} inviteToken
-   * @param {File}   file  - image file
    */
   uploadPhoto: (inviteToken, file) => {
     const formData = new FormData();
@@ -193,10 +295,6 @@ export const verificationAPI = {
   /**
    * POST /verification/upload/document
    * Auth: NOT required (uses invite token).
-   * Re-uploading the same label increments the version number.
-   * @param {string} inviteToken
-   * @param {string} documentLabel - 'aadhar' | 'pan' | 'degree_certificate' | 'driving_license' | custom
-   * @param {File}   file
    */
   uploadDocument: (inviteToken, documentLabel, file) => {
     const formData = new FormData();
@@ -208,15 +306,10 @@ export const verificationAPI = {
     });
   },
 
+  // ── Query / Status ──────────────────────────────────────────────────────────
   /**
    * GET /verification/all
    * Auth: Required.
-   * @param {object}  [filters]
-   * @param {string}  [filters.orgId]
-   * @param {string}  [filters.batchId]
-   * @param {'pending_verification'|'verified'|'failed'} [filters.status]
-   * @param {number}  [filters.limit]   default 100
-   * @param {number}  [filters.offset]  default 0
    */
   getAllVerifications: (filters = {}) => {
     const params = new URLSearchParams();
@@ -231,18 +324,13 @@ export const verificationAPI = {
 
   /**
    * GET /verification/user/:userId
-   * Auth: Required.
-   * @param {string} userId - UUID
    */
   getUserVerification: (userId) =>
     verificationApi.get(`/verification/user/${userId}`),
 
   /**
    * PATCH /verification/user/:userId/status
-   * Auth: Required (Superadmin).
-   * @param {string} userId
-   * @param {'verified'|'failed'|'pending_verification'} status
-   * @param {string} [reason] - Required when status is 'failed'
+   * If status not provided, mock verification is performed (80-20 split).
    */
   updateVerificationStatus: (userId, status, reason = null) =>
     verificationApi.patch(`/verification/user/${userId}/status`, {
@@ -252,8 +340,7 @@ export const verificationAPI = {
 
   /**
    * POST /verification/user/:userId/generate-qr
-   * Auth: Required. Only works for verified users.
-   * @param {string} userId
+   * Only works for verified users.
    */
   generateQRAndCertificate: (userId) =>
     verificationApi.post(`/verification/user/${userId}/generate-qr`),

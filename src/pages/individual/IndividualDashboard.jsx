@@ -12,7 +12,7 @@ import { GitBranch, Award, Share2, ArrowRight, CheckCircle, Clock, Hash } from '
 const sectionStyles = {
   education: 'bg-blue-50 text-brand-blue',
   courses: 'bg-green-50 text-green-600',
-  experience: 'bg-purple-50 text-purple-600',
+  experience: 'bg-blue-50 text-brand-blue',
   skills: 'bg-orange-50 text-orange-600',
 };
 

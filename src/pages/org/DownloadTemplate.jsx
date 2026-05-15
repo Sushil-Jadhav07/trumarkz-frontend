@@ -55,7 +55,7 @@ export const DownloadTemplate = () => {
   const handleContinueBulk = () => {
     if (!excelFile) { toast.error('Please upload the filled Excel file'); return; }
     toast.success('Files uploaded successfully');
-    navigate('/org/create-batch');
+    navigate('/org/create-batch', { state: { fromVerificationFlow: true } });
   };
 
   const handleContinueSingle = () => {

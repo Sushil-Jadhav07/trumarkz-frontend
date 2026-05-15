@@ -71,9 +71,11 @@ export const DocumentUpload = () => {
   const [photoLoading, setPhotoLoading]   = useState(false);
   const [docResults, setDocResults]       = useState({});
   const [docLoading, setDocLoading]       = useState({});
+  const [customDocLabel, setCustomDocLabel] = useState('');
   const [allDone, setAllDone]             = useState(false);
 
   const photoRef = useRef(null);
+  const customDocRef = useRef(null);
 
   if (!token) {
     return (
@@ -165,7 +167,7 @@ export const DocumentUpload = () => {
         <div>
           <h1 className="font-sora font-bold text-2xl text-brand-dark">Upload Your Documents</h1>
           <p className="text-sm text-gray-500 font-inter mt-1">
-            Please upload your photo and identity documents for verification.
+            Please upload your photo and supporting documents for verification.
           </p>
         </div>
 
@@ -248,6 +250,54 @@ export const DocumentUpload = () => {
               />
             ))}
           </div>
+        </div>
+
+        <div className="p-4 bg-white rounded-xl border border-gray-100 space-y-3">
+          <div>
+            <h2 className="font-sora font-semibold text-brand-dark flex items-center gap-2">
+              <Upload size={16} className="text-brand-blue" />
+              Additional Document
+            </h2>
+            <p className="text-xs text-gray-400 font-inter mt-1">
+              Add invoices, warranty cards, serial proofs, or any other requested evidence.
+            </p>
+          </div>
+          <input
+            className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm font-inter focus:outline-none focus:ring-2 focus:ring-brand-blue/30"
+            value={customDocLabel}
+            onChange={(e) => setCustomDocLabel(e.target.value)}
+            placeholder="Document label, e.g. purchase_invoice"
+          />
+          <input
+            ref={customDocRef}
+            type="file"
+            accept=".pdf,.jpg,.jpeg,.png"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              const label = customDocLabel.trim().toLowerCase().replace(/\s+/g, '_');
+              if (!file) return;
+              if (!label) {
+                toast.error('Enter a document label first');
+                return;
+              }
+              handleDocUpload(label, file);
+              setCustomDocLabel('');
+              e.target.value = '';
+            }}
+          />
+          <button
+            onClick={() => {
+              if (!customDocLabel.trim()) {
+                toast.error('Enter a document label first');
+                return;
+              }
+              customDocRef.current?.click();
+            }}
+            className="flex items-center gap-2 text-xs text-brand-blue font-inter hover:underline"
+          >
+            <Upload size={12} /> Choose additional file
+          </button>
         </div>
 
         {/* Done button */}

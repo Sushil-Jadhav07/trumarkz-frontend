@@ -8,7 +8,7 @@ import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { ProgressBar } from '@/components/ui/ProgressBar';
 import { verificationAPI, getApiError } from '@/services/api';
-import { RefreshCw, Eye, CheckCircle, Clock, XCircle, Filter, ChevronLeft, ChevronRight } from 'lucide-react';
+import { RefreshCw, Eye, CheckCircle, Clock, XCircle, Filter, ChevronLeft, ChevronRight, Package, User } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 const STATUS_OPTIONS = [
@@ -25,6 +25,25 @@ const statusBadge = (status) => {
 };
 
 const PAGE_SIZE = 20;
+
+const isProductRecord = (record) =>
+  record?.entity_type === 'product' ||
+  !!record?.product_name ||
+  !!record?.category_name ||
+  !!record?.custom_fields;
+
+const getRecordTitle = (record) =>
+  record?.product_name || record?.full_name || record?.email || record?.id || 'Verification record';
+
+const getRecordSubtitle = (record) => {
+  if (isProductRecord(record)) {
+    const customFields = record.custom_fields && typeof record.custom_fields === 'object'
+      ? Object.entries(record.custom_fields).slice(0, 2).map(([key, value]) => `${key}: ${value}`).join(' · ')
+      : '';
+    return [record.category_name, customFields].filter(Boolean).join(' · ') || 'Product verification';
+  }
+  return [record.email, record.phone_number].filter(Boolean).join(' · ') || 'Human verification';
+};
 
 export const BatchStatus = () => {
   const navigate = useNavigate();
@@ -70,7 +89,7 @@ export const BatchStatus = () => {
       <div className="w-full mx-auto lg:max-w-none">
         <PageHeader
           title="Verification Batch Status"
-          subtitle="Monitor all user verifications across your batches"
+          subtitle="Monitor human and product verifications across your batches"
           action={
             <button
               onClick={() => fetchData(true)}
@@ -151,8 +170,8 @@ export const BatchStatus = () => {
               <table className="w-full text-sm font-inter">
                 <thead>
                   <tr className="border-b border-gray-100 bg-gray-50">
-                    <th className="text-left p-4 text-xs text-gray-500 font-medium">Name</th>
-                    <th className="text-left p-4 text-xs text-gray-500 font-medium hidden sm:table-cell">Email</th>
+                    <th className="text-left p-4 text-xs text-gray-500 font-medium">Record</th>
+                    <th className="text-left p-4 text-xs text-gray-500 font-medium hidden sm:table-cell">Details</th>
                     <th className="text-left p-4 text-xs text-gray-500 font-medium hidden md:table-cell">Docs</th>
                     <th className="text-left p-4 text-xs text-gray-500 font-medium">Status</th>
                     <th className="text-right p-4 text-xs text-gray-500 font-medium">Action</th>
@@ -161,6 +180,10 @@ export const BatchStatus = () => {
                 <tbody>
                   {data.users.map((user, i) => {
                     const sb = statusBadge(user.verification_status);
+                    const product = isProductRecord(user);
+                    const Icon = product ? Package : User;
+                    const title = getRecordTitle(user);
+                    const subtitle = getRecordSubtitle(user);
                     return (
                       <motion.tr
                         key={user.id}
@@ -174,23 +197,26 @@ export const BatchStatus = () => {
                             {user.photo_url ? (
                               <img
                                 src={user.photo_url}
-                                alt={user.full_name}
+                                alt={title}
                                 className="w-8 h-8 rounded-full object-cover flex-shrink-0"
                               />
                             ) : (
                               <div className="w-8 h-8 rounded-full bg-brand-blue/10 flex items-center justify-center flex-shrink-0">
-                                <span className="text-xs font-bold text-brand-blue">
-                                  {user.full_name?.charAt(0).toUpperCase()}
-                                </span>
+                                <Icon size={15} className="text-brand-blue" />
                               </div>
                             )}
                             <div className="min-w-0">
-                              <p className="font-medium text-brand-dark truncate">{user.full_name}</p>
-                              <p className="text-xs text-gray-400 sm:hidden truncate">{user.email}</p>
+                              <div className="flex items-center gap-2">
+                                <p className="font-medium text-brand-dark truncate">{title}</p>
+                                <Badge status="default" className="shrink-0">
+                                  {product ? 'Product' : 'Human'}
+                                </Badge>
+                              </div>
+                              <p className="text-xs text-gray-400 sm:hidden truncate">{subtitle}</p>
                             </div>
                           </div>
                         </td>
-                        <td className="p-4 text-gray-500 hidden sm:table-cell">{user.email}</td>
+                        <td className="p-4 text-gray-500 hidden sm:table-cell max-w-xs truncate">{subtitle}</td>
                         <td className="p-4 hidden md:table-cell">
                           <span className="text-gray-500">{user.documents?.length || 0}</span>
                         </td>

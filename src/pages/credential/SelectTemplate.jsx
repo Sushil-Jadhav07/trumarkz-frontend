@@ -28,7 +28,7 @@ const templates = [
     id: 'T3', name: 'Education / Student',
     desc: 'Colleges, universities, institutes',
     fields: 'Photo · Name · Course · Institution · Year · QR',
-    icon: GraduationCap, iconBg: 'bg-purple-50', iconColor: 'text-purple-600',
+    icon: GraduationCap, iconBg: 'bg-blue-50', iconColor: 'text-brand-blue',
   },
   {
     id: 'T4', name: 'Product / Compliance',

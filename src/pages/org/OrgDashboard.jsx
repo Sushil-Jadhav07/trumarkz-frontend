@@ -129,7 +129,7 @@ export const OrgDashboard = () => {
     { label: 'New Verification', icon: Shield, path: '/org/industry', color: 'bg-brand-blue text-white' },
     { label: 'Create Credential', icon: Award, path: '/credential/template', color: 'bg-brand-dark text-white' },
     { label: 'View Reports', icon: BarChart2, path: '/qr/reports', color: 'bg-green-500 text-white' },
-    { label: 'Blockchain Registry', icon: Store, path: '/marketplace', color: 'bg-purple-500 text-white' }
+    { label: 'Blockchain Registry', icon: Store, path: '/marketplace', color: 'bg-brand-blue text-white' }
   ];
 
   const howItWorks = [

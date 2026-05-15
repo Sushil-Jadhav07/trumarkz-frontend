@@ -23,7 +23,7 @@ import {
 const sections = [
   { key: 'education', label: 'Education', icon: GraduationCap, color: 'text-brand-blue', bg: 'bg-blue-50' },
   { key: 'courses', label: 'Courses & Certifications', icon: BookOpen, color: 'text-green-600', bg: 'bg-green-50' },
-  { key: 'experience', label: 'Work Experience', icon: Briefcase, color: 'text-purple-600', bg: 'bg-purple-50' },
+  { key: 'experience', label: 'Work Experience', icon: Briefcase, color: 'text-brand-blue', bg: 'bg-blue-50' },
   { key: 'skills', label: 'Skills', icon: Star, color: 'text-orange-500', bg: 'bg-orange-50' },
 ];
 

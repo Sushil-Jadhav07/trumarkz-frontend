@@ -5,7 +5,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, Layers, Award, Store, BarChart2,
   Wallet, HelpCircle, User, LogOut, ChevronLeft, ChevronRight,
-  Shield, GitBranch, Share2, CheckSquare, Building2, DollarSign,
+  GitBranch, Share2, CheckSquare, Building2, DollarSign,
   AlertTriangle, Activity
 } from 'lucide-react';
 import clsx from 'clsx';
@@ -26,7 +26,6 @@ export const Sidebar = ({ collapsed, onToggle, mobileOpen = false, onMobileClose
     if (role === 'organization') {
       return [
         { path: '/org/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-        { path: '/org/industry', label: 'New Verification', icon: Shield },
         { path: '/org/batch-status', label: 'Batches', icon: Layers },
         { path: '/credential/template', label: 'Credentials', icon: Award },
         { path: '/marketplace', label: 'Registry', icon: Store },

@@ -27,7 +27,7 @@ export const SelectIndustry = () => {
   return (
     <AuthLayout title="Select Industry">
       <div className="w-full mx-auto lg:max-w-none">
-        <StepWizard steps={['Industry', 'Verifications', 'Template', 'Batch']} currentStep={0} />
+        <StepWizard steps={['Industry', 'Verifications', 'Permissions', 'Template', 'Batch']} currentStep={0} />
         <PageHeader title="Select Industry" subtitle="Choose the industry for your verification batch" />
 
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
