@@ -52,7 +52,7 @@ export const Sidebar = ({ collapsed, onToggle, mobileOpen = false, onMobileClose
         { path: '/admin/dashboard', label: 'Dashboard', icon: LayoutDashboard },
         { path: '/admin/org-approvals', label: 'Org Approvals', icon: CheckSquare },
         { path: '/admin/batch-monitor', label: 'Batch Monitor', icon: Layers },
-        { path: '/admin/verifiers', label: 'Agencies', icon: Building2 },
+        { path: '/admin/verifiers', label: ' Third party verifiier', icon: Building2 },
         { path: '/admin/pricing', label: 'Pricing Config', icon: DollarSign },
         { path: '/admin/disputes', label: 'Disputes', icon: AlertTriangle },
         { path: '/admin/platform-health', label: 'Platform Health', icon: Activity },

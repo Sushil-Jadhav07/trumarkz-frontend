@@ -2,8 +2,8 @@ import axios from 'axios';
 
 // ─── Base Configuration ───────────────────────────────────────────────────────
 const DEFAULT_API_BASE_URL = 'https://trumarkz-api-54038467488.asia-south1.run.app';
-const AUTH_BASE_URL = import.meta.env.VITE_AUTH_API_URL || DEFAULT_API_BASE_URL;
-const VERIFICATION_BASE_URL = import.meta.env.VITE_VERIFICATION_API_URL || DEFAULT_API_BASE_URL;
+const AUTH_BASE_URL = import.meta.env.VITE_AUTH_API_URL || import.meta.env.VITE_API_BASE_URL || DEFAULT_API_BASE_URL;
+const VERIFICATION_BASE_URL = import.meta.env.VITE_VERIFICATION_API_URL || import.meta.env.VITE_API_BASE_URL || DEFAULT_API_BASE_URL;
 
 // ─── Auth API instance ────────────────────────────────────────────────────────
 const api = axios.create({
@@ -199,7 +199,6 @@ export const verificationAPI = {
       category_id: data.category_id,
       product_name: data.product_name?.trim(),
       custom_fields: data.custom_fields || {},
-      warranty_status: data.warranty_status || undefined,
     }),
 
   // ── Bulk Upload (Human) ─────────────────────────────────────────────────────
@@ -269,11 +268,11 @@ export const verificationAPI = {
    * @param {string[]} headers  - column names
    */
   generateProductTemplate: (categoryId, headers) => {
-    const params = new URLSearchParams();
-    params.append('category_id', categoryId);
-    params.append('headers', Array.isArray(headers) ? headers.join(',') : headers);
-    return verificationApi.post('/verification/products/template', params, {
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    const formData = new FormData();
+    formData.append('category_id', categoryId);
+    formData.append('headers', Array.isArray(headers) ? headers.join(',') : headers);
+    return verificationApi.post('/verification/products/template', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
       responseType: 'blob',
     });
   },
@@ -316,6 +315,8 @@ export const verificationAPI = {
     if (filters.orgId)       params.append('org_id',   filters.orgId);
     if (filters.batchId)     params.append('batch_id', filters.batchId);
     if (filters.status)      params.append('status',   filters.status);
+    if (filters.entityType)  params.append('entity_type', filters.entityType);
+    if (filters.categoryId)  params.append('category_id', filters.categoryId);
     if (filters.limit != null)  params.append('limit',  String(filters.limit));
     if (filters.offset != null) params.append('offset', String(filters.offset));
     const q = params.toString();

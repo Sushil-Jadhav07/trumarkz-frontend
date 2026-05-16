@@ -9,6 +9,8 @@ export const Modal = ({ isOpen, onClose, title, children, size = 'md' }) => {
     lg: 'max-w-lg',
     xl: 'max-w-xl',
     '2xl': 'max-w-2xl',
+    '4xl': 'max-w-4xl',
+    '5xl': 'max-w-5xl',
     full: 'max-w-full'
   };
 
@@ -30,7 +32,7 @@ export const Modal = ({ isOpen, onClose, title, children, size = 'md' }) => {
             animate={{ scale: 1, opacity: 1, y: 0 }}
             exit={{ scale: 0.95, opacity: 0, y: 20 }}
             transition={{ duration: 0.2 }}
-            className={`relative w-full ${sizes[size]} bg-white rounded-2xl shadow-xl overflow-hidden`}
+            className={`relative w-full ${sizes[size]} bg-white rounded-2xl shadow-xl overflow-hidden max-h-[92vh] flex flex-col`}
           >
             {title && (
               <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
@@ -43,7 +45,7 @@ export const Modal = ({ isOpen, onClose, title, children, size = 'md' }) => {
                 </button>
               </div>
             )}
-            <div className="p-6">{children}</div>
+            <div className="p-6 overflow-y-auto scrollbar-hidden">{children}</div>
           </motion.div>
         </motion.div>
       )}

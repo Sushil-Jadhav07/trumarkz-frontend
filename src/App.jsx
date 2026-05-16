@@ -50,6 +50,7 @@ import ShareProfile from '@/pages/individual/ShareProfile';
 import AdminDashboard from '@/pages/admin/AdminDashboard';
 import OrgApprovals from '@/pages/admin/OrgApprovals';
 import BatchMonitor from '@/pages/admin/BatchMonitor';
+import Verifiers from '@/pages/admin/Verifiers';
 import PricingConfig from '@/pages/admin/PricingConfig';
 import Disputes from '@/pages/admin/Disputes';
 import PlatformHealth from '@/pages/admin/PlatformHealth';
@@ -123,6 +124,7 @@ const AnimatedRoutes = () => {
           <Route path="/admin/dashboard" element={<AdminDashboard />} />
           <Route path="/admin/org-approvals" element={<OrgApprovals />} />
           <Route path="/admin/batch-monitor" element={<BatchMonitor />} />
+          <Route path="/admin/verifiers" element={<Verifiers />} />
           <Route path="/admin/pricing" element={<PricingConfig />} />
           <Route path="/admin/disputes" element={<Disputes />} />
           <Route path="/admin/platform-health" element={<PlatformHealth />} />

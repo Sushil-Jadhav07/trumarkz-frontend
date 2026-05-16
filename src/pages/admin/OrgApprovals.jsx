@@ -1,4 +1,4 @@
-﻿import React, { useState } from 'react';
+import React, { useState } from 'react';
 import { motion } from 'framer-motion';
 import { AuthLayout } from '@/components/layout/AuthLayout';
 import { PageHeader } from '@/components/shared/PageHeader';
@@ -6,7 +6,7 @@ import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { mockPendingOrgs } from '@/data/mockData';
-import { Building2, Mail, FileText, CheckCircle, XCircle, CalendarDays, Landmark } from 'lucide-react';
+import { Building2, CheckCircle, Clock, FileText, Landmark, Mail, XCircle } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 export const OrgApprovals = () => {
@@ -22,82 +22,124 @@ export const OrgApprovals = () => {
     toast.error('Organisation rejected.');
   };
 
+  const industryCount = new Set(orgs.map((org) => org.industry)).size;
+
   return (
     <AuthLayout title="Org Approvals">
-      <PageHeader title="Organisation Approvals" subtitle={`${orgs.length} pending review`} />
+      <PageHeader title="Organisation Approvals" subtitle="Review registered organisations before granting dashboard access" />
 
-      <div className="space-y-4">
-        {orgs.length === 0 && (
-          <Card className="p-10 text-center">
-            <CheckCircle size={40} className="text-green-500 mx-auto mb-3" />
-            <p className="font-sora font-semibold text-brand-dark">All caught up!</p>
-            <p className="text-sm text-gray-400 font-inter">No pending approvals.</p>
-          </Card>
-        )}
-
-        {orgs.map((org, i) => (
-          <motion.div
-            key={org.id}
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: i * 0.08 }}
-          >
-            <Card className="p-5 sm:p-6">
-              <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
-                <div className="flex items-start gap-3 min-w-0">
-                  <div className="p-3 bg-brand-blue/10 rounded-xl shrink-0">
-                    <Building2 size={22} className="text-brand-blue" />
-                  </div>
-                  <div className="min-w-0">
-                    <h3 className="font-sora font-semibold text-brand-dark text-lg leading-tight">{org.name}</h3>
-                    <p className="text-xs text-gray-500 font-inter mt-1">Verify organisation details before granting dashboard access</p>
-                  </div>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-5">
+        {[
+          { label: 'Pending Review', value: orgs.length, icon: Clock, surface: 'bg-orange-50', text: 'text-orange-600' },
+          { label: 'Industries', value: industryCount, icon: Landmark, surface: 'bg-blue-50', text: 'text-brand-blue' },
+          { label: 'Ready Actions', value: orgs.length * 2, icon: CheckCircle, surface: 'bg-green-50', text: 'text-green-600' },
+        ].map((stat) => {
+          const Icon = stat.icon;
+          return (
+            <Card key={stat.label} className="p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs text-gray-500 font-inter">{stat.label}</p>
+                  <p className="font-sora font-bold text-2xl text-brand-dark mt-1">{stat.value}</p>
                 </div>
-                <Badge status="pending">Pending Review</Badge>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 mb-5">
-                <div className="p-3 bg-gray-50 rounded-xl border border-gray-100">
-                  <p className="text-xs text-gray-400 font-inter mb-1 flex items-center gap-1">
-                    <FileText size={12} /> GST Number
-                  </p>
-                  <p className="text-sm font-medium text-brand-dark font-inter break-all">{org.gst}</p>
+                <div className={`w-11 h-11 rounded-xl ${stat.surface} flex items-center justify-center`}>
+                  <Icon size={20} className={stat.text} />
                 </div>
-
-                <div className="p-3 bg-gray-50 rounded-xl border border-gray-100">
-                  <p className="text-xs text-gray-400 font-inter mb-1 flex items-center gap-1">
-                    <Landmark size={12} /> Industry
-                  </p>
-                  <p className="text-sm font-medium text-brand-dark font-inter">{org.industry}</p>
-                </div>
-
-                <div className="p-3 bg-gray-50 rounded-xl border border-gray-100">
-                  <p className="text-xs text-gray-400 font-inter mb-1 flex items-center gap-1">
-                    <Mail size={12} /> Official Email
-                  </p>
-                  <p className="text-sm font-medium text-brand-dark font-inter break-all">{org.email}</p>
-                </div>
-
-                <div className="p-3 bg-gray-50 rounded-xl border border-gray-100">
-                  <p className="text-xs text-gray-400 font-inter mb-1 flex items-center gap-1">
-                    <CalendarDays size={12} /> Submitted
-                  </p>
-                  <p className="text-sm font-medium text-brand-dark font-inter">{org.submittedAt}</p>
-                </div>
-              </div>
-
-              <div className="flex flex-col sm:flex-row gap-3 sm:justify-end">
-                <Button variant="danger" className="sm:w-auto" icon={XCircle} onClick={() => reject(org.id)}>
-                  Reject
-                </Button>
-                <Button variant="success" className="sm:w-auto" icon={CheckCircle} onClick={() => approve(org.id)}>
-                  Approve Organisation
-                </Button>
               </div>
             </Card>
-          </motion.div>
-        ))}
+          );
+        })}
       </div>
+
+      {orgs.length === 0 ? (
+        <Card className="p-10 text-center">
+          <CheckCircle size={40} className="text-green-500 mx-auto mb-3" />
+          <p className="font-sora font-semibold text-brand-dark">All caught up!</p>
+          <p className="text-sm text-gray-400 font-inter">No pending approvals.</p>
+        </Card>
+      ) : (
+        <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }}>
+          <Card className="p-0 overflow-hidden border border-gray-100">
+            <div className="px-5 py-4 border-b border-gray-100 bg-white flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h3 className="font-sora font-semibold text-brand-dark">Approval Queue</h3>
+                <p className="text-xs text-gray-400 font-inter mt-1">Validate GST, industry, and official email before enabling access.</p>
+              </div>
+              <Badge status="warning">{orgs.length} Pending</Badge>
+            </div>
+
+            <div className="overflow-x-auto scrollbar-hidden">
+              <table className="w-full min-w-[1040px]">
+                <thead>
+                  <tr className="bg-gray-50 border-b border-gray-100">
+                    <th className="px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-500 font-inter">Organisation</th>
+                    <th className="px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-500 font-inter">GST Number</th>
+                    <th className="px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-500 font-inter">Industry</th>
+                    <th className="px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-500 font-inter">Official Email</th>
+                    <th className="px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-500 font-inter">Submitted</th>
+                    <th className="px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-500 font-inter">Status</th>
+                    <th className="px-5 py-3 text-right text-[11px] font-semibold uppercase tracking-wide text-gray-500 font-inter">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100 bg-white">
+                  {orgs.map((org, index) => (
+                    <motion.tr
+                      key={org.id}
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: index * 0.05 }}
+                      className="hover:bg-gray-50/70 transition-colors"
+                    >
+                      <td className="px-5 py-4">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-xl bg-brand-blue/10 text-brand-blue flex items-center justify-center shrink-0">
+                            <Building2 size={18} />
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold text-brand-dark font-inter truncate">{org.name}</p>
+                            <p className="text-xs text-gray-400 font-inter">{org.id}</p>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-5 py-4">
+                        <p className="text-sm font-medium text-brand-dark font-inter flex items-center gap-2">
+                          <FileText size={14} className="text-gray-400" />
+                          {org.gst}
+                        </p>
+                      </td>
+                      <td className="px-5 py-4">
+                        <span className="inline-flex rounded-lg bg-gray-100 px-2.5 py-1 text-xs font-medium text-gray-600 font-inter">
+                          {org.industry}
+                        </span>
+                      </td>
+                      <td className="px-5 py-4">
+                        <p className="text-sm font-medium text-brand-dark font-inter flex items-center gap-2">
+                          <Mail size={14} className="text-gray-400" />
+                          {org.email}
+                        </p>
+                      </td>
+                      <td className="px-5 py-4 text-sm text-gray-600 font-inter">{org.submittedAt}</td>
+                      <td className="px-5 py-4">
+                        <Badge status="warning">Pending Review</Badge>
+                      </td>
+                      <td className="px-5 py-4">
+                        <div className="flex justify-end gap-2">
+                          <Button variant="danger" size="sm" icon={XCircle} onClick={() => reject(org.id)}>
+                            Reject
+                          </Button>
+                          <Button variant="success" size="sm" icon={CheckCircle} onClick={() => approve(org.id)}>
+                            Approve
+                          </Button>
+                        </div>
+                      </td>
+                    </motion.tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        </motion.div>
+      )}
     </AuthLayout>
   );
 };

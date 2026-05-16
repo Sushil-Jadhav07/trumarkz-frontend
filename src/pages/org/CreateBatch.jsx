@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useLocation, useNavigate } from 'react-router-dom';
+import * as XLSX from 'xlsx';
 import { AuthLayout } from '@/components/layout/AuthLayout';
 import { PageHeader } from '@/components/shared/PageHeader';
 import { useApp } from '@/context/AppContext';
@@ -21,6 +22,39 @@ import {
   Tractor, Gem, Grid2X2, BadgeCheck, Award, Lock, Globe2
 } from 'lucide-react';
 import toast from 'react-hot-toast';
+
+const parseTemplateHeaders = (value) =>
+  String(value || '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+const buildExampleValue = (header) => {
+  const key = header.toLowerCase();
+  if (key.includes('product')) return 'Example Product';
+  if (key.includes('serial')) return 'SN-001';
+  if (key.includes('warranty start')) return '2026-05-16';
+  if (key.includes('warranty end')) return '2027-05-16';
+  if (key.includes('invoice')) return 'INV-001';
+  if (key.includes('model')) return 'Model A';
+  if (key.includes('batch')) return 'BATCH-001';
+  if (key.includes('certificate')) return 'CERT-001';
+  if (key.includes('price')) return '1000';
+  if (key.includes('date')) return '2026-05-16';
+  return `Example ${header}`;
+};
+
+const downloadProductTemplateWorkbook = (headers, fileName = 'product-template') => {
+  const worksheet = XLSX.utils.aoa_to_sheet([
+    headers,
+    headers.map(buildExampleValue),
+  ]);
+  worksheet['!cols'] = headers.map((header) => ({ wch: Math.max(18, header.length + 4) }));
+
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, 'Products');
+  XLSX.writeFile(workbook, `${fileName}.xlsx`);
+};
 
 const PRODUCT_SECTOR_DEFS = [
   { id: 'consumer_goods', title: 'Consumer Goods', description: 'Digital certificates for everyday products and packaged goods.', icon: ClipboardCheck, aliases: ['consumer goods', 'consumer products'], fallbackWarranty: 'optional' },
@@ -643,20 +677,16 @@ const ProductBulkPanel = ({ categories, onResult, selectedCategory, selectedServ
 
   const handleGenerateTemplate = async () => {
     if (!categoryId) { toast.error('Please select a category first'); return; }
-    const headers = templateHeaders.split(',').map((item) => item.trim()).filter(Boolean);
+    const headers = parseTemplateHeaders(templateHeaders);
     if (headers.length === 0) { toast.error('Add at least one template column'); return; }
+    if (headers[0].toLowerCase() !== 'product name') {
+      toast.error('First column must be Product Name for product batch upload');
+      return;
+    }
 
     setTemplateLoading(true);
     try {
-      const { data } = await verificationAPI.generateProductTemplate(categoryId, headers);
-      const url = window.URL.createObjectURL(data);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `${batchName.trim() || 'product-template'}.xlsx`;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      window.URL.revokeObjectURL(url);
+      downloadProductTemplateWorkbook(headers, batchName.trim() || 'product-template');
       toast.success('Template downloaded.');
     } catch (err) {
       toast.error(getApiError(err, 'Failed to generate product template'));
@@ -664,6 +694,8 @@ const ProductBulkPanel = ({ categories, onResult, selectedCategory, selectedServ
       setTemplateLoading(false);
     }
   };
+
+  const currentTemplateHeaders = parseTemplateHeaders(templateHeaders);
 
   if (uploadResult) {
     return (
@@ -822,6 +854,15 @@ const ProductBulkPanel = ({ categories, onResult, selectedCategory, selectedServ
               Template
             </Button>
           </div>
+          {currentTemplateHeaders.length > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              {currentTemplateHeaders.map((header) => (
+                <span key={header} className="rounded-lg bg-white border border-blue-100 px-2 py-1 text-[11px] text-blue-700 font-inter">
+                  {header}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
       </div>
       <div>
