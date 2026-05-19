@@ -1,16 +1,21 @@
 import React from 'react';
-import { Routes, Route, useLocation } from 'react-router-dom';
-import { AnimatePresence, motion } from 'framer-motion';
+import { Navigate, Routes, Route, useLocation } from 'react-router-dom';
+import { AnimatePresence } from 'framer-motion';
 import { Toaster } from 'react-hot-toast';
-import { AuthProvider } from '@/context/AuthContext';
+import { AuthProvider, useAuth } from '@/context/AuthContext';
 import { AppProvider } from '@/context/AppContext';
-import SplashScreen from '@/pages/public/SplashScreen';
 import LoginRegister from '@/pages/public/LoginRegister';
+import ForgotPassword from '@/pages/public/ForgotPassword';
+import ResetPassword from '@/pages/public/ResetPassword';
+import AuthCallback from '@/pages/public/AuthCallback';
+import AuthError from '@/pages/public/AuthError';
+import GoogleCallback from '@/pages/public/GoogleCallback';
 import DocumentUpload from '@/pages/public/DocumentUpload';
 import OrgRegistration from '@/pages/org/OrgRegistration';
 import IndividualRegistration from '@/pages/individual/IndividualRegistration';
 import OTPVerification from '@/pages/org/OTPVerification';
 import WelcomeKYC from '@/pages/org/WelcomeKYC';
+import OrgOnboarding from '@/pages/org/OrgOnboarding';
 import PendingApproval from '@/pages/org/PendingApproval';
 import OrgDashboard from '@/pages/org/OrgDashboard';
 import SelectIndustry from '@/pages/org/SelectIndustry';
@@ -55,26 +60,57 @@ import PricingConfig from '@/pages/admin/PricingConfig';
 import Disputes from '@/pages/admin/Disputes';
 import PlatformHealth from '@/pages/admin/PlatformHealth';
 
+const ProtectedRoute = ({ children }) => {
+  const { isAuthenticated, loading } = useAuth();
+  const location = useLocation();
+
+  if (loading) return <div className="min-h-screen bg-brand-bg" />;
+
+  if (!isAuthenticated) {
+    return <Navigate to="/login" replace state={{ from: location.pathname }} />;
+  }
+
+  return children;
+};
+
+const DashboardRedirect = () => {
+  const { role, user } = useAuth();
+  const userType = user?.userType || role;
+  return <Navigate to={userType === 'individual' ? '/individual/dashboard' : '/org/dashboard'} replace />;
+};
+
 const AnimatedRoutes = () => {
   const location = useLocation();
   React.useEffect(() => { window.scrollTo({ top: 0, left: 0, behavior: 'auto' }); }, [location.pathname]);
   return (
     <AnimatePresence mode="wait">
-      <motion.div key={location.pathname} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} transition={{ duration: 0.3 }}>
+      <div key={location.pathname}>
         <Routes location={location}>
-          <Route path="/" element={<SplashScreen />} />
+          <Route path="/" element={<Navigate to="/login" replace />} />
           <Route path="/login" element={<LoginRegister />} />
+          <Route path="/signup" element={<LoginRegister />} />
+          <Route path="/forgot-password" element={<ForgotPassword />} />
+          <Route path="/reset-password" element={<ResetPassword />} />
+          <Route path="/auth/callback" element={<AuthCallback />} />
+          <Route path="/auth/error" element={<AuthError />} />
+          <Route path="/auth/google/callback" element={<GoogleCallback />} />
           <Route path="/upload" element={<DocumentUpload />} />
 
           {/* ── Registration routes ── */}
+          <Route path="/org-registration" element={<OrgRegistration />} />
+          <Route path="/signup/organization" element={<OrgRegistration />} />
           <Route path="/register" element={<OrgRegistration />} />
+          <Route path="/signup/individual" element={<IndividualRegistration />} />
           <Route path="/register/individual" element={<IndividualRegistration />} />
           <Route path="/verify-otp" element={<OTPVerification />} />
           <Route path="/welcome" element={<WelcomeKYC />} />
 
           {/* ── Org routes ── */}
+          <Route path="/onboarding" element={<ProtectedRoute><OrgOnboarding /></ProtectedRoute>} />
+          <Route path="/dashboard" element={<ProtectedRoute><DashboardRedirect /></ProtectedRoute>} />
+          <Route path="/org/onboarding" element={<ProtectedRoute><OrgOnboarding /></ProtectedRoute>} />
           <Route path="/org/pending-approval" element={<PendingApproval />} />
-          <Route path="/org/dashboard" element={<OrgDashboard />} />
+          <Route path="/org/dashboard" element={<ProtectedRoute><OrgDashboard /></ProtectedRoute>} />
           <Route path="/org/industry" element={<SelectIndustry />} />
           <Route path="/org/verifications" element={<SelectVerifications />} />
           <Route path="/org/permissions" element={<PermissionSettings />} />
@@ -114,7 +150,7 @@ const AnimatedRoutes = () => {
           <Route path="/logout" element={<Logout />} />
 
           {/* ── Individual routes ── */}
-          <Route path="/individual/dashboard" element={<IndividualDashboard />} />
+          <Route path="/individual/dashboard" element={<ProtectedRoute><IndividualDashboard /></ProtectedRoute>} />
           <Route path="/individual/skill-tree" element={<SkillTree />} />
           <Route path="/individual/skill-tree/build" element={<SkillTreeForm />} />
           <Route path="/individual/credentials" element={<IndividualCredentials />} />
@@ -129,7 +165,7 @@ const AnimatedRoutes = () => {
           <Route path="/admin/disputes" element={<Disputes />} />
           <Route path="/admin/platform-health" element={<PlatformHealth />} />
         </Routes>
-      </motion.div>
+      </div>
     </AnimatePresence>
   );
 };

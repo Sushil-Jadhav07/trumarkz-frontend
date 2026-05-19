@@ -6,21 +6,19 @@ import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { StepWizard } from '@/components/ui/StepWizard';
 import { Card } from '@/components/ui/Card';
-import { Building2, Mail, Phone, Lock, MapPin, FileText, ArrowLeft, ArrowRight } from 'lucide-react';
+import { Building2, Mail, Phone, Lock, ArrowLeft, ArrowRight } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 export const OrgRegistration = () => {
   const navigate = useNavigate();
-  const { register } = useAuth();
+  const { registerOrg } = useAuth();
 
   const [form, setForm] = useState({
     orgName: '',
     email: '',
+    phoneNumber: '',
     password: '',
-    mobile: '',
-    gstNumber: '',
-    businessRegNo: '',
-    address: '',
+    confirmPassword: '',
   });
   const [errors, setErrors] = useState({});
   const [submitting, setSubmitting] = useState(false);
@@ -29,18 +27,13 @@ export const OrgRegistration = () => {
     const newErrors = {};
     if (!form.orgName.trim()) newErrors.orgName = 'Organization name is required';
     if (!form.email.trim()) newErrors.email = 'Email is required';
-    else if (!/\S+@\S+\.\S+/.test(form.email.trim())) newErrors.email = 'Invalid email';
-    if (form.mobile && !/^\d{10,15}$/.test(form.mobile.replace(/\D/g, ''))) {
-      newErrors.mobile = 'Enter a valid 10-15 digit number';
-    }
-    if (!form.gstNumber.trim()) newErrors.gstNumber = 'GST number is required';
-    else if (form.gstNumber.trim().length !== 15) {
-      newErrors.gstNumber = 'GST number must be 15 characters';
-    }
-    if (!form.businessRegNo.trim()) newErrors.businessRegNo = 'Business registration number is required';
-    if (!form.address.trim()) newErrors.address = 'Registered address is required';
+    else if (!/\S+@\S+\.\S+/.test(form.email.trim())) newErrors.email = 'Invalid email address';
+    if (!form.phoneNumber.trim()) newErrors.phoneNumber = 'Phone number is required';
+    else if (!/^\+?\d{7,15}$/.test(form.phoneNumber.replace(/\s/g, '')))
+      newErrors.phoneNumber = 'Enter a valid phone number';
     if (!form.password) newErrors.password = 'Password is required';
     else if (form.password.length < 8) newErrors.password = 'Minimum 8 characters';
+    if (form.confirmPassword !== form.password) newErrors.confirmPassword = 'Passwords do not match';
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -48,9 +41,8 @@ export const OrgRegistration = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!validate() || submitting) return;
-
     setSubmitting(true);
-    const result = await register(form);
+    const result = await registerOrg(form);
     setSubmitting(false);
 
     if (!result.success) {
@@ -58,20 +50,20 @@ export const OrgRegistration = () => {
       return;
     }
 
-    toast.success(result.mobile ? 'OTPs sent to your email and mobile' : 'OTP sent to your email');
+    toast.success('OTP sent to your email');
     navigate('/verify-otp');
   };
 
   const updateField = (field, value) => {
-    setForm((prev) => ({ ...prev, [field]: value }));
-    if (errors[field]) setErrors((prev) => ({ ...prev, [field]: '' }));
+    setForm(prev => ({ ...prev, [field]: value }));
+    if (errors[field]) setErrors(prev => ({ ...prev, [field]: '' }));
   };
 
   return (
     <div className="min-h-screen bg-brand-bg flex items-center justify-center p-4">
-      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="w-full max-w-lg">
+      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="w-full max-w-md">
         <Card className="p-6 sm:p-8">
-          <StepWizard steps={['Registration', 'OTP', 'Welcome']} currentStep={0} />
+          <StepWizard steps={['Registration', 'OTP Verification', 'Onboarding']} currentStep={0} />
 
           <h2 className="font-sora font-bold text-xl text-brand-dark text-center mb-1">
             Organization Registration
@@ -85,7 +77,7 @@ export const OrgRegistration = () => {
               label="Organization Name"
               placeholder="Enter organization name"
               value={form.orgName}
-              onChange={(e) => updateField('orgName', e.target.value)}
+              onChange={e => updateField('orgName', e.target.value)}
               error={errors.orgName}
               icon={Building2}
             />
@@ -95,9 +87,19 @@ export const OrgRegistration = () => {
               name="email"
               autoComplete="email"
               value={form.email}
-              onChange={(e) => updateField('email', e.target.value)}
+              onChange={e => updateField('email', e.target.value)}
               error={errors.email}
               icon={Mail}
+            />
+            <Input
+              label="Phone Number"
+              placeholder="+91 9876543210"
+              name="tel"
+              autoComplete="tel"
+              value={form.phoneNumber}
+              onChange={e => updateField('phoneNumber', e.target.value)}
+              error={errors.phoneNumber}
+              icon={Phone}
             />
             <Input
               label="Password"
@@ -106,53 +108,30 @@ export const OrgRegistration = () => {
               name="password"
               autoComplete="new-password"
               value={form.password}
-              onChange={(e) => updateField('password', e.target.value)}
+              onChange={e => updateField('password', e.target.value)}
               error={errors.password}
               icon={Lock}
             />
             <Input
-              label="Mobile Number (optional)"
-              placeholder="+91 9876543210"
-              name="tel"
-              autoComplete="tel"
-              value={form.mobile}
-              onChange={(e) => updateField('mobile', e.target.value)}
-              error={errors.mobile}
-              icon={Phone}
-            />
-            <Input
-              label="GST Number"
-              placeholder="e.g. 27ABCDE1234F1Z5"
-              value={form.gstNumber}
-              onChange={(e) => updateField('gstNumber', e.target.value.toUpperCase())}
-              error={errors.gstNumber}
-              icon={FileText}
-            />
-            <Input
-              label="Business Registration Number"
-              placeholder="e.g. U74999MH2020PTC123456"
-              value={form.businessRegNo}
-              onChange={(e) => updateField('businessRegNo', e.target.value)}
-              error={errors.businessRegNo}
-              icon={FileText}
-            />
-            <Input
-              label="Registered Address"
-              placeholder="Full business address"
-              value={form.address}
-              onChange={(e) => updateField('address', e.target.value)}
-              error={errors.address}
-              icon={MapPin}
+              label="Confirm Password"
+              type="password"
+              placeholder="Confirm password"
+              name="confirmPassword"
+              autoComplete="new-password"
+              value={form.confirmPassword}
+              onChange={e => updateField('confirmPassword', e.target.value)}
+              error={errors.confirmPassword}
+              icon={Lock}
             />
 
             <Button type="submit" variant="primary" size="lg" className="w-full" disabled={submitting}>
-              {submitting ? 'Sending OTP...' : 'Send OTP'} <ArrowRight size={18} />
+              {submitting ? 'Sending OTP...' : 'Create Account & Send OTP'} <ArrowRight size={18} />
             </Button>
           </form>
 
           <div className="mt-4 text-center">
             <button
-              onClick={() => navigate('/login')}
+              onClick={() => navigate('/login?type=organization')}
               className="text-sm text-brand-blue font-inter hover:underline inline-flex items-center gap-1"
             >
               <ArrowLeft size={14} /> Back to Login

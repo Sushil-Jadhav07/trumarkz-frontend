@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { AuthLayout } from '@/components/layout/AuthLayout';
 import { PageHeader } from '@/components/shared/PageHeader';
@@ -7,207 +7,80 @@ import { Badge } from '@/components/ui/Badge';
 import { ProgressBar } from '@/components/ui/ProgressBar';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
-import { verificationAPI, getApiError } from '@/services/api';
+import { verificationAPI, getApiError, triggerBlobDownload } from '@/services/api';
 import {
-  CheckCircle,
-  Clock,
-  Download,
-  Eye,
-  FileText,
-  Filter,
-  IdCard,
-  Mail,
-  Package,
-  QrCode,
-  RefreshCw,
-  Send,
-  Upload,
-  User,
-  Users,
-  XCircle,
+  CheckCircle, Clock, Download, Eye, FileText, Filter, IdCard,
+  Mail, Package, QrCode, RefreshCw, Send, Upload, User, Users, XCircle,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
+// ── Verifier directory (shared with Verifiers.jsx) ───────────────────────────
+export const VERIFIER_DIRECTORY = [
+  { id: 'VRF-001', name: 'TrustCheck Verification Services', email: 'ops@trustcheck.example', status: 'active' },
+  { id: 'VRF-002', name: 'SureProof Agencies',               email: 'verify@sureproof.example', status: 'active' },
+  { id: 'VRF-003', name: 'Manual Audit Partner',             email: 'audit@manualpartner.example', status: 'paused' },
+];
+
 const STATUS_OPTIONS = [
-  { value: '', label: 'All' },
-  { value: 'pending', label: 'Pending' },
-  { value: 'send_to_verifier', label: 'Send to Verifier' },
-  { value: 'verified', label: 'Verified' },
+  { value: '',                     label: 'All' },
+  { value: 'pending',              label: 'Pending' },
+  { value: 'send_to_verifier',     label: 'Send to Verifier' },
+  { value: 'verified',             label: 'Verified' },
   { value: 'send_to_organization', label: 'Sent to Org' },
 ];
 
 const BATCH_WORKFLOW_KEY = 'trumarkz_admin_batch_workflow_mock';
 
 const MOCK_VERIFICATION_DATA = {
-  total: 10,
-  pending: 7,
-  verified: 3,
-  failed: 0,
+  total: 10, pending: 7, verified: 3, failed: 0,
   users: [
-    {
-      id: 'mock-user-001',
-      batch_id: 'BATCH-MOCK-001',
-      full_name: 'Aarav Sharma',
-      email: 'aarav.sharma@example.com',
-      phone_number: '+91 98765 43001',
-      verification_status: 'pending_verification',
-      created_at: '2026-05-10T08:30:00Z',
-    },
-    {
-      id: 'mock-user-002',
-      batch_id: 'BATCH-MOCK-001',
-      full_name: 'Meera Joshi',
-      email: 'meera.joshi@example.com',
-      phone_number: '+91 98765 43002',
-      verification_status: 'pending_verification',
-      created_at: '2026-05-10T08:31:00Z',
-    },
-    {
-      id: 'mock-user-003',
-      batch_id: 'BATCH-MOCK-001',
-      full_name: 'Kabir Verma',
-      email: 'kabir.verma@example.com',
-      phone_number: '+91 98765 43003',
-      verification_status: 'pending_verification',
-      created_at: '2026-05-10T08:32:00Z',
-    },
-    {
-      id: 'mock-user-004',
-      batch_id: 'BATCH-MOCK-001',
-      full_name: 'Nisha Patel',
-      email: 'nisha.patel@example.com',
-      phone_number: '+91 98765 43004',
-      verification_status: 'pending_verification',
-      created_at: '2026-05-10T08:33:00Z',
-    },
-    {
-      id: 'mock-user-005',
-      batch_id: 'BATCH-MOCK-002',
-      full_name: 'Rohan Gupta',
-      email: 'rohan.gupta@example.com',
-      phone_number: '+91 98765 43005',
-      verification_status: 'verified',
-      created_at: '2026-05-09T10:15:00Z',
-      verified_at: '2026-05-12T11:00:00Z',
-    },
-    {
-      id: 'mock-user-006',
-      batch_id: 'BATCH-MOCK-002',
-      full_name: 'Priya Nair',
-      email: 'priya.nair@example.com',
-      phone_number: '+91 98765 43006',
-      verification_status: 'verified',
-      created_at: '2026-05-09T10:16:00Z',
-      verified_at: '2026-05-12T11:02:00Z',
-    },
-    {
-      id: 'mock-user-007',
-      batch_id: 'BATCH-MOCK-003',
-      full_name: 'Sameer Khan',
-      email: 'sameer.khan@example.com',
-      phone_number: '+91 98765 43007',
-      verification_status: 'pending_verification',
-      created_at: '2026-05-11T12:05:00Z',
-    },
-    {
-      id: 'mock-user-008',
-      batch_id: 'BATCH-MOCK-003',
-      full_name: 'Anika Rao',
-      email: 'anika.rao@example.com',
-      phone_number: '+91 98765 43008',
-      verification_status: 'pending_verification',
-      created_at: '2026-05-11T12:06:00Z',
-    },
-    {
-      id: 'mock-product-001',
-      batch_id: 'BATCH-MOCK-004',
-      entity_type: 'product',
-      product_name: 'TruTag Smart Label',
-      category_name: 'Electronics',
-      verification_status: 'verified',
-      created_at: '2026-05-08T09:00:00Z',
-      verified_at: '2026-05-10T09:00:00Z',
-    },
-    {
-      id: 'mock-user-009',
-      batch_id: 'BATCH-MOCK-005',
-      full_name: 'Dev Malhotra',
-      email: 'dev.malhotra@example.com',
-      phone_number: '+91 98765 43009',
-      verification_status: 'pending_verification',
-      created_at: '2026-05-12T09:20:00Z',
-    },
+    { id: 'mock-user-001', batch_id: 'BATCH-MOCK-001', full_name: 'Aarav Sharma',   email: 'aarav.sharma@example.com',   phone_number: '+91 98765 43001', verification_status: 'pending_verification', created_at: '2026-05-10T08:30:00Z' },
+    { id: 'mock-user-002', batch_id: 'BATCH-MOCK-001', full_name: 'Meera Joshi',    email: 'meera.joshi@example.com',    phone_number: '+91 98765 43002', verification_status: 'pending_verification', created_at: '2026-05-10T08:31:00Z' },
+    { id: 'mock-user-003', batch_id: 'BATCH-MOCK-001', full_name: 'Kabir Verma',    email: 'kabir.verma@example.com',    phone_number: '+91 98765 43003', verification_status: 'pending_verification', created_at: '2026-05-10T08:32:00Z' },
+    { id: 'mock-user-004', batch_id: 'BATCH-MOCK-001', full_name: 'Nisha Patel',    email: 'nisha.patel@example.com',    phone_number: '+91 98765 43004', verification_status: 'pending_verification', created_at: '2026-05-10T08:33:00Z' },
+    { id: 'mock-user-005', batch_id: 'BATCH-MOCK-002', full_name: 'Rohan Gupta',    email: 'rohan.gupta@example.com',    phone_number: '+91 98765 43005', verification_status: 'verified',             created_at: '2026-05-09T10:15:00Z', verified_at: '2026-05-12T11:00:00Z' },
+    { id: 'mock-user-006', batch_id: 'BATCH-MOCK-002', full_name: 'Priya Nair',     email: 'priya.nair@example.com',     phone_number: '+91 98765 43006', verification_status: 'verified',             created_at: '2026-05-09T10:16:00Z', verified_at: '2026-05-12T11:02:00Z' },
+    { id: 'mock-user-007', batch_id: 'BATCH-MOCK-003', full_name: 'Sameer Khan',    email: 'sameer.khan@example.com',    phone_number: '+91 98765 43007', verification_status: 'pending_verification', created_at: '2026-05-11T12:05:00Z' },
+    { id: 'mock-user-008', batch_id: 'BATCH-MOCK-003', full_name: 'Anika Rao',      email: 'anika.rao@example.com',      phone_number: '+91 98765 43008', verification_status: 'pending_verification', created_at: '2026-05-11T12:06:00Z' },
+    { id: 'mock-product-001', batch_id: 'BATCH-MOCK-004', entity_type: 'product', product_name: 'TruTag Smart Label', category_name: 'Electronics', verification_status: 'verified', created_at: '2026-05-08T09:00:00Z', verified_at: '2026-05-10T09:00:00Z' },
+    { id: 'mock-user-009', batch_id: 'BATCH-MOCK-005', full_name: 'Dev Malhotra',   email: 'dev.malhotra@example.com',   phone_number: '+91 98765 43009', verification_status: 'pending_verification', created_at: '2026-05-12T09:20:00Z' },
   ],
 };
 
 const statusBadge = (status) => {
   if (status === 'verified') return { variant: 'success', label: 'Verified', icon: CheckCircle };
-  if (status === 'failed') return { variant: 'error', label: 'Failed', icon: XCircle };
-  return { variant: 'pending', label: 'Pending', icon: Clock };
+  if (status === 'failed')   return { variant: 'error',   label: 'Failed',   icon: XCircle };
+  return                            { variant: 'pending', label: 'Pending',  icon: Clock };
 };
 
 const batchStatusMeta = {
-  pending: { label: 'Pending', badge: 'warning', stage: 'Review', tone: 'bg-orange-50 text-orange-700 border-orange-100' },
-  send_to_verifier: { label: 'Send to Verifier', badge: 'info', stage: 'Verify', tone: 'bg-blue-50 text-brand-blue border-blue-100' },
-  verified: { label: 'Verified', badge: 'success', stage: 'Verified', tone: 'bg-green-50 text-green-700 border-green-100' },
-  send_to_organization: { label: 'Send to Organization', badge: 'success', stage: 'Shared', tone: 'bg-emerald-50 text-emerald-700 border-emerald-100' },
+  pending:              { label: 'Pending',              badge: 'warning', stage: 'Review',    tone: 'bg-orange-50 text-orange-700 border-orange-100' },
+  send_to_verifier:     { label: 'Send to Verifier',     badge: 'info',    stage: 'Verify',    tone: 'bg-blue-50 text-brand-blue border-blue-100' },
+  verified:             { label: 'Verified',             badge: 'success', stage: 'Verified',  tone: 'bg-green-50 text-green-700 border-green-100' },
+  send_to_organization: { label: 'Send to Organization', badge: 'success', stage: 'Shared',    tone: 'bg-emerald-50 text-emerald-700 border-emerald-100' },
 };
 
 const WORKFLOW_STEPS = [
-  { id: 'pending', label: 'Review' },
-  { id: 'send_to_verifier', label: 'Verifier' },
-  { id: 'verified', label: 'Verified' },
+  { id: 'pending',              label: 'Review' },
+  { id: 'send_to_verifier',     label: 'Verifier' },
+  { id: 'verified',             label: 'Verified' },
   { id: 'send_to_organization', label: 'Org Shared' },
 ];
 
 const getStoredWorkflow = () => {
-  try {
-    return JSON.parse(localStorage.getItem(BATCH_WORKFLOW_KEY) || '{}');
-  } catch {
-    return {};
-  }
-};
-
-const downloadMockFile = (fileName, content) => {
-  const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement('a');
-  anchor.href = url;
-  anchor.download = fileName;
-  anchor.click();
-  URL.revokeObjectURL(url);
-};
-
-const generateMockBatchAssets = async (batch) => {
-  const generators = batch.records.map((record) =>
-    Promise.resolve({
-      recordId: record.id,
-      title: recordTitle(record),
-      idCardUrl: `/mock-assets/${batch.id}/${record.id}-id-card.pdf`,
-      qrCodeUrl: `/mock-assets/${batch.id}/${record.id}-qr.png`,
-      reportUrl: `/mock-assets/${batch.id}/${record.id}-report.pdf`,
-    })
-  );
-  return Promise.all(generators);
+  try { return JSON.parse(localStorage.getItem(BATCH_WORKFLOW_KEY) || '{}'); }
+  catch { return {}; }
 };
 
 const isProductRecord = (record) =>
-  record?.entity_type === 'product' ||
-  !!record?.product_name ||
-  !!record?.category_name ||
-  !!record?.custom_fields;
+  record?.entity_type === 'product' || !!record?.product_name || !!record?.category_name || !!record?.custom_fields;
 
 const recordTitle = (record) =>
   record.product_name || record.full_name || record.email || record.id || 'Verification record';
 
 const formatLastAction = (value) => {
   if (!value) return 'No batch action yet';
-  return new Date(value).toLocaleString([], {
-    day: '2-digit',
-    month: 'short',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+  return new Date(value).toLocaleString([], { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
 };
 
 const groupByBatch = (records) => {
@@ -215,17 +88,11 @@ const groupByBatch = (records) => {
     const id = record.batch_id || 'single-records';
     if (!acc[id]) {
       acc[id] = {
-        id,
-        name: id === 'single-records' ? 'Single records' : `Batch ${id.slice(0, 8)}`,
+        id, name: id === 'single-records' ? 'Single records' : `Batch ${id.slice(0, 8)}`,
         orgName: record.organization_name || record.org_name || 'Organization',
-        records: [],
-        total: 0,
-        pending: 0,
-        verified: 0,
-        failed: 0,
+        records: [], total: 0, pending: 0, verified: 0, failed: 0,
       };
     }
-
     acc[id].records.push(record);
     acc[id].total += 1;
     if (record.verification_status === 'verified') acc[id].verified += 1;
@@ -233,10 +100,129 @@ const groupByBatch = (records) => {
     else acc[id].pending += 1;
     return acc;
   }, {});
-
   return Object.values(batches).sort((a, b) => b.pending - a.pending || b.total - a.total);
 };
 
+// ── Select-Verifier sub-modal ─────────────────────────────────────────────────
+const SelectVerifierModal = ({ isOpen, onClose, onConfirm, batchName, sending }) => {
+  const [selected, setSelected] = useState(null);
+  const activeVerifiers = VERIFIER_DIRECTORY.filter((v) => v.status === 'active');
+  return (
+    <Modal isOpen={isOpen} onClose={onClose} title="Select Third-Party Verifier" size="md">
+      <div className="space-y-4">
+        <p className="text-sm text-gray-500 font-inter">
+          Choose a verifier to receive the batch notification email for <span className="font-semibold text-brand-dark">{batchName}</span>.
+        </p>
+        <div className="space-y-2">
+          {activeVerifiers.map((v) => (
+            <button
+              key={v.id}
+              onClick={() => setSelected(v)}
+              className={`w-full flex items-center gap-4 p-3.5 rounded-xl border transition-all text-left ${
+                selected?.id === v.id
+                  ? 'border-brand-blue bg-blue-50'
+                  : 'border-gray-200 hover:border-gray-300 bg-white'
+              }`}
+            >
+              <div className="w-9 h-9 rounded-xl bg-brand-blue/10 flex items-center justify-center shrink-0">
+                <Mail size={16} className="text-brand-blue" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-brand-dark font-inter truncate">{v.name}</p>
+                <p className="text-xs text-gray-400 font-inter truncate">{v.email}</p>
+              </div>
+              {selected?.id === v.id && (
+                <CheckCircle size={16} className="text-brand-blue shrink-0 ml-auto" />
+              )}
+            </button>
+          ))}
+        </div>
+        <div className="flex gap-2 pt-2">
+          <Button variant="ghost" onClick={onClose} className="flex-1">Cancel</Button>
+          <Button
+            variant="primary" icon={Mail} className="flex-1"
+            disabled={!selected || sending}
+            onClick={() => onConfirm(selected)}
+          >
+            {sending ? 'Sending…' : 'Send Mail'}
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+};
+
+// ── Upload-Verified sub-modal ─────────────────────────────────────────────────
+const UploadVerifiedModal = ({ isOpen, onClose, onConfirm, batchName, uploadType, uploading }) => {
+  const fileRef = useRef(null);
+  const [file, setFile] = useState(null);
+  const [progress, setProgress] = useState(0);
+
+  const reset = () => { setFile(null); setProgress(0); };
+  const handleClose = () => { reset(); onClose(); };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    const dropped = e.dataTransfer?.files?.[0];
+    if (dropped) setFile(dropped);
+  };
+
+  const label = uploadType === 'data' ? 'Verified Data' : 'Verified Document';
+
+  return (
+    <Modal isOpen={isOpen} onClose={handleClose} title={`Upload ${label}`} size="md">
+      <div className="space-y-4">
+        <p className="text-sm text-gray-500 font-inter">
+          Upload the {label.toLowerCase()} for <span className="font-semibold text-brand-dark">{batchName}</span>. This will mark the batch as <span className="font-semibold text-green-700">Verified</span>.
+        </p>
+        <div
+          onDrop={handleDrop}
+          onDragOver={(e) => e.preventDefault()}
+          onClick={() => fileRef.current?.click()}
+          className={`flex flex-col items-center justify-center gap-3 p-8 rounded-2xl border-2 border-dashed cursor-pointer transition-colors ${
+            file ? 'border-brand-blue bg-blue-50' : 'border-gray-200 hover:border-brand-blue hover:bg-gray-50'
+          }`}
+        >
+          <input ref={fileRef} type="file" className="hidden" accept=".pdf,.xlsx,.xls,.csv,.docx,.doc"
+            onChange={(e) => setFile(e.target.files?.[0] || null)} />
+          <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${file ? 'bg-brand-blue/10' : 'bg-gray-100'}`}>
+            <Upload size={22} className={file ? 'text-brand-blue' : 'text-gray-400'} />
+          </div>
+          {file ? (
+            <div className="text-center">
+              <p className="text-sm font-semibold text-brand-dark font-inter">{file.name}</p>
+              <p className="text-xs text-gray-400 font-inter mt-1">{(file.size / 1024).toFixed(1)} KB · Click to change</p>
+            </div>
+          ) : (
+            <div className="text-center">
+              <p className="text-sm font-medium text-gray-600 font-inter">Drop file here or click to browse</p>
+              <p className="text-xs text-gray-400 font-inter mt-1">PDF, Excel, CSV, Word · max 50MB</p>
+            </div>
+          )}
+        </div>
+        {uploading && progress > 0 && (
+          <div>
+            <div className="flex justify-between text-xs text-gray-500 font-inter mb-1">
+              <span>Uploading…</span><span>{progress}%</span>
+            </div>
+            <div className="h-2 rounded-full bg-gray-100 overflow-hidden">
+              <div className="h-full bg-brand-blue rounded-full transition-all" style={{ width: `${progress}%` }} />
+            </div>
+          </div>
+        )}
+        <div className="flex gap-2">
+          <Button variant="ghost" onClick={handleClose} className="flex-1" disabled={uploading}>Cancel</Button>
+          <Button variant="primary" icon={Upload} className="flex-1" disabled={!file || uploading}
+            onClick={() => onConfirm(file, setProgress)}>
+            {uploading ? 'Uploading…' : `Upload ${label}`}
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+};
+
+// ── Main BatchMonitor component ───────────────────────────────────────────────
 export const BatchMonitor = () => {
   const [data, setData] = useState(null);
   const [statusFilter, setStatusFilter] = useState('');
@@ -245,14 +231,26 @@ export const BatchMonitor = () => {
   const [selectedBatchId, setSelectedBatchId] = useState(null);
   const [workflowByBatch, setWorkflowByBatch] = useState(() => getStoredWorkflow());
 
+  // Action loading states
+  const [mailSending, setMailSending] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [generatingAssets, setGeneratingAssets] = useState(false);
+  const [sendingToOrg, setSendingToOrg] = useState(false);
+  const [downloadingDoc, setDownloadingDoc] = useState(false);
+  const [downloadingReport, setDownloadingReport] = useState(false);
+
+  // Sub-modal states
+  const [verifierModalOpen, setVerifierModalOpen] = useState(false);
+  const [verifierModalBatch, setVerifierModalBatch] = useState(null);
+  const [uploadModalOpen, setUploadModalOpen] = useState(false);
+  const [uploadModalBatch, setUploadModalBatch] = useState(null);
+  const [uploadModalType, setUploadModalType] = useState('document');
+
   const fetchData = useCallback(async (showRefresh = false) => {
     if (showRefresh) setRefreshing(true);
     else setLoading(true);
     try {
-      const { data: result } = await verificationAPI.getAllVerifications({
-        limit: 200,
-        offset: 0,
-      });
+      const { data: result } = await verificationAPI.getAllVerifications({ limit: 200, offset: 0 });
       setData(result?.users?.length ? result : MOCK_VERIFICATION_DATA);
     } catch (err) {
       setData(MOCK_VERIFICATION_DATA);
@@ -281,79 +279,218 @@ export const BatchMonitor = () => {
       verifiedDocument: stored.verifiedDocument || batchComplete,
       verifiedReport: stored.verifiedReport || batchComplete,
       assets,
-      sharedWithOrganization: batchComplete && status === 'send_to_organization',
+      sharedWithOrganization: status === 'send_to_organization',
       lastAction: stored.lastAction,
+      verifiedDocumentUrl: stored.verifiedDocumentUrl || null,
+      verifiedReportUrl: stored.verifiedReportUrl || null,
     };
   });
-  const visibleBatches = statusFilter ? batches.filter((batch) => batch.status === statusFilter) : batches;
-  const selectedBatch = batches.find((batch) => batch.id === selectedBatchId) || null;
-  const total = batches.reduce((sum, batch) => sum + batch.total, 0);
-  const pending = batches.reduce((sum, batch) => sum + batch.pending, 0);
-  const verified = batches.reduce((sum, batch) => sum + batch.verified, 0);
-  const failed = batches.reduce((sum, batch) => sum + batch.failed, 0);
+
+  const visibleBatches = statusFilter ? batches.filter((b) => b.status === statusFilter) : batches;
+  const selectedBatch = batches.find((b) => b.id === selectedBatchId) || null;
+  const total    = batches.reduce((s, b) => s + b.total,    0);
+  const pending  = batches.reduce((s, b) => s + b.pending,  0);
+  const verified = batches.reduce((s, b) => s + b.verified, 0);
+  const failed   = batches.reduce((s, b) => s + b.failed,   0);
+
   const statCards = [
-    { label: 'Total Records', value: total, icon: Users, accent: 'bg-brand-blue', surface: 'bg-blue-50', text: 'text-brand-blue' },
-    { label: 'Pending Review', value: pending, icon: Clock, accent: 'bg-orange-400', surface: 'bg-orange-50', text: 'text-orange-600' },
-    { label: 'Verified', value: verified, icon: CheckCircle, accent: 'bg-green-500', surface: 'bg-green-50', text: 'text-green-600' },
-    { label: 'Failed', value: failed, icon: XCircle, accent: 'bg-red-500', surface: 'bg-red-50', text: 'text-red-600' },
+    { label: 'Total Records', value: total,    icon: Users,        accent: 'bg-brand-blue', surface: 'bg-blue-50',   text: 'text-brand-blue' },
+    { label: 'Pending Review', value: pending, icon: Clock,        accent: 'bg-orange-400', surface: 'bg-orange-50', text: 'text-orange-600' },
+    { label: 'Verified',       value: verified, icon: CheckCircle, accent: 'bg-green-500',  surface: 'bg-green-50',  text: 'text-green-600' },
+    { label: 'Failed',         value: failed,   icon: XCircle,     accent: 'bg-red-500',    surface: 'bg-red-50',    text: 'text-red-600' },
   ];
 
   const updateBatchWorkflow = (batchId, patch) => {
     setWorkflowByBatch((current) => {
-      const next = {
-        ...current,
-        [batchId]: {
-          ...(current[batchId] || {}),
-          ...patch,
-          lastAction: new Date().toISOString(),
-        },
-      };
+      const next = { ...current, [batchId]: { ...(current[batchId] || {}), ...patch, lastAction: new Date().toISOString() } };
       localStorage.setItem(BATCH_WORKFLOW_KEY, JSON.stringify(next));
       return next;
     });
   };
 
-  const handleMailVerifier = (batch) => {
-    updateBatchWorkflow(batch.id, { status: 'send_to_verifier' });
-    toast.success(`Mock email sent to third-party verifier for ${batch.name}`);
+  // ── Action: Mail to Verifier ─────────────────────────────────────────────
+  const openMailVerifierModal = (batch) => {
+    setVerifierModalBatch(batch);
+    setVerifierModalOpen(true);
   };
 
-  const handleUploadVerifiedOutput = async (batch, type) => {
-    const assets = await generateMockBatchAssets(batch);
-    updateBatchWorkflow(batch.id, {
-      status: 'verified',
-      verifiedDocument: true,
-      verifiedReport: true,
-      assets,
-      uploadedType: type,
-    });
-    toast.success(`${type === 'data' ? 'Verified data' : 'Verified document'} uploaded. Batch marked verified.`);
+  const handleConfirmMailVerifier = async (verifier) => {
+    const batch = verifierModalBatch;
+    setMailSending(true);
+    try {
+      await verificationAPI.sendVerifierEmail(batch.id, verifier.email);
+      updateBatchWorkflow(batch.id, { status: 'send_to_verifier' });
+      toast.success(`Email sent to ${verifier.name} for ${batch.name}`);
+      setVerifierModalOpen(false);
+      setVerifierModalBatch(null);
+    } catch (err) {
+      // API not live yet — update local state as mock fallback
+      const msg = getApiError(err, '');
+      updateBatchWorkflow(batch.id, { status: 'send_to_verifier' });
+      toast.success(`(Mock) Email sent to ${verifier.name} for ${batch.name}${msg ? ` · Note: ${msg}` : ''}`);
+      setVerifierModalOpen(false);
+      setVerifierModalBatch(null);
+    } finally {
+      setMailSending(false);
+    }
   };
 
+  // ── Action: Upload Verified Document ────────────────────────────────────
+  const openUploadModal = (batch, type) => {
+    setUploadModalBatch(batch);
+    setUploadModalType(type);
+    setUploadModalOpen(true);
+  };
+
+  const handleConfirmUpload = async (file, setProgress) => {
+    const batch = uploadModalBatch;
+    setUploading(true);
+    try {
+      const { data: result } = await verificationAPI.uploadBatchVerifiedDocument(
+        batch.id, file, uploadModalType,
+        (pct) => setProgress(pct)
+      );
+      updateBatchWorkflow(batch.id, {
+        status: 'verified',
+        verifiedDocument: true,
+        verifiedReport: true,
+        verifiedDocumentUrl: result?.document_url || null,
+        verifiedReportUrl: result?.report_url || null,
+      });
+      toast.success(`${uploadModalType === 'data' ? 'Verified data' : 'Verified document'} uploaded. Batch marked Verified.`);
+      setUploadModalOpen(false);
+      setUploadModalBatch(null);
+    } catch (err) {
+      // Fallback: mark verified locally if API not live
+      updateBatchWorkflow(batch.id, { status: 'verified', verifiedDocument: true, verifiedReport: true });
+      toast.success(`(Mock) Document uploaded. Batch marked Verified.`);
+      setUploadModalOpen(false);
+      setUploadModalBatch(null);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  // ── Action: Generate Batch Assets ────────────────────────────────────────
   const handleGenerateAssets = async (batch) => {
-    const assets = await generateMockBatchAssets(batch);
-    updateBatchWorkflow(batch.id, { assets });
-    toast.success(`Generated ${assets.length} ID cards, QR codes, and reports in mock storage`);
+    setGeneratingAssets(true);
+    const toastId = toast.loading(`Generating assets for ${batch.total} records…`);
+    try {
+      const userIds = batch.records.map((r) => r.id);
+      const { data: result } = await verificationAPI.generateBatchAssets(batch.id, userIds);
+      const assets = (result?.assets || []).map((a) => ({
+        recordId: a.user_id || a.entity_id,
+        title: recordTitle(batch.records.find((r) => r.id === (a.user_id || a.entity_id)) || {}),
+        idCardUrl:  a.pdf_url     || null,
+        qrCodeUrl:  a.qr_code_data || null,
+        reportUrl:  a.report_url  || null,
+      }));
+      // If API returned nothing, generate mock asset entries
+      const finalAssets = assets.length
+        ? assets
+        : batch.records.map((r) => ({
+            recordId: r.id,
+            title: recordTitle(r),
+            idCardUrl: `/mock-assets/${batch.id}/${r.id}-id-card.pdf`,
+            qrCodeUrl: `/mock-assets/${batch.id}/${r.id}-qr.png`,
+            reportUrl: `/mock-assets/${batch.id}/${r.id}-report.pdf`,
+          }));
+      updateBatchWorkflow(batch.id, { assets: finalAssets });
+      toast.dismiss(toastId);
+      toast.success(`Generated assets for ${finalAssets.length} records`);
+    } catch (err) {
+      toast.dismiss(toastId);
+      toast.error(getApiError(err, 'Failed to generate assets'));
+    } finally {
+      setGeneratingAssets(false);
+    }
   };
 
+  // ── Action: Send to Organization ────────────────────────────────────────
   const handleSendToOrganization = async (batch) => {
-    const assets = batch.assets.length
-      ? batch.assets
-      : await generateMockBatchAssets(batch);
-    updateBatchWorkflow(batch.id, { status: 'send_to_organization', assets });
-    toast.success(`${batch.name} assets shared with the organization`);
+    setSendingToOrg(true);
+    try {
+      await verificationAPI.updateBatchStatus(batch.id, 'send_to_organization');
+      const assets = batch.assets.length
+        ? batch.assets
+        : batch.records.map((r) => ({
+            recordId: r.id,
+            title: recordTitle(r),
+            idCardUrl: `/mock-assets/${batch.id}/${r.id}-id-card.pdf`,
+            qrCodeUrl: `/mock-assets/${batch.id}/${r.id}-qr.png`,
+            reportUrl: `/mock-assets/${batch.id}/${r.id}-report.pdf`,
+          }));
+      updateBatchWorkflow(batch.id, { status: 'send_to_organization', assets });
+      toast.success(`${batch.name} assets shared with the organization`);
+    } catch (err) {
+      // Fallback mock
+      const assets = batch.assets.length ? batch.assets : batch.records.map((r) => ({
+        recordId: r.id, title: recordTitle(r),
+        idCardUrl: `/mock-assets/${batch.id}/${r.id}-id-card.pdf`,
+        qrCodeUrl: `/mock-assets/${batch.id}/${r.id}-qr.png`,
+        reportUrl: `/mock-assets/${batch.id}/${r.id}-report.pdf`,
+      }));
+      updateBatchWorkflow(batch.id, { status: 'send_to_organization', assets });
+      toast.success(`(Mock) ${batch.name} assets shared with the organization`);
+    } finally {
+      setSendingToOrg(false);
+    }
   };
 
-  const handleDownload = (batch, type, record = null) => {
-    const title = record ? record.title : batch.name;
-    const content = [
-      `Mock ${type}`,
-      `Batch: ${batch.name}`,
-      `Batch ID: ${batch.id}`,
-      record ? `Record: ${record.title} (${record.recordId})` : `Records: ${batch.total}`,
-      `Generated: ${new Date().toLocaleString()}`,
-    ].join('\n');
-    downloadMockFile(`${title.replace(/\s+/g, '-').toLowerCase()}-${type.replace(/\s+/g, '-')}.txt`, content);
+  // ── Action: Download Verified Document ──────────────────────────────────
+  const handleDownloadVerifiedDocument = async (batch) => {
+    // If we have a real URL from the upload response, open it directly
+    if (batch.verifiedDocumentUrl) {
+      window.open(batch.verifiedDocumentUrl, '_blank');
+      return;
+    }
+    setDownloadingDoc(true);
+    try {
+      const { data: blob } = await verificationAPI.downloadBatchVerifiedDocument(batch.id);
+      triggerBlobDownload(blob, `${batch.name.replace(/\s+/g, '-')}-verified-document.pdf`);
+    } catch (err) {
+      // Mock fallback
+      const content = `Mock Verified Document\nBatch: ${batch.name}\nBatch ID: ${batch.id}\nRecords: ${batch.total}\nGenerated: ${new Date().toLocaleString()}`;
+      const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+      triggerBlobDownload(blob, `${batch.name.replace(/\s+/g, '-')}-verified-document.txt`);
+      toast('(Mock) Verified document downloaded', { icon: '📄' });
+    } finally {
+      setDownloadingDoc(false);
+    }
+  };
+
+  // ── Action: Download Verified Report ────────────────────────────────────
+  const handleDownloadVerifiedReport = async (batch) => {
+    if (batch.verifiedReportUrl) {
+      window.open(batch.verifiedReportUrl, '_blank');
+      return;
+    }
+    setDownloadingReport(true);
+    try {
+      const { data: blob } = await verificationAPI.downloadBatchVerifiedReport(batch.id);
+      triggerBlobDownload(blob, `${batch.name.replace(/\s+/g, '-')}-verified-report.pdf`);
+    } catch (err) {
+      const content = `Mock Verified Report\nBatch: ${batch.name}\nBatch ID: ${batch.id}\nRecords: ${batch.total}\nGenerated: ${new Date().toLocaleString()}`;
+      const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+      triggerBlobDownload(blob, `${batch.name.replace(/\s+/g, '-')}-verified-report.txt`);
+      toast('(Mock) Verified report downloaded', { icon: '📊' });
+    } finally {
+      setDownloadingReport(false);
+    }
+  };
+
+  // ── Action: Download per-record asset ───────────────────────────────────
+  const handleDownloadAsset = (batch, type, record) => {
+    const asset = batch.assets.find((a) => a.recordId === record.id);
+    const url = type === 'id-card' ? asset?.idCardUrl : asset?.qrCodeUrl;
+    if (url && !url.startsWith('/mock-')) {
+      window.open(url, '_blank');
+      return;
+    }
+    const title = recordTitle(record);
+    const content = `Mock ${type}\nBatch: ${batch.name}\nRecord: ${title} (${record.id})\nGenerated: ${new Date().toLocaleString()}`;
+    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+    triggerBlobDownload(blob, `${title.replace(/\s+/g, '-')}-${type}.txt`);
   };
 
   return (
@@ -372,6 +509,7 @@ export const BatchMonitor = () => {
         }
       />
 
+      {/* Stat Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-5">
         {statCards.map((stat) => {
           const Icon = stat.icon;
@@ -392,6 +530,7 @@ export const BatchMonitor = () => {
         })}
       </div>
 
+      {/* Filter bar */}
       <Card className="p-4 mb-4">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div>
@@ -417,6 +556,7 @@ export const BatchMonitor = () => {
         </div>
       </Card>
 
+      {/* Batch Table */}
       {loading ? (
         <Card className="p-10 flex flex-col items-center justify-center gap-3">
           <RefreshCw size={24} className="animate-spin text-brand-blue" />
@@ -427,11 +567,7 @@ export const BatchMonitor = () => {
           <p className="text-sm text-gray-400 font-inter">No verification records found</p>
         </Card>
       ) : (
-        <motion.div
-          initial={{ opacity: 0, y: 14 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.25 }}
-        >
+        <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }}>
           <Card className="p-0 overflow-hidden border border-gray-100">
             <div className="px-5 py-4 border-b border-gray-100 bg-white flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
@@ -477,33 +613,22 @@ export const BatchMonitor = () => {
                             {WORKFLOW_STEPS.map((step, index) => {
                               const activeIndex = WORKFLOW_STEPS.findIndex((item) => item.id === batch.status);
                               return (
-                                <span
-                                  key={step.id}
-                                  className={`h-1.5 rounded-full ${index <= activeIndex ? 'bg-brand-blue' : 'bg-gray-200'}`}
-                                />
+                                <span key={step.id} className={`h-1.5 rounded-full ${index <= activeIndex ? 'bg-brand-blue' : 'bg-gray-200'}`} />
                               );
                             })}
                           </div>
                         </td>
                         <td className="px-5 py-4 text-center">
-                          <span className="inline-flex min-w-10 justify-center rounded-lg bg-gray-100 px-2.5 py-1 text-sm font-bold text-brand-dark font-inter">
-                            {batch.total}
-                          </span>
+                          <span className="inline-flex min-w-10 justify-center rounded-lg bg-gray-100 px-2.5 py-1 text-sm font-bold text-brand-dark font-inter">{batch.total}</span>
                         </td>
                         <td className="px-5 py-4 text-center">
-                          <span className="inline-flex min-w-9 justify-center rounded-lg bg-orange-50 px-2.5 py-1 text-sm font-bold text-orange-600 font-inter">
-                            {batch.pending}
-                          </span>
+                          <span className="inline-flex min-w-9 justify-center rounded-lg bg-orange-50 px-2.5 py-1 text-sm font-bold text-orange-600 font-inter">{batch.pending}</span>
                         </td>
                         <td className="px-5 py-4 text-center">
-                          <span className="inline-flex min-w-9 justify-center rounded-lg bg-green-50 px-2.5 py-1 text-sm font-bold text-green-600 font-inter">
-                            {batch.verified}
-                          </span>
+                          <span className="inline-flex min-w-9 justify-center rounded-lg bg-green-50 px-2.5 py-1 text-sm font-bold text-green-600 font-inter">{batch.verified}</span>
                         </td>
                         <td className="px-5 py-4 text-center">
-                          <span className="inline-flex min-w-9 justify-center rounded-lg bg-red-50 px-2.5 py-1 text-sm font-bold text-red-600 font-inter">
-                            {batch.failed}
-                          </span>
+                          <span className="inline-flex min-w-9 justify-center rounded-lg bg-red-50 px-2.5 py-1 text-sm font-bold text-red-600 font-inter">{batch.failed}</span>
                         </td>
                         <td className="px-5 py-4">
                           <div className={`inline-flex flex-col gap-1 rounded-xl border px-3 py-2 ${batch.statusMeta.tone}`}>
@@ -517,7 +642,7 @@ export const BatchMonitor = () => {
                               View Details
                             </Button>
                             {batch.status === 'pending' && (
-                              <Button variant="outline" size="sm" icon={Mail} onClick={() => handleMailVerifier(batch)}>
+                              <Button variant="outline" size="sm" icon={Mail} onClick={() => openMailVerifierModal(batch)}>
                                 Mail Verifier
                               </Button>
                             )}
@@ -533,6 +658,7 @@ export const BatchMonitor = () => {
         </motion.div>
       )}
 
+      {/* ── View Details Modal ─────────────────────────────────────────────── */}
       <Modal
         isOpen={!!selectedBatch}
         onClose={() => setSelectedBatchId(null)}
@@ -541,6 +667,7 @@ export const BatchMonitor = () => {
       >
         {selectedBatch && (
           <div className="space-y-5">
+            {/* Stage header */}
             <div className="rounded-2xl border border-gray-100 bg-gray-50 p-4">
               <div className="grid grid-cols-1 lg:grid-cols-[1.4fr_1fr] gap-4">
                 <div className={`rounded-xl border p-5 ${selectedBatch.statusMeta.tone}`}>
@@ -556,10 +683,10 @@ export const BatchMonitor = () => {
                   </div>
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-5">
                     {[
-                      { label: 'Records', value: selectedBatch.total, className: 'text-brand-dark' },
-                      { label: 'Pending', value: selectedBatch.pending, className: 'text-orange-600' },
+                      { label: 'Records', value: selectedBatch.total,    className: 'text-brand-dark' },
+                      { label: 'Pending', value: selectedBatch.pending,  className: 'text-orange-600' },
                       { label: 'Verified', value: selectedBatch.verified, className: 'text-green-600' },
-                      { label: 'Failed', value: selectedBatch.failed, className: 'text-red-600' },
+                      { label: 'Failed',  value: selectedBatch.failed,   className: 'text-red-600' },
                     ].map((item) => (
                       <div key={item.label} className="rounded-xl bg-white/75 border border-white/80 p-3">
                         <p className={`font-sora font-bold text-xl ${item.className}`}>{item.value}</p>
@@ -590,12 +717,14 @@ export const BatchMonitor = () => {
               </div>
             </div>
 
+            {/* Workflow + Actions */}
             <div className="grid grid-cols-1 xl:grid-cols-[1.1fr_0.9fr] gap-4">
+              {/* Workflow steps */}
               <div className="rounded-2xl border border-gray-100 bg-white p-5">
                 <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
                   <div>
                     <p className="font-sora font-semibold text-brand-dark">Batch Workflow</p>
-                    <p className="text-xs text-gray-400 font-inter mt-1">Review to verifier processing to organization sharing</p>
+                    <p className="text-xs text-gray-400 font-inter mt-1">Review → Verifier → Verified → Org Shared</p>
                   </div>
                   <Badge status={selectedBatch.statusMeta.badge}>{selectedBatch.statusMeta.label}</Badge>
                 </div>
@@ -613,6 +742,7 @@ export const BatchMonitor = () => {
                 </div>
               </div>
 
+              {/* Actions panel */}
               <div className="rounded-2xl border border-gray-100 bg-gray-50 p-5">
                 <div className="flex items-start justify-between gap-3 mb-4">
                   <div>
@@ -622,35 +752,52 @@ export const BatchMonitor = () => {
                   {selectedBatch.sharedWithOrganization && <Badge status="success">Shared</Badge>}
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-1 gap-2">
+
+                  {/* Mail verifier — only when pending */}
                   {selectedBatch.status === 'pending' && (
-                    <Button variant="outline" size="sm" icon={Mail} className="justify-start" onClick={() => handleMailVerifier(selectedBatch)}>
+                    <Button variant="outline" size="sm" icon={Mail} className="justify-start"
+                      onClick={() => openMailVerifierModal(selectedBatch)}>
                       Mail to Third-Party Verifier
                     </Button>
                   )}
+
+                  {/* Upload — for pending/send_to_verifier */}
                   {selectedBatch.status !== 'verified' && selectedBatch.status !== 'send_to_organization' && (
                     <>
-                      <Button variant="primary" size="sm" icon={Upload} className="justify-start" onClick={() => handleUploadVerifiedOutput(selectedBatch, 'data')}>
+                      <Button variant="primary" size="sm" icon={Upload} className="justify-start"
+                        onClick={() => openUploadModal(selectedBatch, 'data')}>
                         Upload Verified Data
                       </Button>
-                      <Button variant="secondary" size="sm" icon={Upload} className="justify-start" onClick={() => handleUploadVerifiedOutput(selectedBatch, 'document')}>
+                      <Button variant="secondary" size="sm" icon={Upload} className="justify-start"
+                        onClick={() => openUploadModal(selectedBatch, 'document')}>
                         Upload Verified Document
                       </Button>
                     </>
                   )}
+
+                  {/* Download + generate + send to org — for verified / sent */}
                   {(selectedBatch.status === 'verified' || selectedBatch.status === 'send_to_organization') && (
                     <>
-                      <Button variant="outline" size="sm" icon={Download} className="justify-start" onClick={() => handleDownload(selectedBatch, 'verified-document')}>
-                        Download Verified Document
+                      <Button variant="outline" size="sm" icon={downloadingDoc ? RefreshCw : Download}
+                        className="justify-start" disabled={downloadingDoc}
+                        onClick={() => handleDownloadVerifiedDocument(selectedBatch)}>
+                        {downloadingDoc ? 'Downloading…' : 'Download Verified Document'}
                       </Button>
-                      <Button variant="outline" size="sm" icon={FileText} className="justify-start" onClick={() => handleDownload(selectedBatch, 'verified-report')}>
-                        Download Verified Report
+                      <Button variant="outline" size="sm" icon={downloadingReport ? RefreshCw : FileText}
+                        className="justify-start" disabled={downloadingReport}
+                        onClick={() => handleDownloadVerifiedReport(selectedBatch)}>
+                        {downloadingReport ? 'Downloading…' : 'Download Verified Report'}
                       </Button>
-                      <Button variant="primary" size="sm" icon={IdCard} className="justify-start" onClick={() => handleGenerateAssets(selectedBatch)}>
-                        Generate Batch Assets
+                      <Button variant="primary" size="sm" icon={generatingAssets ? RefreshCw : IdCard}
+                        className="justify-start" disabled={generatingAssets}
+                        onClick={() => handleGenerateAssets(selectedBatch)}>
+                        {generatingAssets ? 'Generating…' : 'Generate Batch Assets'}
                       </Button>
                       {selectedBatch.status === 'verified' && (
-                        <Button variant="success" size="sm" icon={Send} className="justify-start" onClick={() => handleSendToOrganization(selectedBatch)}>
-                          Send to Organization
+                        <Button variant="success" size="sm" icon={sendingToOrg ? RefreshCw : Send}
+                          className="justify-start" disabled={sendingToOrg}
+                          onClick={() => handleSendToOrganization(selectedBatch)}>
+                          {sendingToOrg ? 'Sending…' : 'Send to Organization'}
                         </Button>
                       )}
                     </>
@@ -659,6 +806,7 @@ export const BatchMonitor = () => {
               </div>
             </div>
 
+            {/* Records table */}
             <div className="rounded-2xl border border-gray-100 bg-white overflow-hidden">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-5 py-4 border-b border-gray-100 bg-gray-50">
                 <div>
@@ -684,7 +832,6 @@ export const BatchMonitor = () => {
                       const status = selectedBatch.status === 'verified' || selectedBatch.status === 'send_to_organization'
                         ? { variant: 'success', label: 'Verified' }
                         : statusBadge(record.verification_status);
-                      const asset = selectedBatch.assets.find((item) => item.recordId === record.id);
                       return (
                         <tr key={record.id} className="hover:bg-gray-50/70 transition-colors">
                           <td className="px-4 py-3">
@@ -703,10 +850,12 @@ export const BatchMonitor = () => {
                           <td className="px-4 py-3">
                             {selectedBatch.status === 'verified' || selectedBatch.status === 'send_to_organization' ? (
                               <div className="flex flex-wrap gap-1.5">
-                                <Button variant="ghost" size="sm" icon={IdCard} onClick={() => handleDownload(selectedBatch, 'id-card', asset || { recordId: record.id, title: recordTitle(record) })}>
+                                <Button variant="ghost" size="sm" icon={IdCard}
+                                  onClick={() => handleDownloadAsset(selectedBatch, 'id-card', record)}>
                                   ID Card
                                 </Button>
-                                <Button variant="ghost" size="sm" icon={QrCode} onClick={() => handleDownload(selectedBatch, 'qr-code', asset || { recordId: record.id, title: recordTitle(record) })}>
+                                <Button variant="ghost" size="sm" icon={QrCode}
+                                  onClick={() => handleDownloadAsset(selectedBatch, 'qr-code', record)}>
                                   QR
                                 </Button>
                               </div>
@@ -724,9 +873,27 @@ export const BatchMonitor = () => {
           </div>
         )}
       </Modal>
+
+      {/* ── Select Verifier Sub-Modal ────────────────────────────────────── */}
+      <SelectVerifierModal
+        isOpen={verifierModalOpen}
+        onClose={() => { setVerifierModalOpen(false); setVerifierModalBatch(null); }}
+        onConfirm={handleConfirmMailVerifier}
+        batchName={verifierModalBatch?.name || ''}
+        sending={mailSending}
+      />
+
+      {/* ── Upload Verified Sub-Modal ────────────────────────────────────── */}
+      <UploadVerifiedModal
+        isOpen={uploadModalOpen}
+        onClose={() => { setUploadModalOpen(false); setUploadModalBatch(null); }}
+        onConfirm={handleConfirmUpload}
+        batchName={uploadModalBatch?.name || ''}
+        uploadType={uploadModalType}
+        uploading={uploading}
+      />
     </AuthLayout>
   );
 };
 
 export default BatchMonitor;
-
