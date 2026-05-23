@@ -73,10 +73,27 @@ const ProtectedRoute = ({ children }) => {
   return children;
 };
 
+const AdminRoute = ({ children }) => {
+  const { role, loading } = useAuth();
+
+  if (loading) return <div className="min-h-screen bg-brand-bg" />;
+
+  if (role !== 'super-admin') {
+    return <Navigate to="/dashboard" replace />;
+  }
+
+  return children;
+};
+
 const DashboardRedirect = () => {
   const { role, user } = useAuth();
   const userType = user?.userType || role;
-  return <Navigate to={userType === 'individual' ? '/individual/dashboard' : '/org/dashboard'} replace />;
+  const path = userType === 'super-admin'
+    ? '/admin/dashboard'
+    : userType === 'individual'
+      ? '/individual/dashboard'
+      : '/org/dashboard';
+  return <Navigate to={path} replace />;
 };
 
 const AnimatedRoutes = () => {
@@ -157,13 +174,13 @@ const AnimatedRoutes = () => {
           <Route path="/individual/share" element={<ShareProfile />} />
 
           {/* ── Admin routes ── */}
-          <Route path="/admin/dashboard" element={<AdminDashboard />} />
-          <Route path="/admin/org-approvals" element={<OrgApprovals />} />
-          <Route path="/admin/batch-monitor" element={<BatchMonitor />} />
-          <Route path="/admin/verifiers" element={<Verifiers />} />
-          <Route path="/admin/pricing" element={<PricingConfig />} />
-          <Route path="/admin/disputes" element={<Disputes />} />
-          <Route path="/admin/platform-health" element={<PlatformHealth />} />
+          <Route path="/admin/dashboard" element={<ProtectedRoute><AdminRoute><AdminDashboard /></AdminRoute></ProtectedRoute>} />
+          <Route path="/admin/org-approvals" element={<ProtectedRoute><AdminRoute><OrgApprovals /></AdminRoute></ProtectedRoute>} />
+          <Route path="/admin/batch-monitor" element={<ProtectedRoute><AdminRoute><BatchMonitor /></AdminRoute></ProtectedRoute>} />
+          <Route path="/admin/verifiers" element={<ProtectedRoute><AdminRoute><Verifiers /></AdminRoute></ProtectedRoute>} />
+          <Route path="/admin/pricing" element={<ProtectedRoute><AdminRoute><PricingConfig /></AdminRoute></ProtectedRoute>} />
+          <Route path="/admin/disputes" element={<ProtectedRoute><AdminRoute><Disputes /></AdminRoute></ProtectedRoute>} />
+          <Route path="/admin/platform-health" element={<ProtectedRoute><AdminRoute><PlatformHealth /></AdminRoute></ProtectedRoute>} />
         </Routes>
       </div>
     </AnimatePresence>

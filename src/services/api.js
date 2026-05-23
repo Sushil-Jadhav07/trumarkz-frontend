@@ -98,7 +98,17 @@ export const authAPI = {
   resendOtp: (email) => api.post('/auth/resend-otp', { email }),
 
   // ── Login ────────────────────────────────────────────────────────────────────
-  login: (email, password) => api.post('/auth/login', { email, password }),
+  login: (emailOrMobile, password, loginType, rememberMe = false) => {
+    if (loginType) {
+      return api.post('/auth/login', {
+        login_type: loginType,
+        email_or_mobile: emailOrMobile,
+        password,
+        remember_me: rememberMe,
+      });
+    }
+    return api.post('/auth/login', { email: emailOrMobile, password });
+  },
 
   // ── Google OAuth ─────────────────────────────────────────────────────────────
   getGoogleAuthUrl: (userType) => api.get('/auth/google/url', {

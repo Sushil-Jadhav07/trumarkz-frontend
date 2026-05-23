@@ -6,7 +6,7 @@ import { Logo } from '@/components/ui/Logo';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import {
-  Mail, Lock, Building2, User, Globe, ArrowRight, CheckCircle,
+  Mail, Lock, Building2, User, Users, Globe, ArrowRight, CheckCircle,
   Shield, X, AlertCircle, ArrowLeft
 } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -86,9 +86,14 @@ export const LoginRegister = () => {
   const [searchParams] = useSearchParams();
   const { login, forgotPassword, getGoogleAuthUrl } = useAuth();
 
-  const typeFromUrl = searchParams.get('type'); // 'organization' | 'individual'
-  const validTypes = ['organization', 'individual'];
-  const [userType, setUserType] = useState(validTypes.includes(typeFromUrl) ? typeFromUrl : 'organization');
+  const typeFromUrl = searchParams.get('role') || searchParams.get('type');
+  const validTypes = ['organization', 'individual', 'super-admin'];
+  const [userType, setUserType] = useState(() => {
+    const pendingRole = sessionStorage.getItem('trumarkz_login_role');
+    if (validTypes.includes(typeFromUrl)) return typeFromUrl;
+    if (validTypes.includes(pendingRole)) return pendingRole;
+    return 'organization';
+  });
 
   const [tab, setTab] = useState(location.pathname === '/signup' ? 'register' : 'login');
   const [email, setEmail] = useState('');
@@ -100,12 +105,16 @@ export const LoginRegister = () => {
   const [showForgotPassword, setShowForgotPassword] = useState(false);
 
   useEffect(() => {
-    const t = searchParams.get('type');
+    const t = searchParams.get('role') || searchParams.get('type');
     if (validTypes.includes(t) && t !== userType) setUserType(t);
     if (searchParams.get('error') === 'auth_failed') {
       setErrors({ form: 'Authentication failed. Please sign in again.' });
     }
   }, [searchParams]);
+
+  useEffect(() => {
+    if (userType === 'super-admin' && tab === 'register') setTab('login');
+  }, [userType, tab]);
 
   const validate = () => {
     const newErrors = {};
@@ -122,7 +131,7 @@ export const LoginRegister = () => {
     if (!validate() || submitting) return;
     setSubmitting(true);
     setErrors({});
-    const result = await login(email.trim(), password);
+    const result = await login(email.trim(), password, userType, rememberMe);
     setSubmitting(false);
 
     if (!result.success) {
@@ -144,12 +153,16 @@ export const LoginRegister = () => {
     try {
       const raw = localStorage.getItem(ROLE_CREDENTIALS_KEY);
       const saved = raw ? JSON.parse(raw) : {};
-      if (rememberMe) saved[result.userType || userType] = { email: email.trim() };
-      else delete saved[result.userType || userType];
+      if (rememberMe) saved[userType] = { email: email.trim() };
+      else delete saved[userType];
       localStorage.setItem(ROLE_CREDENTIALS_KEY, JSON.stringify(saved));
+      sessionStorage.removeItem('trumarkz_login_identifier');
+      sessionStorage.removeItem('trumarkz_login_role');
     } catch {}
 
-    if (result.requiresOnboarding) {
+    if (result.userType === 'super-admin') {
+      navigate('/admin/dashboard');
+    } else if (result.requiresOnboarding) {
       navigate('/onboarding');
     } else if (result.userType === 'individual' || userType === 'individual') {
       navigate('/individual/dashboard');
@@ -159,6 +172,7 @@ export const LoginRegister = () => {
   };
 
   const handleGoogleLogin = async () => {
+    if (userType === 'super-admin') return;
     if (googleLoading) return;
     setGoogleLoading(true);
     setErrors({});
@@ -176,8 +190,9 @@ export const LoginRegister = () => {
   };
 
   const roleDescriptions = {
-    organization: 'Sign in to manage verifications and credentials.',
-    individual: 'Sign in to your verified Skill Tree profile.',
+    organization: 'Verify workers & products. Issue credentials.',
+    individual: 'Build your verified Skill Tree resume.',
+    'super-admin': 'Full platform control and monitoring.',
   };
 
   const registerRoutes = {
@@ -188,6 +203,7 @@ export const LoginRegister = () => {
   const types = [
     { id: 'organization', label: 'Organization', icon: Building2 },
     { id: 'individual', label: 'Individual', icon: User },
+    { id: 'super-admin', label: 'Super Admin', icon: Users },
   ];
 
   return (
@@ -238,18 +254,18 @@ export const LoginRegister = () => {
             </p>
 
             {/* User type selector — 2 options only */}
-            <div className="grid grid-cols-2 gap-2 mb-5 p-1 bg-gray-200 rounded-xl">
+            <div className="grid grid-cols-3 gap-2 mb-5 p-1 bg-gray-200 rounded-xl">
               {types.map(t => (
                 <button
                   key={t.id}
                   type="button"
-                  onClick={() => { setUserType(t.id); setErrors({}); }}
-                  className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg text-sm font-medium font-inter transition-all min-h-[46px] ${
+                  onClick={() => { setUserType(t.id); setErrors({}); if (t.id === 'super-admin') setTab('login'); }}
+                  className={`flex items-center justify-center gap-2 py-2.5 px-2 rounded-lg text-sm font-medium font-inter transition-all min-h-[46px] ${
                     userType === t.id ? 'bg-white text-brand-dark shadow-sm' : 'text-gray-500 hover:text-gray-700'
                   }`}
                 >
                   <t.icon size={16} className="shrink-0" />
-                  <span>{t.label}</span>
+                  <span className="text-xs sm:text-sm leading-tight text-center whitespace-nowrap">{t.label}</span>
                 </button>
               ))}
             </div>
@@ -260,9 +276,11 @@ export const LoginRegister = () => {
               <button onClick={() => setTab('login')} className={`pb-3 text-sm font-medium font-inter border-b-2 transition-colors ${tab === 'login' ? 'border-brand-blue text-brand-blue' : 'border-transparent text-gray-400 hover:text-gray-600'}`}>
                 Sign In
               </button>
-              <button onClick={() => setTab('register')} className={`pb-3 text-sm font-medium font-inter border-b-2 transition-colors ${tab === 'register' ? 'border-brand-blue text-brand-blue' : 'border-transparent text-gray-400 hover:text-gray-600'}`}>
-                Register
-              </button>
+              {userType !== 'super-admin' && (
+                <button onClick={() => setTab('register')} className={`pb-3 text-sm font-medium font-inter border-b-2 transition-colors ${tab === 'register' ? 'border-brand-blue text-brand-blue' : 'border-transparent text-gray-400 hover:text-gray-600'}`}>
+                  Register
+                </button>
+              )}
             </div>
 
             <AnimatePresence mode="wait">
@@ -295,40 +313,48 @@ export const LoginRegister = () => {
                     </Button>
                   </form>
 
-                  {/* Divider */}
-                  <div className="relative">
-                    <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-gray-200" /></div>
-                    <div className="relative flex justify-center"><span className="bg-brand-bg px-3 text-xs text-gray-400 font-inter">or continue with</span></div>
-                  </div>
+                  {userType !== 'super-admin' && (
+                    <>
+                      {/* Divider */}
+                      <div className="relative">
+                        <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-gray-200" /></div>
+                        <div className="relative flex justify-center"><span className="bg-brand-bg px-3 text-xs text-gray-400 font-inter">or continue with</span></div>
+                      </div>
 
-                  {/* Google Login */}
-                  <button
-                    type="button"
-                    onClick={handleGoogleLogin}
-                    disabled={googleLoading}
-                    className="w-full flex items-center justify-center gap-3 py-3 px-4 rounded-xl border-2 border-gray-200 hover:border-brand-blue/40 hover:bg-gray-50 text-brand-dark font-inter text-sm font-medium transition-all disabled:opacity-60"
-                  >
-                    <GoogleIcon />
-                    {googleLoading ? 'Redirecting...' : 'Continue with Google'}
-                  </button>
+                      {/* Google Login */}
+                      <button
+                        type="button"
+                        onClick={handleGoogleLogin}
+                        disabled={googleLoading}
+                        className="w-full flex items-center justify-center gap-3 py-3 px-4 rounded-xl border-2 border-gray-200 hover:border-brand-blue/40 hover:bg-gray-50 text-brand-dark font-inter text-sm font-medium transition-all disabled:opacity-60"
+                      >
+                        <GoogleIcon />
+                        {googleLoading ? 'Redirecting...' : 'Continue with Google'}
+                      </button>
 
-                  <p className="text-center text-sm text-gray-500 font-inter">
-                    {userType === 'individual' ? 'New here? ' : 'New Organization? '}
-                    <button type="button" onClick={() => setTab('register')} className="text-brand-blue font-medium hover:underline">
-                      {userType === 'individual' ? 'Register as Individual' : 'Register Organization'}
-                    </button>
-                  </p>
+                      <p className="text-center text-sm text-gray-500 font-inter">
+                        {userType === 'individual' ? 'New here? ' : 'New Organization? '}
+                        <button type="button" onClick={() => setTab('register')} className="text-brand-blue font-medium hover:underline">
+                          {userType === 'individual' ? 'Register as Individual' : 'Register Organization'}
+                        </button>
+                      </p>
+                    </>
+                  )}
                 </motion.div>
               ) : (
                 <motion.div key={`register-${userType}`} initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }} className="space-y-4">
                   <p className="text-sm text-gray-500 font-inter mb-4">
-                    {userType === 'organization'
+                    {userType === 'super-admin'
+                      ? 'Super Admin accounts are provisioned by the platform. Please contact support if you need access.'
+                      : userType === 'organization'
                       ? 'Register your organization to start verifying identities and issuing digital credentials.'
                       : 'Create an individual account to build your verified Skill Tree profile and showcase your credentials.'}
                   </p>
-                  <Button variant="primary" size="lg" className="w-full" onClick={() => navigate(registerRoutes[userType])}>
-                    {userType === 'organization' ? 'Register Organization' : 'Register as Individual'} <ArrowRight size={18} />
-                  </Button>
+                  {userType !== 'super-admin' && (
+                    <Button variant="primary" size="lg" className="w-full" onClick={() => navigate(registerRoutes[userType])}>
+                      {userType === 'organization' ? 'Register Organization' : 'Register as Individual'} <ArrowRight size={18} />
+                    </Button>
+                  )}
 
                   {/* Divider */}
                   <div className="relative">
@@ -336,15 +362,17 @@ export const LoginRegister = () => {
                     <div className="relative flex justify-center"><span className="bg-brand-bg px-3 text-xs text-gray-400 font-inter">or sign up with</span></div>
                   </div>
 
-                  <button
-                    type="button"
-                    onClick={handleGoogleLogin}
-                    disabled={googleLoading}
-                    className="w-full flex items-center justify-center gap-3 py-3 px-4 rounded-xl border-2 border-gray-200 hover:border-brand-blue/40 hover:bg-gray-50 text-brand-dark font-inter text-sm font-medium transition-all disabled:opacity-60"
-                  >
-                    <GoogleIcon />
-                    {googleLoading ? 'Redirecting...' : 'Continue with Google'}
-                  </button>
+                  {userType !== 'super-admin' && (
+                    <button
+                      type="button"
+                      onClick={handleGoogleLogin}
+                      disabled={googleLoading}
+                      className="w-full flex items-center justify-center gap-3 py-3 px-4 rounded-xl border-2 border-gray-200 hover:border-brand-blue/40 hover:bg-gray-50 text-brand-dark font-inter text-sm font-medium transition-all disabled:opacity-60"
+                    >
+                      <GoogleIcon />
+                      {googleLoading ? 'Redirecting...' : 'Continue with Google'}
+                    </button>
+                  )}
 
                   <p className="text-center text-sm text-gray-500 font-inter">
                     Already have an account?{' '}

@@ -3,6 +3,16 @@ import { authAPI, tokenHelpers } from '@/services/api';
 
 const AuthContext = createContext(null);
 
+const ROLE_MAP = {
+  organization: 'organization',
+  individual: 'individual',
+  'super-admin': 'super_admin',
+};
+
+const SUPER_ADMIN_EMAIL = import.meta.env.VITE_SUPER_ADMIN_EMAIL || 'superadmin@trumarkz.com';
+const SUPER_ADMIN_PASSWORD = import.meta.env.VITE_SUPER_ADMIN_PASSWORD || 'Admin@123';
+const SUPER_ADMIN_TOKEN = 'trumarkz_super_admin_session';
+
 const getErrorMessage = (err, fallback) => {
   const detail = err.response?.data?.detail;
   if (typeof detail === 'string') return detail;
@@ -15,11 +25,34 @@ const getErrorMessage = (err, fallback) => {
   return err.response?.data?.message || fallback;
 };
 
-const normalizeUserType = (value, fallback = 'organization') =>
-  value === 'individual' ? 'individual' : value === 'organization' ? 'organization' : fallback;
+const normalizeUserType = (value, fallback = 'organization') => {
+  const normalized = String(value || '').trim().toLowerCase().replace(/_/g, '-');
+  if (normalized === 'individual') return 'individual';
+  if (normalized === 'organization') return 'organization';
+  if (normalized === 'super-admin' || normalized === 'superadmin') return 'super-admin';
+  return fallback;
+};
+
+const getRoleFromLoginType = (value, fallback = 'organization') => {
+  const apiRole = String(value || '').trim().toLowerCase();
+  return Object.entries(ROLE_MAP).find(([, mapped]) => mapped === apiRole)?.[0] || normalizeUserType(value, fallback);
+};
 
 const getPendingGoogleUserType = () =>
   normalizeUserType(sessionStorage.getItem('trumarkz_google_user_type'), 'organization');
+
+const buildSuperAdminUser = (email = SUPER_ADMIN_EMAIL) => ({
+  id: 'super-admin',
+  name: 'Super Admin',
+  email,
+  phoneNumber: '',
+  organization: 'TruMarkZ',
+  userType: 'super-admin',
+  role: 'super-admin',
+  onboardingCompleted: true,
+  emailVerified: true,
+  isActive: true,
+});
 
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
@@ -27,14 +60,16 @@ export const AuthProvider = ({ children }) => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [loading, setLoading] = useState(true);
 
-  const buildUser = useCallback((data) => {
+  const buildUser = useCallback((data, fallbackUserType = 'organization') => {
+    const userType = getRoleFromLoginType(data.login_type || data.user_type, fallbackUserType);
     return {
       id: data.id,
       name: data.full_name || data.organization_name || '',
       email: data.email || '',
       phoneNumber: data.phone_number || '',
       organization: data.organization_name || '',
-      userType: data.user_type,
+      userType,
+      role: userType,
       onboardingCompleted: data.onboarding_completed,
       emailVerified: data.email_verified,
       isActive: data.is_active,
@@ -45,11 +80,12 @@ export const AuthProvider = ({ children }) => {
     };
   }, []);
 
-  const persistAuthData = useCallback((data = {}) => {
+  const persistAuthData = useCallback((data = {}, fallbackUserType = '') => {
+    const userType = getRoleFromLoginType(data.login_type || data.user_type, fallbackUserType);
     tokenHelpers.saveAuthData({
       access_token: data.access_token,
       user_id: data.user_id || data.id,
-      user_type: data.user_type,
+      user_type: userType || data.user_type,
       email: data.email,
     });
   }, []);
@@ -58,11 +94,19 @@ export const AuthProvider = ({ children }) => {
     const restoreSession = async () => {
       const token = tokenHelpers.get();
       if (!token) { setLoading(false); return; }
+      if (token === SUPER_ADMIN_TOKEN || localStorage.getItem('user_type') === 'super-admin') {
+        const builtUser = buildSuperAdminUser(localStorage.getItem('email') || SUPER_ADMIN_EMAIL);
+        setUser(builtUser);
+        setRole('super-admin');
+        setIsAuthenticated(true);
+        setLoading(false);
+        return;
+      }
       try {
         const { data } = await authAPI.getCurrentUser();
         const builtUser = buildUser(data);
         setUser(builtUser);
-        setRole(data.user_type === 'individual' ? 'individual' : 'organization');
+        setRole(builtUser.userType);
         setIsAuthenticated(true);
       } catch {
         tokenHelpers.remove();
@@ -74,24 +118,43 @@ export const AuthProvider = ({ children }) => {
   }, [buildUser]);
 
   // ── Login ──────────────────────────────────────────────────────────────────
-  const login = useCallback(async (email, password) => {
+  const login = useCallback(async (email, password, selectedRole = 'organization', rememberMe = false) => {
     try {
       tokenHelpers.remove();
+      if (selectedRole === 'super-admin') {
+        const normalizedEmail = email.trim().toLowerCase();
+        if (normalizedEmail !== SUPER_ADMIN_EMAIL.toLowerCase() || password !== SUPER_ADMIN_PASSWORD) {
+          return { success: false, error: 'Invalid Super Admin credentials.' };
+        }
+
+        const builtUser = buildSuperAdminUser(email.trim());
+        tokenHelpers.saveAuthData({
+          access_token: SUPER_ADMIN_TOKEN,
+          user_id: builtUser.id,
+          user_type: builtUser.userType,
+          email: builtUser.email,
+        });
+        setUser(builtUser);
+        setRole('super-admin');
+        setIsAuthenticated(true);
+        return { success: true, userType: 'super-admin', requiresOnboarding: false };
+      }
+
       const { data } = await authAPI.login(email.trim(), password);
-      const accessToken = data.access_token;
+      const accessToken = data.access_token || data.token || data.data?.access_token || data.data?.token;
       if (!accessToken) return { success: false, error: 'Login response did not include an access token.' };
-      persistAuthData(data);
+      persistAuthData({ ...data, access_token: accessToken }, selectedRole);
 
       const { data: profile } = await authAPI.getCurrentUser();
-      const builtUser = buildUser(profile);
+      const builtUser = buildUser(profile, getRoleFromLoginType(data.login_type || data.user_type, selectedRole));
       setUser(builtUser);
-      setRole(profile.user_type === 'individual' ? 'individual' : 'organization');
+      setRole(builtUser.userType);
       setIsAuthenticated(true);
 
       return {
         success: true,
-        userType: data.user_type,
-        requiresOnboarding: data.requires_onboarding,
+        userType: builtUser.userType,
+        requiresOnboarding: builtUser.userType === 'organization' && data.requires_onboarding,
       };
     } catch (err) {
       const raw = getErrorMessage(err, 'Login failed. Please check your credentials and try again.');
@@ -100,6 +163,9 @@ export const AuthProvider = ({ children }) => {
 
       if (status === 403 && (lower.includes('not verified') || lower.includes('verify'))) {
         return { success: false, requiresVerification: true, error: 'Your email is not verified yet. Please enter the OTP sent to your email.' };
+      }
+      if (lower.includes('invalid login type')) {
+        return { success: false, error: `This account is not registered as "${selectedRole}". Please select the correct role and try again.` };
       }
       return { success: false, error: raw };
     }
@@ -193,16 +259,16 @@ export const AuthProvider = ({ children }) => {
 
       try {
         const { data: profile } = await authAPI.getCurrentUser();
-        builtUser = buildUser(profile);
+        builtUser = buildUser(profile, normalizeUserType(data.user_type, pendingUserType));
       } catch {
         // The Google endpoint already returns enough session data to route the user.
       }
 
-      const userType = normalizeUserType(data.user_type, pendingUserType);
-      setUser({ ...builtUser, userType: builtUser.userType || userType });
+      const userType = normalizeUserType(builtUser.userType || data.user_type, pendingUserType);
+      setUser({ ...builtUser, userType: builtUser.userType || userType, role: builtUser.role || userType });
       setRole(userType);
       setIsAuthenticated(true);
-      return { success: true, userType, requiresOnboarding: data.requires_onboarding };
+      return { success: true, userType, requiresOnboarding: userType === 'organization' && data.requires_onboarding };
     } catch (err) {
       return { success: false, error: getErrorMessage(err, 'Google authentication failed.') };
     }
@@ -215,9 +281,10 @@ export const AuthProvider = ({ children }) => {
       const { data } = await authAPI.googleAuthMobile(token, normalizedUserType);
       if (!data.access_token) return { success: false, error: 'Google auth response did not include an access token.' };
       persistAuthData(data);
-      setRole(normalizeUserType(data.user_type, normalizedUserType));
+      const userType = normalizeUserType(data.user_type, normalizedUserType);
+      setRole(userType);
       setIsAuthenticated(true);
-      return { success: true, userType: data.user_type, requiresOnboarding: data.requires_onboarding };
+      return { success: true, userType, requiresOnboarding: userType === 'organization' && data.requires_onboarding };
     } catch (err) {
       return { success: false, error: getErrorMessage(err, 'Google authentication failed.') };
     }
@@ -229,9 +296,10 @@ export const AuthProvider = ({ children }) => {
       const { data } = await authAPI.completeGoogleSignup(normalizedUserType);
       if (!data.access_token) return { success: false, error: 'Signup response did not include an access token.' };
       persistAuthData(data);
-      setRole(normalizeUserType(data.user_type, normalizedUserType));
+      const userType = normalizeUserType(data.user_type, normalizedUserType);
+      setRole(userType);
       setIsAuthenticated(true);
-      return { success: true, userType: data.user_type, requiresOnboarding: data.requires_onboarding };
+      return { success: true, userType, requiresOnboarding: userType === 'organization' && data.requires_onboarding };
     } catch (err) {
       return { success: false, error: getErrorMessage(err, 'Failed to complete Google signup.') };
     }
@@ -257,7 +325,7 @@ export const AuthProvider = ({ children }) => {
 
       try {
         const { data: profile } = await authAPI.getCurrentUser();
-        builtUser = buildUser(profile);
+        builtUser = buildUser(profile, userType);
         userType = normalizeUserType(profile.user_type, userType);
         requiresOnboarding = userType === 'organization' && !profile.onboarding_completed;
       } catch {
@@ -265,8 +333,8 @@ export const AuthProvider = ({ children }) => {
         // active even if the profile refresh is temporarily unavailable.
       }
 
-      setUser({ ...builtUser, userType: builtUser.userType || userType });
-      setRole(userType === 'individual' ? 'individual' : 'organization');
+      setUser({ ...builtUser, userType: builtUser.userType || userType, role: builtUser.role || userType });
+      setRole(userType);
       setIsAuthenticated(true);
 
       return {
