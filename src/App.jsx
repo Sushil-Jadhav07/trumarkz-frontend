@@ -1,8 +1,31 @@
 import React from 'react';
 import { Navigate, Routes, Route, useLocation } from 'react-router-dom';
-import { AnimatePresence } from 'framer-motion';
+import { AnimatePresence, motion } from 'framer-motion';
 import { Toaster } from 'react-hot-toast';
 import { AuthProvider, useAuth } from '@/context/AuthContext';
+import { Logo } from '@/components/ui/Logo';
+import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
+
+const AuthLoadingScreen = () => (
+  <motion.div
+    initial={{ opacity: 0 }}
+    animate={{ opacity: 1 }}
+    exit={{ opacity: 0 }}
+    transition={{ duration: 0.25 }}
+    className="fixed inset-0 bg-brand-bg flex items-center justify-center"
+  >
+    <motion.div
+      initial={{ opacity: 0, y: 12, scale: 0.96 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      transition={{ type: 'spring', stiffness: 300, damping: 28, delay: 0.08 }}
+      className="flex flex-col items-center gap-5"
+    >
+      <Logo size="lg" />
+      <LoadingSpinner size="md" />
+      <p className="text-sm text-gray-400 font-inter tracking-wide">Loading your workspace…</p>
+    </motion.div>
+  </motion.div>
+);
 import { AppProvider } from '@/context/AppContext';
 import LoginRegister from '@/pages/public/LoginRegister';
 import ForgotPassword from '@/pages/public/ForgotPassword';
@@ -64,7 +87,7 @@ const ProtectedRoute = ({ children }) => {
   const { isAuthenticated, loading } = useAuth();
   const location = useLocation();
 
-  if (loading) return <div className="min-h-screen bg-brand-bg" />;
+  if (loading) return <AuthLoadingScreen />;
 
   if (!isAuthenticated) {
     return <Navigate to="/login" replace state={{ from: location.pathname }} />;
@@ -76,7 +99,7 @@ const ProtectedRoute = ({ children }) => {
 const AdminRoute = ({ children }) => {
   const { role, loading } = useAuth();
 
-  if (loading) return <div className="min-h-screen bg-brand-bg" />;
+  if (loading) return <AuthLoadingScreen />;
 
   if (role !== 'super-admin') {
     return <Navigate to="/dashboard" replace />;

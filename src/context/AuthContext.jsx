@@ -10,8 +10,6 @@ const ROLE_MAP = {
 };
 
 const SUPER_ADMIN_EMAIL = import.meta.env.VITE_SUPER_ADMIN_EMAIL || 'superadmin@trumarkz.com';
-const SUPER_ADMIN_PASSWORD = import.meta.env.VITE_SUPER_ADMIN_PASSWORD || 'Admin@123';
-const SUPER_ADMIN_TOKEN = 'trumarkz_super_admin_session';
 
 const getErrorMessage = (err, fallback) => {
   const detail = err.response?.data?.detail;
@@ -94,14 +92,6 @@ export const AuthProvider = ({ children }) => {
     const restoreSession = async () => {
       const token = tokenHelpers.get();
       if (!token) { setLoading(false); return; }
-      if (token === SUPER_ADMIN_TOKEN || localStorage.getItem('user_type') === 'super-admin') {
-        const builtUser = buildSuperAdminUser(localStorage.getItem('email') || SUPER_ADMIN_EMAIL);
-        setUser(builtUser);
-        setRole('super-admin');
-        setIsAuthenticated(true);
-        setLoading(false);
-        return;
-      }
       try {
         const { data } = await authAPI.getCurrentUser();
         const builtUser = buildUser(data);
@@ -118,35 +108,43 @@ export const AuthProvider = ({ children }) => {
   }, [buildUser]);
 
   // ── Login ──────────────────────────────────────────────────────────────────
-  const login = useCallback(async (email, password, selectedRole = 'organization', rememberMe = false) => {
+  const login = useCallback(async (email, password, selectedRole = 'organization') => {
     try {
       tokenHelpers.remove();
-      if (selectedRole === 'super-admin') {
-        const normalizedEmail = email.trim().toLowerCase();
-        if (normalizedEmail !== SUPER_ADMIN_EMAIL.toLowerCase() || password !== SUPER_ADMIN_PASSWORD) {
-          return { success: false, error: 'Invalid Super Admin credentials.' };
-        }
 
-        const builtUser = buildSuperAdminUser(email.trim());
-        tokenHelpers.saveAuthData({
-          access_token: SUPER_ADMIN_TOKEN,
-          user_id: builtUser.id,
-          user_type: builtUser.userType,
-          email: builtUser.email,
-        });
-        setUser(builtUser);
-        setRole('super-admin');
-        setIsAuthenticated(true);
-        return { success: true, userType: 'super-admin', requiresOnboarding: false };
+      // API accepts only { email, password } — user_type comes back in the response
+      const { data } = await authAPI.login(email.trim(), password);
+      const accessToken = data.access_token || data.token;
+      if (!accessToken) return { success: false, error: 'Login response did not include an access token.' };
+
+      const returnedType = normalizeUserType(data.user_type, selectedRole);
+
+      // Validate the returned role matches what the user selected
+      if (selectedRole === 'super-admin' && returnedType !== 'super-admin') {
+        return { success: false, error: 'This account does not have Super Admin access.' };
+      }
+      if (selectedRole !== 'super-admin' && returnedType === 'super-admin') {
+        return { success: false, error: 'Please select the "Super Admin" role to sign in with this account.' };
+      }
+      if (returnedType !== selectedRole) {
+        return { success: false, error: `This account is registered as "${returnedType}". Please select the correct role and try again.` };
       }
 
-      const { data } = await authAPI.login(email.trim(), password);
-      const accessToken = data.access_token || data.token || data.data?.access_token || data.data?.token;
-      if (!accessToken) return { success: false, error: 'Login response did not include an access token.' };
-      persistAuthData({ ...data, access_token: accessToken }, selectedRole);
+      persistAuthData({ ...data, access_token: accessToken }, returnedType);
 
-      const { data: profile } = await authAPI.getCurrentUser();
-      const builtUser = buildUser(profile, getRoleFromLoginType(data.login_type || data.user_type, selectedRole));
+      let builtUser;
+      try {
+        const { data: profile } = await authAPI.getCurrentUser();
+        builtUser = buildUser(profile, returnedType);
+      } catch {
+        // Fallback for super-admin if /me is temporarily unavailable
+        if (returnedType === 'super-admin') {
+          builtUser = buildSuperAdminUser(email.trim());
+        } else {
+          throw new Error('Failed to load user profile.');
+        }
+      }
+
       setUser(builtUser);
       setRole(builtUser.userType);
       setIsAuthenticated(true);
@@ -163,9 +161,6 @@ export const AuthProvider = ({ children }) => {
 
       if (status === 403 && (lower.includes('not verified') || lower.includes('verify'))) {
         return { success: false, requiresVerification: true, error: 'Your email is not verified yet. Please enter the OTP sent to your email.' };
-      }
-      if (lower.includes('invalid login type')) {
-        return { success: false, error: `This account is not registered as "${selectedRole}". Please select the correct role and try again.` };
       }
       return { success: false, error: raw };
     }
