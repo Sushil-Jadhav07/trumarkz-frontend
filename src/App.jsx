@@ -82,6 +82,7 @@ import Verifiers from '@/pages/admin/Verifiers';
 import PricingConfig from '@/pages/admin/PricingConfig';
 import Disputes from '@/pages/admin/Disputes';
 import PlatformHealth from '@/pages/admin/PlatformHealth';
+import SDCVerification from '@/pages/admin/SDCVerification';
 
 const ProtectedRoute = ({ children }) => {
   const { isAuthenticated, loading } = useAuth();
@@ -201,6 +202,7 @@ const AnimatedRoutes = () => {
           <Route path="/admin/org-approvals" element={<ProtectedRoute><AdminRoute><OrgApprovals /></AdminRoute></ProtectedRoute>} />
           <Route path="/admin/batch-monitor" element={<ProtectedRoute><AdminRoute><BatchMonitor /></AdminRoute></ProtectedRoute>} />
           <Route path="/admin/verifiers" element={<ProtectedRoute><AdminRoute><Verifiers /></AdminRoute></ProtectedRoute>} />
+          <Route path="/admin/sdc-verification" element={<ProtectedRoute><AdminRoute><SDCVerification /></AdminRoute></ProtectedRoute>} />
           <Route path="/admin/pricing" element={<ProtectedRoute><AdminRoute><PricingConfig /></AdminRoute></ProtectedRoute>} />
           <Route path="/admin/disputes" element={<ProtectedRoute><AdminRoute><Disputes /></AdminRoute></ProtectedRoute>} />
           <Route path="/admin/platform-health" element={<ProtectedRoute><AdminRoute><PlatformHealth /></AdminRoute></ProtectedRoute>} />

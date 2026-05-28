@@ -11,7 +11,7 @@ import { Modal } from '@/components/ui/Modal';
 import { verificationAPI, getApiError } from '@/services/api';
 import {
   RefreshCw, Eye, CheckCircle, Clock, XCircle, Filter,
-  ChevronLeft, ChevronRight, Package, User, Download, QrCode, IdCard, FileText,
+  ChevronLeft, ChevronRight, Package, User, QrCode,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -38,28 +38,19 @@ const statusBadge = (status) => {
   return                            { variant: 'pending', label: 'Pending',   icon: Clock };
 };
 
-// Batch-level status meta — matches the admin BatchMonitor labels
+// Batch-level status meta
 const batchStatusMeta = {
-  pending:              { label: 'Pending Review',        badge: 'warning', tone: 'bg-orange-50 text-orange-700 border-orange-100' },
-  send_to_verifier:     { label: 'Sent to Verifier',      badge: 'info',    tone: 'bg-blue-50 text-brand-blue border-blue-100' },
-  verified:             { label: 'Verified',              badge: 'success', tone: 'bg-green-50 text-green-700 border-green-100' },
-  send_to_organization: { label: 'Shared with Your Org',  badge: 'success', tone: 'bg-emerald-50 text-emerald-700 border-emerald-100' },
+  pending_verification: { label: 'Pending',  badge: 'warning', tone: 'bg-orange-50 text-orange-700 border-orange-100' },
+  verified:             { label: 'Verified', badge: 'success', tone: 'bg-green-50 text-green-700 border-green-100' },
+  failed:               { label: 'Failed',   badge: 'error',   tone: 'bg-red-50 text-red-700 border-red-100' },
 };
 
 const BATCH_STATUS_OPTIONS = [
-  { value: '',                     label: 'All' },
-  { value: 'pending',              label: 'Pending' },
-  { value: 'send_to_verifier',     label: 'With Verifier' },
-  { value: 'verified',             label: 'Verified' },
-  { value: 'send_to_organization', label: 'Shared' },
+  { value: '', label: 'All' },
+  { value: 'pending_verification', label: 'Pending' },
+  { value: 'verified', label: 'Verified' },
+  { value: 'failed', label: 'Failed' },
 ];
-
-// Read-only batch workflow key (same key as admin, so org sees same state)
-const BATCH_WORKFLOW_KEY = 'trumarkz_admin_batch_workflow_mock';
-const getStoredWorkflow = () => {
-  try { return JSON.parse(localStorage.getItem(BATCH_WORKFLOW_KEY) || '{}'); }
-  catch { return {}; }
-};
 
 const groupByBatch = (records) => {
   const batches = records.reduce((acc, record) => {
@@ -92,34 +83,29 @@ const formatDate = (value) => {
 const PAGE_SIZE = 10;
 
 // ── Batch Detail Modal (org view — read-only + download assets) ───────────────
-const BatchDetailModal = ({ batch, onClose }) => {
+const BatchDetailModal = ({ batch, onClose, onRefresh }) => {
   if (!batch) return null;
-  const canDownload = batch.status === 'verified' || batch.status === 'send_to_organization';
-
-  const handleDownloadAsset = (record, type) => {
-    const asset = batch.assets?.find((a) => a.recordId === record.id);
-    const url = type === 'id-card' ? asset?.idCardUrl : asset?.qrCodeUrl;
-    if (url && !url.startsWith('/mock-')) { window.open(url, '_blank'); return; }
-    const content = `Mock ${type}\nBatch: ${batch.name}\nRecord: ${getRecordTitle(record)} (${record.id})\nGenerated: ${new Date().toLocaleString()}`;
-    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
-    const anchor = document.createElement('a');
-    anchor.href = URL.createObjectURL(blob);
-    anchor.download = `${getRecordTitle(record).replace(/\s+/g, '-')}-${type}.txt`;
-    anchor.click();
-    URL.revokeObjectURL(anchor.href);
+  const handleGenerateQR = async (userId) => {
+    try {
+      const { data } = await verificationAPI.generateQRAndCertificate(userId);
+      if (data?.pdf_url) window.open(data.pdf_url, '_blank');
+      else toast.success('QR generated successfully');
+    } catch (err) {
+      toast.error(getApiError(err, 'Failed to generate QR/certificate'));
+    }
   };
 
-  const handleDownloadReport = () => {
-    if (batch.verifiedReportUrl) { window.open(batch.verifiedReportUrl, '_blank'); return; }
-    toast('(Mock) Report download — admin must generate this first.', { icon: '📊' });
+  const handleUpdateStatus = async (userId, status) => {
+    try {
+      await verificationAPI.updateVerificationStatus(userId, status);
+      toast.success(`Marked as ${status}`);
+      await onRefresh?.();
+    } catch (err) {
+      toast.error(getApiError(err, 'Failed to update status'));
+    }
   };
 
-  const handleDownloadDocument = () => {
-    if (batch.verifiedDocumentUrl) { window.open(batch.verifiedDocumentUrl, '_blank'); return; }
-    toast('(Mock) Document download — admin must upload this first.', { icon: '📄' });
-  };
-
-  const meta = batchStatusMeta[batch.status] || batchStatusMeta.pending;
+  const meta = batchStatusMeta[batch.status] || batchStatusMeta.pending_verification;
 
   return (
     <Modal isOpen={!!batch} onClose={onClose} title={`${batch.name} — Details`} size="4xl">
@@ -147,21 +133,6 @@ const BatchDetailModal = ({ batch, onClose }) => {
           </div>
         </div>
 
-        {/* Downloads — only for verified / sent_to_org */}
-        {canDownload && (
-          <div className="rounded-2xl border border-gray-100 bg-white p-5">
-            <p className="font-sora font-semibold text-brand-dark mb-3">Downloads</p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              <Button variant="outline" size="sm" icon={Download} className="justify-start" onClick={handleDownloadDocument}>
-                Download Verified Document
-              </Button>
-              <Button variant="outline" size="sm" icon={FileText} className="justify-start" onClick={handleDownloadReport}>
-                Download Verified Report
-              </Button>
-            </div>
-          </div>
-        )}
-
         {/* Records table */}
         <div className="rounded-2xl border border-gray-100 bg-white overflow-hidden">
           <div className="px-5 py-4 border-b border-gray-100 bg-gray-50 flex items-center justify-between">
@@ -181,9 +152,7 @@ const BatchDetailModal = ({ batch, onClose }) => {
                 {batch.records.map((record) => {
                   const product = isProductRecord(record);
                   const Icon = product ? Package : User;
-                  const sb = canDownload
-                    ? { variant: 'success', label: 'Verified' }
-                    : statusBadge(record.verification_status);
+                  const sb = statusBadge(record.verification_status);
                   return (
                     <tr key={record.id} className="hover:bg-gray-50/60 transition-colors">
                       <td className="px-4 py-3">
@@ -199,14 +168,11 @@ const BatchDetailModal = ({ batch, onClose }) => {
                       </td>
                       <td className="px-4 py-3"><Badge status={sb.variant}>{sb.label}</Badge></td>
                       <td className="px-4 py-3">
-                        {canDownload ? (
-                          <div className="flex gap-1.5">
-                            <Button variant="ghost" size="sm" icon={IdCard} onClick={() => handleDownloadAsset(record, 'id-card')}>ID Card</Button>
-                            <Button variant="ghost" size="sm" icon={QrCode} onClick={() => handleDownloadAsset(record, 'qr-code')}>QR</Button>
-                          </div>
-                        ) : (
-                          <span className="text-xs text-gray-400 font-inter">Pending verification</span>
-                        )}
+                        <div className="flex gap-1.5 flex-wrap">
+                          <Button variant="ghost" size="sm" icon={QrCode} onClick={() => handleGenerateQR(record.id)}>Generate QR</Button>
+                          <Button variant="ghost" size="sm" onClick={() => handleUpdateStatus(record.id, 'verified')}>Verify</Button>
+                          <Button variant="ghost" size="sm" onClick={() => handleUpdateStatus(record.id, 'failed')}>Fail</Button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -228,16 +194,13 @@ export const BatchStatus = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [statusFilter, setStatusFilter] = useState('');
   const [page, setPage] = useState(0);
-  const [workflowByBatch] = useState(() => getStoredWorkflow());
   const [selectedBatch, setSelectedBatch] = useState(null);
 
   const fetchData = useCallback(async (showRefreshSpinner = false) => {
     if (showRefreshSpinner) setRefreshing(true);
     else setLoading(true);
     try {
-      const { data: result } = await verificationAPI.getAllVerifications({
-        limit: 500, offset: 0,
-      });
+      const { data: result } = await verificationAPI.getAllVerifications({ limit: 200, offset: 0 });
       setData(result);
     } catch (err) {
       toast.error(getApiError(err, 'Failed to fetch verifications'));
@@ -255,22 +218,14 @@ export const BatchStatus = () => {
     return () => clearInterval(timer);
   }, [fetchData]);
 
-  // Build batch list from raw records + merge stored workflow state
+  // Build batch list from raw records
   const allRecords = data?.users || [];
   const rawBatches = groupByBatch(allRecords).map((batch) => {
-    const stored = workflowByBatch[batch.id] || {};
-    const inferredStatus = batch.pending > 0 ? 'pending' : 'verified';
-    const status = stored.status || inferredStatus;
-    const batchComplete = status === 'verified' || status === 'send_to_organization';
+    const status = batch.pending > 0 ? 'pending_verification' : (batch.failed > 0 ? 'failed' : 'verified');
     return {
       ...batch,
-      pending: batchComplete ? 0 : batch.pending,
-      verified: batchComplete ? batch.total - batch.failed : batch.verified,
       status,
-      statusMeta: batchStatusMeta[status] || batchStatusMeta.pending,
-      assets: stored.assets || [],
-      verifiedDocumentUrl: stored.verifiedDocumentUrl || null,
-      verifiedReportUrl: stored.verifiedReportUrl || null,
+      statusMeta: batchStatusMeta[status] || batchStatusMeta.pending_verification,
     };
   });
 
@@ -451,7 +406,7 @@ export const BatchStatus = () => {
       </div>
 
       {/* Batch Detail Modal */}
-      <BatchDetailModal batch={selectedBatch} onClose={() => setSelectedBatch(null)} />
+      <BatchDetailModal batch={selectedBatch} onClose={() => setSelectedBatch(null)} onRefresh={fetchData} />
     </AuthLayout>
   );
 };

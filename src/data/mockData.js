@@ -198,3 +198,89 @@ export const mockSkillTree = {
     { id: 'SK2', skill: 'MS Excel', level: 'Expert', status: 'verified', credId: 'TM-SKL-2026-00042' }
   ]
 };
+
+export const SDC_DUMMY_BATCHES = [
+  {
+    batch_id: 'SDC-BATCH-ORG-001',
+    org_name: 'FastTrack Logistics Pvt Ltd',
+    entity_type: 'human',
+    industry: 'Transport & Logistics',
+    created_at: '2026-05-01T08:00:00Z',
+    records: [
+      { id: 'SDC-H-001', full_name: 'Ravi Kumar', email: 'ravi.kumar@example.com', phone_number: '+91 98001 00001', dob: '1992-04-01', aadhar_number: '1234-5678-9012', pan_number: 'ABCDE1234F', verification_status: 'verified', verified_at: '2026-05-05T10:00:00Z', photo_url: null, documents: [] },
+      { id: 'SDC-H-002', full_name: 'Meera Joshi', email: 'meera.joshi@example.com', phone_number: '+91 98001 00002', dob: '1990-07-15', aadhar_number: '2345-6789-0123', pan_number: 'BCDEF2345G', verification_status: 'verified', verified_at: '2026-05-05T10:05:00Z', photo_url: null, documents: [] },
+      { id: 'SDC-H-003', full_name: 'Kabir Verma', email: 'kabir.verma@example.com', phone_number: '+91 98001 00003', dob: '1988-12-20', aadhar_number: '3456-7890-1234', pan_number: 'CDEFG3456H', verification_status: 'pending_verification', verified_at: null, photo_url: null, documents: [] },
+      { id: 'SDC-H-004', full_name: 'Nisha Patel', email: 'nisha.patel@example.com', phone_number: '+91 98001 00004', dob: '1995-03-08', aadhar_number: '4567-8901-2345', pan_number: 'DEFGH4567I', verification_status: 'failed', verified_at: null, photo_url: null, documents: [], verification_reason: 'Document mismatch' },
+      { id: 'SDC-H-005', full_name: 'Arjun Mehta', email: 'arjun.mehta@example.com', phone_number: '+91 98001 00005', dob: '1993-09-11', aadhar_number: '5678-9012-3456', pan_number: 'EFGHI5678J', verification_status: 'pending_verification', verified_at: null, photo_url: null, documents: [] },
+    ],
+  },
+  {
+    batch_id: 'SDC-BATCH-ORG-002',
+    org_name: 'MediCare Hospitals',
+    entity_type: 'human',
+    industry: 'Healthcare',
+    created_at: '2026-05-03T09:30:00Z',
+    records: [
+      { id: 'SDC-H-006', full_name: 'Dr. Priya Nair', email: 'priya.nair@medicare.com', phone_number: '+91 98002 00001', verification_status: 'verified', verified_at: '2026-05-07T14:00:00Z', photo_url: null, documents: [] },
+      { id: 'SDC-H-007', full_name: 'Dr. Sameer Khan', email: 'sameer.khan@medicare.com', phone_number: '+91 98002 00002', verification_status: 'verified', verified_at: '2026-05-07T14:10:00Z', photo_url: null, documents: [] },
+      { id: 'SDC-H-008', full_name: 'Nurse Anika Rao', email: 'anika.rao@medicare.com', phone_number: '+91 98002 00003', verification_status: 'pending_verification', verified_at: null, photo_url: null, documents: [] },
+    ],
+  },
+  {
+    batch_id: 'SDC-BATCH-ORG-003',
+    org_name: 'EduNext Foundation',
+    entity_type: 'human',
+    industry: 'Education',
+    created_at: '2026-05-10T11:00:00Z',
+    records: [
+      { id: 'SDC-H-009', full_name: 'Rohan Gupta', email: 'rohan.gupta@edunext.com', phone_number: '+91 98003 00001', verification_status: 'pending_verification', verified_at: null, photo_url: null, documents: [] },
+      { id: 'SDC-H-010', full_name: 'Anjali Singh', email: 'anjali.singh@edunext.com', phone_number: '+91 98003 00002', verification_status: 'pending_verification', verified_at: null, photo_url: null, documents: [] },
+      { id: 'SDC-H-011', full_name: 'Dev Malhotra', email: 'dev.malhotra@edunext.com', phone_number: '+91 98003 00003', verification_status: 'failed', verified_at: null, photo_url: null, documents: [], verification_reason: 'Incomplete documents' },
+    ],
+  },
+  {
+    batch_id: 'SDC-BATCH-PROD-001',
+    org_name: 'TechGadgets India',
+    entity_type: 'product',
+    industry: 'Electronics & Appliances',
+    created_at: '2026-05-06T07:00:00Z',
+    records: [
+      { id: 'SDC-P-001', product_name: 'TruTag Smart Speaker X1', category_name: 'Electronics', custom_fields: { serial_number: 'SN-SPK-001', warranty_period: '1 year' }, verification_status: 'verified', verified_at: '2026-05-08T09:00:00Z' },
+      { id: 'SDC-P-002', product_name: 'TruTag Smart Speaker X2', category_name: 'Electronics', custom_fields: { serial_number: 'SN-SPK-002', warranty_period: '1 year' }, verification_status: 'verified', verified_at: '2026-05-08T09:05:00Z' },
+      { id: 'SDC-P-003', product_name: 'TruTag WiFi Router R100', category_name: 'Electronics', custom_fields: { serial_number: 'SN-RTR-001', warranty_period: '2 years' }, verification_status: 'pending_verification', verified_at: null },
+      { id: 'SDC-P-004', product_name: 'TruTag Smart Camera C50', category_name: 'Electronics', custom_fields: { serial_number: 'SN-CAM-001', warranty_period: '1 year' }, verification_status: 'pending_verification', verified_at: null },
+    ],
+  },
+  {
+    batch_id: 'SDC-BATCH-PROD-002',
+    org_name: 'LuxeGoods Mumbai',
+    entity_type: 'product',
+    industry: 'Luxury Products',
+    created_at: '2026-05-12T10:00:00Z',
+    records: [
+      { id: 'SDC-P-005', product_name: 'Heritage Gold Bracelet', category_name: 'Jewellery', custom_fields: { sku: 'HGB-001', material: '22K Gold' }, verification_status: 'verified', verified_at: '2026-05-14T15:00:00Z' },
+      { id: 'SDC-P-006', product_name: 'Artisan Silk Saree', category_name: 'Apparel', custom_fields: { sku: 'ASS-001', weave: 'Banarasi' }, verification_status: 'pending_verification', verified_at: null },
+    ],
+  },
+  {
+    batch_id: 'SDC-BATCH-IND-001',
+    org_name: 'Individual',
+    entity_type: 'individual',
+    industry: 'Freelance / Gig',
+    created_at: '2026-05-08T13:00:00Z',
+    records: [
+      { id: 'SDC-I-001', full_name: 'Vikram Desai', email: 'vikram.desai@gmail.com', phone_number: '+91 99100 00001', verification_status: 'verified', verified_at: '2026-05-10T09:30:00Z', photo_url: null, documents: [] },
+      { id: 'SDC-I-002', full_name: 'Sunita Rao', email: 'sunita.rao@gmail.com', phone_number: '+91 99100 00002', verification_status: 'pending_verification', verified_at: null, photo_url: null, documents: [] },
+    ],
+  },
+  {
+    batch_id: 'SDC-BATCH-IND-002',
+    org_name: 'Individual',
+    entity_type: 'individual',
+    industry: 'Technology',
+    created_at: '2026-05-15T08:00:00Z',
+    records: [
+      { id: 'SDC-I-003', full_name: 'Pooja Agarwal', email: 'pooja.ag@gmail.com', phone_number: '+91 99200 00001', verification_status: 'verified', verified_at: '2026-05-17T11:00:00Z', photo_url: null, documents: [] },
+    ],
+  },
+];

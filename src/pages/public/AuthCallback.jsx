@@ -67,9 +67,10 @@ export const AuthCallback = () => {
       sessionStorage.removeItem('trumarkz_google_user_type');
       window.history.replaceState(null, '', '/auth/callback');
 
-      if (result.userType === 'super-admin')  navigate('/admin/dashboard', { replace: true });
-      else if (result.requiresOnboarding)     navigate('/onboarding', { replace: true });
-      else                                    navigate('/dashboard', { replace: true });
+      if (result.userType === 'super-admin')     navigate('/admin/dashboard',      { replace: true });
+      else if (result.requiresOnboarding)        navigate('/org/onboarding',       { replace: true });
+      else if (result.userType === 'individual') navigate('/individual/dashboard', { replace: true });
+      else                                       navigate('/dashboard',             { replace: true });
     };
 
     finishAuth();

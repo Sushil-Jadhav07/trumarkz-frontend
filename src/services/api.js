@@ -137,9 +137,7 @@ export const authAPI = {
 };
 
 export const orgAPI = {
-  assignIndividual: (emailOrMobile) => api.post('/auth/org/assign-individual', { individual_email_or_mobile: emailOrMobile }),
-  inviteIndividual: (email, mobile) => api.post('/auth/org/invite-individual', { email: email || undefined, mobile: mobile || undefined }),
-  getAssignedIndividuals: () => api.get('/auth/org/individuals'),
+  // Intentionally empty: org assignment endpoints are not available in the current backend API.
 };
 
 export const verificationAPI = {
@@ -155,10 +153,6 @@ export const verificationAPI = {
 
   uploadSingleProduct: (data) => verificationApi.post('/verification/single/product', {
     category_id: data.category_id, product_name: data.product_name?.trim(), custom_fields: data.custom_fields || {},
-  }),
-
-  bulkUploadHumans: (payload) => verificationApi.post('/verification/bulk-upload', {
-    batch_name: payload.batch_name, description: payload.description || '', users: payload.users,
   }),
 
   bulkUpload: (file, batchName, description = '', onProgress) => {
@@ -207,8 +201,6 @@ export const verificationAPI = {
     if (filters.orgId) params.append('org_id', filters.orgId);
     if (filters.batchId) params.append('batch_id', filters.batchId);
     if (filters.status) params.append('status', filters.status);
-    if (filters.entityType) params.append('entity_type', filters.entityType);
-    if (filters.categoryId) params.append('category_id', filters.categoryId);
     if (filters.limit != null) params.append('limit', String(filters.limit));
     if (filters.offset != null) params.append('offset', String(filters.offset));
     const q = params.toString();
@@ -216,43 +208,14 @@ export const verificationAPI = {
   },
 
   getUserVerification: (userId) => verificationApi.get(`/verification/user/${userId}`),
-  updateVerificationStatus: (userId, status, reason = null) =>
-    verificationApi.patch(`/verification/user/${userId}/status`, { status, reason: reason || null }),
+  updateVerificationStatus: (userId, status, reason = null) => {
+    const payload = {};
+    if (status != null) payload.status = status;
+    if (reason != null && reason !== '') payload.reason = reason;
+    return verificationApi.patch(`/verification/user/${userId}/status`, payload);
+  },
   generateQRAndCertificate: (userId) =>
     verificationApi.post(`/verification/user/${userId}/generate-qr`),
-  updateBatchStatus: (batchId, status) =>
-    verificationApi.patch(`/verification/batch/${batchId}/status`, { status }),
-  sendVerifierEmail: (batchId, verifierEmail = null) =>
-    verificationApi.post(`/verification/batch/${batchId}/notify-verifier`, { verifier_email: verifierEmail || undefined }),
-  uploadBatchVerifiedDocument: (batchId, file, type = 'document', onProgress) => {
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('document_type', type);
-    return verificationApi.post(`/verification/batch/${batchId}/upload-verified-document`, formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-      onUploadProgress: onProgress ? (e) => onProgress(Math.round((e.loaded * 100) / (e.total || 1))) : undefined,
-    });
-  },
-  downloadBatchVerifiedDocument: (batchId) =>
-    verificationApi.get(`/verification/batch/${batchId}/download-verified-document`, { responseType: 'blob' }),
-  downloadBatchVerifiedReport: (batchId) =>
-    verificationApi.get(`/verification/batch/${batchId}/download-verified-report`, { responseType: 'blob' }),
-  generateBatchAssets: async (batchId, userIds = []) => {
-    try {
-      return await verificationApi.post(`/verification/batch/${batchId}/generate-assets`);
-    } catch (err) {
-      if ([404, 405, 501].includes(err?.response?.status)) {
-        const results = await Promise.allSettled(
-          userIds.map((uid) =>
-            verificationApi.post(`/verification/user/${uid}/generate-qr`).then((res) => ({ user_id: uid, ...res.data }))
-          )
-        );
-        const assets = results.filter((r) => r.status === 'fulfilled').map((r) => r.value);
-        return { data: { assets, total: assets.length } };
-      }
-      throw err;
-    }
-  },
 };
 
 export const healthCheck = () => api.get('/health');

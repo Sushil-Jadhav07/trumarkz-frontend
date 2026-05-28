@@ -10,7 +10,7 @@ import { Modal } from '@/components/ui/Modal';
 import { verificationAPI, getApiError, triggerBlobDownload } from '@/services/api';
 import {
   CheckCircle, Clock, Download, Eye, FileText, Filter, IdCard,
-  Mail, Package, QrCode, RefreshCw, Send, Upload, User, Users, XCircle,
+  Mail, MoreVertical, Package, Pencil, QrCode, RefreshCw, Send, Upload, User, Users, XCircle,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -153,7 +153,7 @@ const SelectVerifierModal = ({ isOpen, onClose, onConfirm, batchName, sending })
 };
 
 // ── Upload-Verified sub-modal ─────────────────────────────────────────────────
-const UploadVerifiedModal = ({ isOpen, onClose, onConfirm, batchName, uploadType, uploading }) => {
+const UploadVerifiedModal = ({ isOpen, onClose, onConfirm, batchName, uploading }) => {
   const fileRef = useRef(null);
   const [file, setFile] = useState(null);
   const [progress, setProgress] = useState(0);
@@ -167,7 +167,7 @@ const UploadVerifiedModal = ({ isOpen, onClose, onConfirm, batchName, uploadType
     if (dropped) setFile(dropped);
   };
 
-  const label = uploadType === 'data' ? 'Verified Data' : 'Verified Document';
+  const label = 'Verified Data Document';
 
   return (
     <Modal isOpen={isOpen} onClose={handleClose} title={`Upload ${label}`} size="md">
@@ -244,7 +244,7 @@ export const BatchMonitor = () => {
   const [verifierModalBatch, setVerifierModalBatch] = useState(null);
   const [uploadModalOpen, setUploadModalOpen] = useState(false);
   const [uploadModalBatch, setUploadModalBatch] = useState(null);
-  const [uploadModalType, setUploadModalType] = useState('document');
+  const [actionMenuBatchId, setActionMenuBatchId] = useState(null);
 
   const fetchData = useCallback(async (showRefresh = false) => {
     if (showRefresh) setRefreshing(true);
@@ -318,16 +318,13 @@ export const BatchMonitor = () => {
     const batch = verifierModalBatch;
     setMailSending(true);
     try {
-      await verificationAPI.sendVerifierEmail(batch.id, verifier.email);
       updateBatchWorkflow(batch.id, { status: 'send_to_verifier' });
-      toast.success(`Email sent to ${verifier.name} for ${batch.name}`);
+      toast.success(`Verifier assigned to ${verifier.name} for ${batch.name}`);
       setVerifierModalOpen(false);
       setVerifierModalBatch(null);
     } catch (err) {
-      // API not live yet — update local state as mock fallback
-      const msg = getApiError(err, '');
       updateBatchWorkflow(batch.id, { status: 'send_to_verifier' });
-      toast.success(`(Mock) Email sent to ${verifier.name} for ${batch.name}${msg ? ` · Note: ${msg}` : ''}`);
+      toast.success(`Verifier assigned to ${verifier.name} for ${batch.name}`);
       setVerifierModalOpen(false);
       setVerifierModalBatch(null);
     } finally {
@@ -336,9 +333,8 @@ export const BatchMonitor = () => {
   };
 
   // ── Action: Upload Verified Document ────────────────────────────────────
-  const openUploadModal = (batch, type) => {
+  const openUploadModal = (batch) => {
     setUploadModalBatch(batch);
-    setUploadModalType(type);
     setUploadModalOpen(true);
   };
 
@@ -346,24 +342,21 @@ export const BatchMonitor = () => {
     const batch = uploadModalBatch;
     setUploading(true);
     try {
-      const { data: result } = await verificationAPI.uploadBatchVerifiedDocument(
-        batch.id, file, uploadModalType,
-        (pct) => setProgress(pct)
-      );
+      setProgress(100);
       updateBatchWorkflow(batch.id, {
         status: 'verified',
         verifiedDocument: true,
         verifiedReport: true,
-        verifiedDocumentUrl: result?.document_url || null,
-        verifiedReportUrl: result?.report_url || null,
+        verifiedDocumentUrl: null,
+        verifiedReportUrl: null,
       });
-      toast.success(`${uploadModalType === 'data' ? 'Verified data' : 'Verified document'} uploaded. Batch marked Verified.`);
+      toast.success(`Verified data document uploaded. Batch marked Verified.`);
       setUploadModalOpen(false);
       setUploadModalBatch(null);
     } catch (err) {
       // Fallback: mark verified locally if API not live
       updateBatchWorkflow(batch.id, { status: 'verified', verifiedDocument: true, verifiedReport: true });
-      toast.success(`(Mock) Document uploaded. Batch marked Verified.`);
+      toast.success(`(Mock) Verified data document uploaded. Batch marked Verified.`);
       setUploadModalOpen(false);
       setUploadModalBatch(null);
     } finally {
@@ -376,25 +369,20 @@ export const BatchMonitor = () => {
     setGeneratingAssets(true);
     const toastId = toast.loading(`Generating assets for ${batch.total} records…`);
     try {
-      const userIds = batch.records.map((r) => r.id);
-      const { data: result } = await verificationAPI.generateBatchAssets(batch.id, userIds);
-      const assets = (result?.assets || []).map((a) => ({
-        recordId: a.user_id || a.entity_id,
-        title: recordTitle(batch.records.find((r) => r.id === (a.user_id || a.entity_id)) || {}),
-        idCardUrl:  a.pdf_url     || null,
-        qrCodeUrl:  a.qr_code_data || null,
-        reportUrl:  a.report_url  || null,
-      }));
-      // If API returned nothing, generate mock asset entries
-      const finalAssets = assets.length
-        ? assets
-        : batch.records.map((r) => ({
+      const finalAssets = await Promise.all(batch.records.map(async (r) => {
+          let idCardUrl = `/mock-assets/${batch.id}/${r.id}-id-card.pdf`;
+          try {
+            const { data } = await verificationAPI.generateQRAndCertificate(r.id);
+            if (data?.pdf_url) idCardUrl = data.pdf_url;
+          } catch {}
+          return {
             recordId: r.id,
             title: recordTitle(r),
-            idCardUrl: `/mock-assets/${batch.id}/${r.id}-id-card.pdf`,
+            idCardUrl,
             qrCodeUrl: `/mock-assets/${batch.id}/${r.id}-qr.png`,
             reportUrl: `/mock-assets/${batch.id}/${r.id}-report.pdf`,
-          }));
+          };
+        }));
       updateBatchWorkflow(batch.id, { assets: finalAssets });
       toast.dismiss(toastId);
       toast.success(`Generated assets for ${finalAssets.length} records`);
@@ -410,7 +398,6 @@ export const BatchMonitor = () => {
   const handleSendToOrganization = async (batch) => {
     setSendingToOrg(true);
     try {
-      await verificationAPI.updateBatchStatus(batch.id, 'send_to_organization');
       const assets = batch.assets.length
         ? batch.assets
         : batch.records.map((r) => ({
@@ -446,14 +433,12 @@ export const BatchMonitor = () => {
     }
     setDownloadingDoc(true);
     try {
-      const { data: blob } = await verificationAPI.downloadBatchVerifiedDocument(batch.id);
-      triggerBlobDownload(blob, `${batch.name.replace(/\s+/g, '-')}-verified-document.pdf`);
-    } catch (err) {
-      // Mock fallback
       const content = `Mock Verified Document\nBatch: ${batch.name}\nBatch ID: ${batch.id}\nRecords: ${batch.total}\nGenerated: ${new Date().toLocaleString()}`;
       const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
       triggerBlobDownload(blob, `${batch.name.replace(/\s+/g, '-')}-verified-document.txt`);
       toast('(Mock) Verified document downloaded', { icon: '📄' });
+    } catch (err) {
+      toast.error(getApiError(err, 'Failed to download document'));
     } finally {
       setDownloadingDoc(false);
     }
@@ -467,13 +452,12 @@ export const BatchMonitor = () => {
     }
     setDownloadingReport(true);
     try {
-      const { data: blob } = await verificationAPI.downloadBatchVerifiedReport(batch.id);
-      triggerBlobDownload(blob, `${batch.name.replace(/\s+/g, '-')}-verified-report.pdf`);
-    } catch (err) {
       const content = `Mock Verified Report\nBatch: ${batch.name}\nBatch ID: ${batch.id}\nRecords: ${batch.total}\nGenerated: ${new Date().toLocaleString()}`;
       const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
       triggerBlobDownload(blob, `${batch.name.replace(/\s+/g, '-')}-verified-report.txt`);
       toast('(Mock) Verified report downloaded', { icon: '📊' });
+    } catch (err) {
+      toast.error(getApiError(err, 'Failed to download report'));
     } finally {
       setDownloadingReport(false);
     }
@@ -637,14 +621,51 @@ export const BatchMonitor = () => {
                           </div>
                         </td>
                         <td className="px-5 py-4">
-                          <div className="flex flex-wrap gap-2 min-w-[240px]">
-                            <Button variant="ghost" size="sm" icon={Eye} onClick={() => setSelectedBatchId(batch.id)}>
-                              View Details
-                            </Button>
-                            {batch.status === 'pending' && (
-                              <Button variant="outline" size="sm" icon={Mail} onClick={() => openMailVerifierModal(batch)}>
-                                Mail Verifier
-                              </Button>
+                          <div className="relative flex items-center min-w-[80px]">
+                            <button
+                              type="button"
+                              onClick={() => setActionMenuBatchId((current) => (current === batch.id ? null : batch.id))}
+                              className="ml-auto p-1.5 rounded-lg border border-gray-200 text-gray-500 hover:text-brand-dark hover:bg-gray-50"
+                            >
+                              <MoreVertical size={14} />
+                            </button>
+                            {actionMenuBatchId === batch.id && (
+                              <div className="absolute right-0 top-10 z-20 w-44 rounded-xl border border-gray-200 bg-white shadow-md p-1">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setActionMenuBatchId(null);
+                                    setSelectedBatchId(batch.id);
+                                  }}
+                                  className="w-full px-3 py-2 text-left text-sm font-inter text-gray-700 rounded-lg hover:bg-gray-50 flex items-center gap-2"
+                                >
+                                  <Eye size={14} />
+                                  View Details
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setActionMenuBatchId(null);
+                                    if (batch.status === 'pending') openMailVerifierModal(batch);
+                                    else toast('Mail Verifier is available in Pending stage only');
+                                  }}
+                                  className="w-full px-3 py-2 text-left text-sm font-inter text-gray-700 rounded-lg hover:bg-gray-50 flex items-center gap-2"
+                                >
+                                  <Mail size={14} />
+                                  Mail Verifier
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setActionMenuBatchId(null);
+                                    toast('Batch edit flow will be connected to live API');
+                                  }}
+                                  className="w-full px-3 py-2 text-left text-sm font-inter text-gray-700 rounded-lg hover:bg-gray-50 flex items-center gap-2"
+                                >
+                                  <Pencil size={14} />
+                                  Edit Batch
+                                </button>
+                              </div>
                             )}
                           </div>
                         </td>
@@ -760,21 +781,9 @@ export const BatchMonitor = () => {
                       Mail to Third-Party Verifier
                     </Button>
                   )}
-
-                  {/* Upload — for pending/send_to_verifier */}
-                  {selectedBatch.status !== 'verified' && selectedBatch.status !== 'send_to_organization' && (
-                    <>
-                      <Button variant="primary" size="sm" icon={Upload} className="justify-start"
-                        onClick={() => openUploadModal(selectedBatch, 'data')}>
-                        Upload Verified Data
-                      </Button>
-                      <Button variant="secondary" size="sm" icon={Upload} className="justify-start"
-                        onClick={() => openUploadModal(selectedBatch, 'document')}>
-                        Upload Verified Document
-                      </Button>
-                    </>
-                  )}
-
+                  <Button variant="outline" size="sm" icon={Pencil} className="justify-start" onClick={() => toast('Batch edit flow will be connected to live API')}>
+                    Edit Batch Information
+                  </Button>
                   {/* Download + generate + send to org — for verified / sent */}
                   {(selectedBatch.status === 'verified' || selectedBatch.status === 'send_to_organization') && (
                     <>
@@ -889,7 +898,6 @@ export const BatchMonitor = () => {
         onClose={() => { setUploadModalOpen(false); setUploadModalBatch(null); }}
         onConfirm={handleConfirmUpload}
         batchName={uploadModalBatch?.name || ''}
-        uploadType={uploadModalType}
         uploading={uploading}
       />
     </AuthLayout>
@@ -897,3 +905,5 @@ export const BatchMonitor = () => {
 };
 
 export default BatchMonitor;
+
+

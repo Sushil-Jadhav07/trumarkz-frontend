@@ -6,12 +6,18 @@ import { Logo } from '@/components/ui/Logo';
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
 import toast from 'react-hot-toast';
 
+const getBooleanParam = (searchParams, key) => {
+  const value = searchParams.get(key);
+  if (value == null) return undefined;
+  return value === 'true' || value === '1';
+};
+
 const steps = ['Processing your Google login…', 'Verifying your account…', 'Almost there…'];
 
 export const GoogleCallback = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { googleAuth } = useAuth();
+  const { completeOAuthRedirect } = useAuth();
   const [stepIndex, setStepIndex] = useState(0);
 
   useEffect(() => {
@@ -22,34 +28,59 @@ export const GoogleCallback = () => {
 
   useEffect(() => {
     const handleCallback = async () => {
-      const googleToken =
-        searchParams.get('code') ||
-        searchParams.get('token') ||
-        searchParams.get('credential') ||
-        searchParams.get('id_token') ||
-        searchParams.get('access_token');
       const error = searchParams.get('error');
+      const message = searchParams.get('message');
 
-      if (error) { toast.error('Google login was cancelled or failed.'); navigate('/login'); return; }
-      if (!googleToken) { toast.error('Invalid callback. Please try again.'); navigate('/login'); return; }
+      if (error) {
+        toast.error('Google login was cancelled or failed.');
+        navigate(`/auth/error?message=${encodeURIComponent(message || error)}`, { replace: true });
+        return;
+      }
 
-      const result = await googleAuth(googleToken);
-      if (!result.success) { toast.error(result.error || 'Google authentication failed.'); navigate('/login'); return; }
+      // Backend completes the OAuth code exchange server-side, then redirects here
+      // with the issued JWT session token (not the raw Google code/token).
+      const token =
+        searchParams.get('token') ||
+        searchParams.get('access_token') ||
+        searchParams.get('jwt');
+
+      if (!token) {
+        toast.error('Invalid callback. Please try again.');
+        navigate('/login', { replace: true });
+        return;
+      }
+
+      const requiresOnboarding = getBooleanParam(searchParams, 'requires_onboarding');
+      const userType =
+        searchParams.get('user_type') ||
+        searchParams.get('type') ||
+        sessionStorage.getItem('trumarkz_google_user_type') ||
+        '';
+      const email  = searchParams.get('email')   || '';
+      const userId = searchParams.get('user_id') || '';
+
+      const result = await completeOAuthRedirect(token, { requiresOnboarding, userType, email, userId });
+
+      if (!result.success) {
+        navigate(`/auth/error?message=${encodeURIComponent(result.error || 'Authentication failed')}`, { replace: true });
+        return;
+      }
 
       toast.success('Signed in with Google!');
       sessionStorage.removeItem('trumarkz_google_user_type');
+      window.history.replaceState(null, '', '/auth/google/callback');
 
-      if (result.userType === 'super-admin')  navigate('/admin/dashboard', { replace: true });
-      else if (result.requiresOnboarding)     navigate('/onboarding', { replace: true });
-      else                                    navigate('/dashboard', { replace: true });
+      if (result.userType === 'super-admin')   navigate('/admin/dashboard',  { replace: true });
+      else if (result.requiresOnboarding)      navigate('/org/onboarding',   { replace: true });
+      else if (result.userType === 'individual') navigate('/individual/dashboard', { replace: true });
+      else                                     navigate('/dashboard',         { replace: true });
     };
 
     handleCallback();
-  }, []);
+  }, [completeOAuthRedirect, navigate, searchParams]);
 
   return (
     <div className="fixed inset-0 bg-brand-dark flex flex-col items-center justify-center overflow-hidden">
-      {/* Ambient glow */}
       <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
         <motion.div
           initial={{ opacity: 0, scale: 0.6 }}
@@ -66,7 +97,6 @@ export const GoogleCallback = () => {
         className="relative z-10 flex flex-col items-center gap-6"
       >
         <Logo size="lg" dark />
-
         <LoadingSpinner size="md" color="white" />
 
         <AnimatePresence mode="wait">
@@ -82,7 +112,6 @@ export const GoogleCallback = () => {
           </motion.p>
         </AnimatePresence>
 
-        {/* Progress dots */}
         <div className="flex items-center gap-1.5">
           {steps.map((_, i) => (
             <motion.div

@@ -240,7 +240,7 @@ export const LoginRegister = () => {
       sessionStorage.removeItem('trumarkz_login_role');
     } catch {}
     if (result.userType === 'super-admin')                                  navigate('/admin/dashboard');
-    else if (result.requiresOnboarding)                                     navigate('/onboarding');
+    else if (result.requiresOnboarding)                                     navigate('/org/onboarding');
     else if (result.userType === 'individual' || userType === 'individual') navigate('/individual/dashboard');
     else                                                                    navigate('/dashboard');
   };

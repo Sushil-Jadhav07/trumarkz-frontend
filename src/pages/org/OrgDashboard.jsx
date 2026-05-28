@@ -75,13 +75,21 @@ export const OrgDashboard = () => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [verificationData, setVerificationData] = useState(null);
+  const [statsSummary, setStatsSummary] = useState({ total: '-', pending: '-', verified: '-', failed: '-' });
 
   useEffect(() => {
     let isMounted = true;
 
-    verificationAPI.getAllVerifications({ limit: 100, offset: 0 })
+    verificationAPI.getAllVerifications({ limit: 200, offset: 0 })
       .then(({ data }) => {
-        if (isMounted) setVerificationData(data);
+        if (!isMounted) return;
+        setVerificationData(data);
+        setStatsSummary({
+          total: data?.total ?? 0,
+          pending: data?.pending ?? 0,
+          verified: data?.verified ?? 0,
+          failed: data?.failed ?? 0,
+        });
       })
       .catch((err) => {
         if (isMounted) toast.error(getApiError(err, 'Failed to load dashboard data'));
@@ -110,17 +118,17 @@ export const OrgDashboard = () => {
   const stats = [
     {
       label: 'Total Users',
-      value: verificationData ? verificationData.total : '-',
+      value: statsSummary.total,
       icon: Layers, color: 'blue', bg: 'bg-blue-50', text: 'text-blue-600'
     },
     {
       label: 'Pending Verifications',
-      value: verificationData ? verificationData.pending : '-',
+      value: statsSummary.pending,
       icon: Clock, color: 'orange', bg: 'bg-orange-50', text: 'text-orange-600'
     },
     {
       label: 'Verified',
-      value: verificationData ? verificationData.verified : '-',
+      value: statsSummary.verified,
       icon: CheckCircle, color: 'green', bg: 'bg-green-50', text: 'text-green-600'
     },
   ];

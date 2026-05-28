@@ -446,7 +446,8 @@ const HumanBulkPanel = ({ onResult }) => {
       const { data } = await verificationAPI.bulkUpload(selectedFile, batchName.trim(), description.trim(), setUploadProgress);
       setUploadResult(data);
       onResult && onResult(data);
-      toast.success(`Batch created! ${data.total_uploaded} users uploaded.`);
+      toast.success(`Uploaded ${data.total_uploaded} records. Batch: ${data.batch_id}`);
+      navigate('/org/batch-status');
     } catch (err) {
       toast.error(getApiError(err, 'Batch upload failed. Please try again.'));
     } finally {
@@ -667,7 +668,8 @@ const ProductBulkPanel = ({ categories, onResult, selectedCategory, selectedServ
       const { data } = await verificationAPI.bulkUploadProducts(selectedFile, batchName.trim(), categoryId, description.trim(), setUploadProgress);
       setUploadResult(data);
       onResult && onResult(data);
-      toast.success(`Product batch created! ${data.total_uploaded} products uploaded.`);
+      toast.success(`Uploaded ${data.total_uploaded} products. Batch: ${data.batch_id}`);
+      navigate('/org/batch-status');
     } catch (err) {
       toast.error(getApiError(err, 'Product batch upload failed. Please try again.'));
     } finally {

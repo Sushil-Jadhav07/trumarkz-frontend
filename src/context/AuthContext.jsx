@@ -74,6 +74,11 @@ export const AuthProvider = ({ children }) => {
       storagePath: data.storage_path,
       industryType: data.industry_type,
       gstin: data.gstin,
+      businessRegNumber: data.business_reg_number,
+      addressLine1: data.address_line1,
+      addressLine2: data.address_line2,
+      addressLine3: data.address_line3,
+      useCases: data.use_cases,
       createdAt: data.created_at,
     };
   }, []);
@@ -375,6 +380,18 @@ export const AuthProvider = ({ children }) => {
     setUser((current) => current ? { ...current, ...updates } : current);
   }, []);
 
+  const refreshUser = useCallback(async () => {
+    try {
+      const { data } = await authAPI.getCurrentUser();
+      const builtUser = buildUser(data);
+      setUser(builtUser);
+      setRole(builtUser.userType);
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: getErrorMessage(err, 'Failed to refresh profile') };
+    }
+  }, [buildUser]);
+
   return (
     <AuthContext.Provider value={{
       user, role, isAuthenticated, loading,
@@ -385,6 +402,7 @@ export const AuthProvider = ({ children }) => {
       getGoogleAuthUrl, googleAuth, googleAuthMobile, completeGoogleSignup, completeOAuthRedirect,
       forgotPassword, resetPassword,
       updateUserProfile,
+      refreshUser,
       // Keep legacy for other pages that use register
       register: registerOrg,
     }}>
