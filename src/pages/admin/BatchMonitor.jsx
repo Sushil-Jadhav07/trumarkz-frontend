@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/Badge';
 import { ProgressBar } from '@/components/ui/ProgressBar';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
+import { Input } from '@/components/ui/Input';
 import { verificationAPI, getApiError, triggerBlobDownload } from '@/services/api';
 import {
   CheckCircle, Clock, Download, Eye, FileText, Filter, IdCard,
@@ -106,45 +107,80 @@ const groupByBatch = (records) => {
 // ── Select-Verifier sub-modal ─────────────────────────────────────────────────
 const SelectVerifierModal = ({ isOpen, onClose, onConfirm, batchName, sending }) => {
   const [selected, setSelected] = useState(null);
+  const [activeTab, setActiveTab] = useState('verifier');
+  const [subject, setSubject] = useState('');
+  const [body, setBody] = useState('');
   const activeVerifiers = VERIFIER_DIRECTORY.filter((v) => v.status === 'active');
+
+  useEffect(() => {
+    setSubject(`Verification Batch Handoff: ${batchName}`);
+    const defaultUrl = `http://localhost:5173/upload?batch=${encodeURIComponent(batchName || "")}`;
+    setBody(`Hi Team,\n\nPlease process the verification batch: ${batchName}.\n\nPlease upload the verified details/documents using this link:\n${defaultUrl}\n\nKindly review all records and share the verified output.\n\nRegards,\nTruMarkZ Admin`);
+  }, [batchName]);
+
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Select Third-Party Verifier" size="md">
-      <div className="space-y-4">
-        <p className="text-sm text-gray-500 font-inter">
-          Choose a verifier to receive the batch notification email for <span className="font-semibold text-brand-dark">{batchName}</span>.
-        </p>
-        <div className="space-y-2">
-          {activeVerifiers.map((v) => (
-            <button
-              key={v.id}
-              onClick={() => setSelected(v)}
-              className={`w-full flex items-center gap-4 p-3.5 rounded-xl border transition-all text-left ${
-                selected?.id === v.id
-                  ? 'border-brand-blue bg-blue-50'
-                  : 'border-gray-200 hover:border-gray-300 bg-white'
-              }`}
-            >
-              <div className="w-9 h-9 rounded-xl bg-brand-blue/10 flex items-center justify-center shrink-0">
-                <Mail size={16} className="text-brand-blue" />
-              </div>
-              <div className="min-w-0">
-                <p className="text-sm font-semibold text-brand-dark font-inter truncate">{v.name}</p>
-                <p className="text-xs text-gray-400 font-inter truncate">{v.email}</p>
-              </div>
-              {selected?.id === v.id && (
-                <CheckCircle size={16} className="text-brand-blue shrink-0 ml-auto" />
-              )}
-            </button>
-          ))}
+    <Modal isOpen={isOpen} onClose={onClose} title="Select Third-Party Verifier" size="xl">
+      <div className="space-y-5">
+        <div className="rounded-2xl border border-blue-100 bg-gradient-to-r from-blue-50 to-indigo-50 px-4 py-3">
+          <p className="text-xs uppercase tracking-wider text-blue-600 font-semibold font-inter">Batch Handoff</p>
+          <p className="text-sm text-brand-dark font-semibold font-inter mt-1">{batchName}</p>
         </div>
-        <div className="flex gap-2 pt-2">
+
+        <div className="flex gap-1 bg-gray-100 p-1 rounded-xl w-full">
+          <button type="button" onClick={() => setActiveTab('verifier')} className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium font-inter transition-all ${activeTab === 'verifier' ? 'bg-white text-brand-dark shadow-sm' : 'text-gray-500 hover:text-brand-dark'}`}>
+            Select Verifier
+          </button>
+          <button type="button" onClick={() => setActiveTab('template')} className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium font-inter transition-all ${activeTab === 'template' ? 'bg-white text-brand-dark shadow-sm' : 'text-gray-500 hover:text-brand-dark'}`}>
+            Mail Template
+          </button>
+        </div>
+
+        {activeTab === 'verifier' ? (
+          <div className="space-y-2 max-h-[360px] overflow-y-auto pr-1">
+            {activeVerifiers.map((v) => (
+              <button
+                key={v.id}
+                onClick={() => setSelected(v)}
+                className={`w-full flex items-center gap-4 p-4 rounded-2xl border transition-all text-left ${selected?.id === v.id ? 'border-brand-blue bg-blue-50 shadow-sm' : 'border-gray-200 hover:border-brand-blue/40 hover:bg-gray-50'}`}
+              >
+                <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${selected?.id === v.id ? 'bg-brand-blue text-white' : 'bg-brand-blue/10 text-brand-blue'}`}>
+                  <Mail size={16} />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-brand-dark font-inter truncate">{v.name}</p>
+                  <p className="text-xs text-gray-500 font-inter truncate">{v.email}</p>
+                </div>
+                {selected?.id === v.id && <CheckCircle size={16} className="text-brand-blue shrink-0 ml-auto" />}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <div className="rounded-xl border border-gray-200 p-3 bg-gray-50">
+              <p className="text-[11px] uppercase tracking-wider text-gray-500 font-semibold font-inter">Template Tips</p>
+              <p className="text-xs text-gray-500 font-inter mt-1">Keep the upload URL in the body. Verifier will use it to submit details.</p>
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 font-inter mb-1">Subject</label>
+              <input value={subject} onChange={(e) => setSubject(e.target.value)} className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm font-inter focus:outline-none focus:ring-2 focus:ring-brand-blue" />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 font-inter mb-1">Body</label>
+              <textarea rows={10} value={body} onChange={(e) => setBody(e.target.value)} className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm font-inter resize-none focus:outline-none focus:ring-2 focus:ring-brand-blue" />
+            </div>
+          </div>
+        )}
+
+        <div className="flex gap-2 pt-1">
           <Button variant="ghost" onClick={onClose} className="flex-1">Cancel</Button>
           <Button
-            variant="primary" icon={Mail} className="flex-1"
-            disabled={!selected || sending}
-            onClick={() => onConfirm(selected)}
+            variant="primary"
+            icon={Mail}
+            className="flex-1"
+            disabled={!selected || sending || !subject.trim() || !body.trim()}
+            onClick={() => onConfirm(selected, { subject: subject.trim(), body: body.trim() })}
           >
-            {sending ? 'Sending…' : 'Send Mail'}
+            {sending ? 'Sending�' : 'Send Mail'}
           </Button>
         </div>
       </div>
@@ -152,7 +188,7 @@ const SelectVerifierModal = ({ isOpen, onClose, onConfirm, batchName, sending })
   );
 };
 
-// ── Upload-Verified sub-modal ─────────────────────────────────────────────────
+// -- Upload-Verified sub-modal ------------------------------------------------
 const UploadVerifiedModal = ({ isOpen, onClose, onConfirm, batchName, uploading }) => {
   const fileRef = useRef(null);
   const [file, setFile] = useState(null);
@@ -179,31 +215,28 @@ const UploadVerifiedModal = ({ isOpen, onClose, onConfirm, batchName, uploading 
           onDrop={handleDrop}
           onDragOver={(e) => e.preventDefault()}
           onClick={() => fileRef.current?.click()}
-          className={`flex flex-col items-center justify-center gap-3 p-8 rounded-2xl border-2 border-dashed cursor-pointer transition-colors ${
-            file ? 'border-brand-blue bg-blue-50' : 'border-gray-200 hover:border-brand-blue hover:bg-gray-50'
-          }`}
+          className={`flex flex-col items-center justify-center gap-3 p-8 rounded-2xl border-2 border-dashed cursor-pointer transition-colors ${file ? 'border-brand-blue bg-blue-50' : 'border-gray-200 hover:border-brand-blue hover:bg-gray-50'}`}
         >
-          <input ref={fileRef} type="file" className="hidden" accept=".pdf,.xlsx,.xls,.csv,.docx,.doc"
-            onChange={(e) => setFile(e.target.files?.[0] || null)} />
+          <input ref={fileRef} type="file" className="hidden" accept=".pdf,.xlsx,.xls,.csv,.docx,.doc" onChange={(e) => setFile(e.target.files?.[0] || null)} />
           <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${file ? 'bg-brand-blue/10' : 'bg-gray-100'}`}>
             <Upload size={22} className={file ? 'text-brand-blue' : 'text-gray-400'} />
           </div>
           {file ? (
             <div className="text-center">
               <p className="text-sm font-semibold text-brand-dark font-inter">{file.name}</p>
-              <p className="text-xs text-gray-400 font-inter mt-1">{(file.size / 1024).toFixed(1)} KB · Click to change</p>
+              <p className="text-xs text-gray-400 font-inter mt-1">{(file.size / 1024).toFixed(1)} KB � Click to change</p>
             </div>
           ) : (
             <div className="text-center">
               <p className="text-sm font-medium text-gray-600 font-inter">Drop file here or click to browse</p>
-              <p className="text-xs text-gray-400 font-inter mt-1">PDF, Excel, CSV, Word · max 50MB</p>
+              <p className="text-xs text-gray-400 font-inter mt-1">PDF, Excel, CSV, Word � max 50MB</p>
             </div>
           )}
         </div>
         {uploading && progress > 0 && (
           <div>
             <div className="flex justify-between text-xs text-gray-500 font-inter mb-1">
-              <span>Uploading…</span><span>{progress}%</span>
+              <span>Uploading...</span><span>{progress}%</span>
             </div>
             <div className="h-2 rounded-full bg-gray-100 overflow-hidden">
               <div className="h-full bg-brand-blue rounded-full transition-all" style={{ width: `${progress}%` }} />
@@ -212,15 +245,72 @@ const UploadVerifiedModal = ({ isOpen, onClose, onConfirm, batchName, uploading 
         )}
         <div className="flex gap-2">
           <Button variant="ghost" onClick={handleClose} className="flex-1" disabled={uploading}>Cancel</Button>
-          <Button variant="primary" icon={Upload} className="flex-1" disabled={!file || uploading}
-            onClick={() => onConfirm(file, setProgress)}>
-            {uploading ? 'Uploading…' : `Upload ${label}`}
+          <Button variant="primary" icon={Upload} className="flex-1" disabled={!file || uploading} onClick={() => onConfirm(file, setProgress)}>
+            {uploading ? 'Uploading...' : `Upload ${label}`}
           </Button>
         </div>
       </div>
     </Modal>
   );
 };
+const EditBatchModal = ({ isOpen, onClose, draft, onChange, onSave, saving }) => (
+  <Modal isOpen={isOpen} onClose={onClose} title="Edit Batch (Dummy)" size="lg">
+    <div className="space-y-4">
+      <p className="text-sm text-gray-500 font-inter">
+        Dummy edit form for local testing. Changes are stored in local state/localStorage for this mock flow.
+      </p>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <Input
+          label="Batch Name"
+          value={draft.name || ''}
+          onChange={(e) => onChange('name', e.target.value)}
+          placeholder="Enter batch name"
+        />
+        <Input
+          label="Organization Name"
+          value={draft.orgName || ''}
+          onChange={(e) => onChange('orgName', e.target.value)}
+          placeholder="Enter organization"
+        />
+      </div>
+
+      <div>
+        <label className="block text-sm font-medium text-brand-dark font-inter mb-1.5">Status</label>
+        <div className="relative">
+          <select
+            value={draft.status || 'pending'}
+            onChange={(e) => onChange('status', e.target.value)}
+            className="w-full rounded-xl border-2 border-brand-gray px-4 py-3 font-inter text-sm outline-none focus:border-brand-blue focus:ring-4 focus:ring-brand-blue/10"
+          >
+            <option value="pending">Pending</option>
+            <option value="send_to_verifier">Send to Verifier</option>
+            <option value="verified">Verified</option>
+            <option value="send_to_organization">Sent to Organization</option>
+          </select>
+        </div>
+      </div>
+
+      <div>
+        <label className="block text-sm font-medium text-brand-dark font-inter mb-1.5">Internal Notes</label>
+        <textarea
+          rows={3}
+          value={draft.notes || ''}
+          onChange={(e) => onChange('notes', e.target.value)}
+          placeholder="Add notes..."
+          className="w-full rounded-xl border-2 border-brand-gray px-4 py-3 font-inter text-sm outline-none resize-none focus:border-brand-blue focus:ring-4 focus:ring-brand-blue/10"
+        />
+      </div>
+
+      <div className="flex gap-2 pt-1">
+        <Button variant="ghost" className="flex-1" onClick={onClose} disabled={saving}>Cancel</Button>
+        <Button variant="primary" className="flex-1" onClick={onSave} disabled={saving}>
+          {saving ? 'Saving...' : 'Save Changes'}
+        </Button>
+      </div>
+    </div>
+  </Modal>
+);
 
 // ── Main BatchMonitor component ───────────────────────────────────────────────
 export const BatchMonitor = () => {
@@ -245,6 +335,10 @@ export const BatchMonitor = () => {
   const [uploadModalOpen, setUploadModalOpen] = useState(false);
   const [uploadModalBatch, setUploadModalBatch] = useState(null);
   const [actionMenuBatchId, setActionMenuBatchId] = useState(null);
+  const [editModalOpen, setEditModalOpen] = useState(false);
+  const [editSaving, setEditSaving] = useState(false);
+  const [editBatchId, setEditBatchId] = useState(null);
+  const [editDraft, setEditDraft] = useState({ name: '', orgName: '', status: 'pending', notes: '' });
 
   const fetchData = useCallback(async (showRefresh = false) => {
     if (showRefresh) setRefreshing(true);
@@ -266,12 +360,15 @@ export const BatchMonitor = () => {
   const records = data?.users || [];
   const batches = groupByBatch(records).map((batch) => {
     const stored = workflowByBatch[batch.id] || {};
+    const edited = stored.edited || {};
     const inferredStatus = batch.pending > 0 ? 'pending' : 'verified';
-    const status = stored.status || inferredStatus;
+    const status = edited.status || stored.status || inferredStatus;
     const assets = stored.assets || [];
     const batchComplete = status === 'verified' || status === 'send_to_organization';
     return {
       ...batch,
+      name: edited.name || batch.name,
+      orgName: edited.orgName || batch.orgName,
       pending: batchComplete ? 0 : batch.pending,
       verified: batchComplete ? batch.total - batch.failed : batch.verified,
       status,
@@ -283,6 +380,7 @@ export const BatchMonitor = () => {
       lastAction: stored.lastAction,
       verifiedDocumentUrl: stored.verifiedDocumentUrl || null,
       verifiedReportUrl: stored.verifiedReportUrl || null,
+      editNotes: edited.notes || '',
     };
   });
 
@@ -314,17 +412,17 @@ export const BatchMonitor = () => {
     setVerifierModalOpen(true);
   };
 
-  const handleConfirmMailVerifier = async (verifier) => {
+  const handleConfirmMailVerifier = async (verifier, template) => {
     const batch = verifierModalBatch;
     setMailSending(true);
     try {
-      updateBatchWorkflow(batch.id, { status: 'send_to_verifier' });
-      toast.success(`Verifier assigned to ${verifier.name} for ${batch.name}`);
+      updateBatchWorkflow(batch.id, { status: 'send_to_verifier', mailTemplate: template });
+      toast.success(`Mail sent to ${verifier.name} for ${batch.name}`);
       setVerifierModalOpen(false);
       setVerifierModalBatch(null);
     } catch (err) {
-      updateBatchWorkflow(batch.id, { status: 'send_to_verifier' });
-      toast.success(`Verifier assigned to ${verifier.name} for ${batch.name}`);
+      updateBatchWorkflow(batch.id, { status: 'send_to_verifier', mailTemplate: template });
+      toast.success(`Mail sent to ${verifier.name} for ${batch.name}`);
       setVerifierModalOpen(false);
       setVerifierModalBatch(null);
     } finally {
@@ -362,6 +460,28 @@ export const BatchMonitor = () => {
     } finally {
       setUploading(false);
     }
+  };
+
+  const openEditBatchModal = (batch) => {
+    setEditBatchId(batch.id);
+    setEditDraft({
+      name: batch.name || '',
+      orgName: batch.orgName || '',
+      status: batch.status || 'pending',
+      notes: batch.editNotes || '',
+    });
+    setEditModalOpen(true);
+  };
+
+  const handleSaveBatchEdit = () => {
+    if (!editBatchId) return;
+    setEditSaving(true);
+    updateBatchWorkflow(editBatchId, { edited: editDraft, status: editDraft.status });
+    setTimeout(() => {
+      setEditSaving(false);
+      setEditModalOpen(false);
+      toast.success('Batch changes saved (dummy)');
+    }, 250);
   };
 
   // ── Action: Generate Batch Assets ────────────────────────────────────────
@@ -552,18 +672,18 @@ export const BatchMonitor = () => {
         </Card>
       ) : (
         <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }}>
-          <Card className="p-0 overflow-hidden border border-gray-100">
-            <div className="px-5 py-4 border-b border-gray-100 bg-white flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <Card className="p-0 overflow-visible border border-gray-200 shadow-sm">
+            <div className="px-6 py-5 border-b border-gray-100 bg-gradient-to-r from-white to-gray-50/70 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
-                <h3 className="font-sora font-semibold text-brand-dark">Verification Batches</h3>
-                <p className="text-xs text-gray-400 font-inter mt-1">Manage verifier handoff, uploads, generated assets, and organization sharing.</p>
+                <h3 className="font-sora font-semibold text-brand-dark text-lg">Verification Batches</h3>
+                <p className="text-sm text-gray-500 font-inter mt-1">Manage verifier handoff, uploads, generated assets, and organization sharing.</p>
               </div>
-              <Badge status="default">{visibleBatches.length} batches</Badge>
+              <Badge status="default" className="bg-gray-900 text-white">{visibleBatches.length} batches</Badge>
             </div>
-            <div className="overflow-x-auto scrollbar-hidden">
+            <div className="overflow-x-auto scrollbar-hidden bg-white">
               <table className="w-full min-w-[1120px] border-collapse">
                 <thead>
-                  <tr className="bg-gray-50/90 border-b border-gray-100">
+                  <tr className="bg-gray-50 border-b border-gray-100">
                     <th className="px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-500 font-inter">Batch</th>
                     <th className="px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-500 font-inter">Progress</th>
                     <th className="px-5 py-3 text-center text-[11px] font-semibold uppercase tracking-wide text-gray-500 font-inter">Records</th>
@@ -571,21 +691,21 @@ export const BatchMonitor = () => {
                     <th className="px-5 py-3 text-center text-[11px] font-semibold uppercase tracking-wide text-gray-500 font-inter">Verified</th>
                     <th className="px-5 py-3 text-center text-[11px] font-semibold uppercase tracking-wide text-gray-500 font-inter">Failed</th>
                     <th className="px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-500 font-inter">Status</th>
-                    <th className="px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-500 font-inter">Actions</th>
+                    <th className="px-5 py-3 text-center text-[11px] font-semibold uppercase tracking-wide text-gray-500 font-inter">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100 bg-white">
                   {visibleBatches.map((batch) => {
                     const complete = batch.total ? Math.round(((batch.verified + batch.failed) / batch.total) * 100) : 0;
                     return (
-                      <tr key={batch.id} className="hover:bg-gray-50/70 transition-colors">
+                      <tr key={batch.id} className="hover:bg-blue-50/30 transition-colors">
                         <td className="px-5 py-4">
                           <div className="flex items-start gap-3">
                             <div className="w-10 h-10 rounded-xl bg-brand-blue/10 text-brand-blue flex items-center justify-center shrink-0">
                               <Package size={18} />
                             </div>
                             <div className="min-w-0">
-                              <p className="font-sora font-semibold text-sm text-brand-dark">{batch.name}</p>
+                              <p className="font-sora font-semibold text-lg leading-5 text-brand-dark">{batch.name}</p>
                               <p className="text-xs text-gray-400 font-inter mt-1 truncate">{batch.orgName} / {batch.id}</p>
                               <p className="text-[11px] text-gray-400 font-inter mt-2">{formatLastAction(batch.lastAction)}</p>
                             </div>
@@ -603,16 +723,16 @@ export const BatchMonitor = () => {
                           </div>
                         </td>
                         <td className="px-5 py-4 text-center">
-                          <span className="inline-flex min-w-10 justify-center rounded-lg bg-gray-100 px-2.5 py-1 text-sm font-bold text-brand-dark font-inter">{batch.total}</span>
+                          <span className="inline-flex min-w-10 justify-center rounded-lg bg-gray-100 px-2.5 py-1 text-sm font-bold text-brand-dark font-inter border border-gray-200">{batch.total}</span>
                         </td>
                         <td className="px-5 py-4 text-center">
-                          <span className="inline-flex min-w-9 justify-center rounded-lg bg-orange-50 px-2.5 py-1 text-sm font-bold text-orange-600 font-inter">{batch.pending}</span>
+                          <span className="inline-flex min-w-9 justify-center rounded-lg bg-orange-50 px-2.5 py-1 text-sm font-bold text-orange-600 font-inter border border-orange-100">{batch.pending}</span>
                         </td>
                         <td className="px-5 py-4 text-center">
-                          <span className="inline-flex min-w-9 justify-center rounded-lg bg-green-50 px-2.5 py-1 text-sm font-bold text-green-600 font-inter">{batch.verified}</span>
+                          <span className="inline-flex min-w-9 justify-center rounded-lg bg-green-50 px-2.5 py-1 text-sm font-bold text-green-600 font-inter border border-green-100">{batch.verified}</span>
                         </td>
                         <td className="px-5 py-4 text-center">
-                          <span className="inline-flex min-w-9 justify-center rounded-lg bg-red-50 px-2.5 py-1 text-sm font-bold text-red-600 font-inter">{batch.failed}</span>
+                          <span className="inline-flex min-w-9 justify-center rounded-lg bg-red-50 px-2.5 py-1 text-sm font-bold text-red-600 font-inter border border-red-100">{batch.failed}</span>
                         </td>
                         <td className="px-5 py-4">
                           <div className={`inline-flex flex-col gap-1 rounded-xl border px-3 py-2 ${batch.statusMeta.tone}`}>
@@ -621,11 +741,11 @@ export const BatchMonitor = () => {
                           </div>
                         </td>
                         <td className="px-5 py-4">
-                          <div className="relative flex items-center min-w-[80px]">
+                          <div className="relative flex items-center justify-center min-w-[80px]">
                             <button
                               type="button"
                               onClick={() => setActionMenuBatchId((current) => (current === batch.id ? null : batch.id))}
-                              className="ml-auto p-1.5 rounded-lg border border-gray-200 text-gray-500 hover:text-brand-dark hover:bg-gray-50"
+                              className="p-2 rounded-lg border border-gray-200 text-gray-500 hover:text-brand-dark hover:bg-gray-50 shadow-sm"
                             >
                               <MoreVertical size={14} />
                             </button>
@@ -658,7 +778,7 @@ export const BatchMonitor = () => {
                                   type="button"
                                   onClick={() => {
                                     setActionMenuBatchId(null);
-                                    toast('Batch edit flow will be connected to live API');
+                                    openEditBatchModal(batch);
                                   }}
                                   className="w-full px-3 py-2 text-left text-sm font-inter text-gray-700 rounded-lg hover:bg-gray-50 flex items-center gap-2"
                                 >
@@ -781,7 +901,7 @@ export const BatchMonitor = () => {
                       Mail to Third-Party Verifier
                     </Button>
                   )}
-                  <Button variant="outline" size="sm" icon={Pencil} className="justify-start" onClick={() => toast('Batch edit flow will be connected to live API')}>
+                  <Button variant="outline" size="sm" icon={Pencil} className="justify-start" onClick={() => openEditBatchModal(selectedBatch)}>
                     Edit Batch Information
                   </Button>
                   {/* Download + generate + send to org — for verified / sent */}
@@ -900,10 +1020,22 @@ export const BatchMonitor = () => {
         batchName={uploadModalBatch?.name || ''}
         uploading={uploading}
       />
+
+      <EditBatchModal
+        isOpen={editModalOpen}
+        onClose={() => setEditModalOpen(false)}
+        draft={editDraft}
+        onChange={(field, value) => setEditDraft((current) => ({ ...current, [field]: value }))}
+        onSave={handleSaveBatchEdit}
+        saving={editSaving}
+      />
     </AuthLayout>
   );
 };
 
 export default BatchMonitor;
+
+
+
 
 

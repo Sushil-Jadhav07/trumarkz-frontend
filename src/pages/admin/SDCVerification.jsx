@@ -293,7 +293,7 @@ const BatchCard = ({ batch, onClick }) => {
 
 const TABS = [
   { id: 'all', label: 'All' },
-  { id: 'organization', label: 'Organizations' },
+  { id: 'organization', label: 'Human' },
   { id: 'individual', label: 'Individuals' },
   { id: 'product', label: 'Products' },
 ];

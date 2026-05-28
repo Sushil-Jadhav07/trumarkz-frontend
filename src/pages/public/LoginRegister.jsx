@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import {
   Mail, Lock, Building2, User, ArrowRight, CheckCircle,
-  Shield, X, AlertCircle, Fingerprint, Globe2, Zap, Eye, EyeOff
+  Shield, X, AlertCircle, Fingerprint, Globe2, Zap
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -183,7 +183,6 @@ export const LoginRegister = () => {
   const [tab,          setTab]          = useState(location.pathname === '/signup' ? 'register' : 'login');
   const [email,        setEmail]        = useState('');
   const [password,     setPassword]     = useState('');
-  const [showPassword, setShowPassword] = useState(false);
   const [rememberMe,   setRememberMe]   = useState(true);
   const [errors,       setErrors]       = useState({});
   const [submitting,   setSubmitting]   = useState(false);
@@ -530,21 +529,9 @@ export const LoginRegister = () => {
                       transition={{ ...spring.smooth, delay: 0.1 }}
                       className="relative"
                     >
-                      <Input label="Password" type={showPassword ? 'text' : 'password'} placeholder="Enter your password"
+                      <Input label="Password" type="password" placeholder="Enter your password"
                         name="password" autoComplete="current-password" value={password}
                         onChange={e => setPassword(e.target.value)} error={errors.password} icon={Lock} />
-                      <motion.button
-                        type="button"
-                        onClick={() => setShowPassword(p => !p)}
-                        whileHover={{ scale: 1.1 }}
-                        whileTap={{ scale: 0.9 }}
-                        transition={spring.micro}
-                        className="absolute right-3 top-[34px] text-gray-400 hover:text-gray-600 cursor-pointer p-1"
-                        tabIndex={-1}
-                        aria-label={showPassword ? 'Hide password' : 'Show password'}
-                      >
-                        {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
-                      </motion.button>
                     </motion.div>
 
                     <AnimatePresence>
