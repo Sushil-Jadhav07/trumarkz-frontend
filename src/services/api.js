@@ -99,8 +99,6 @@ export const authAPI = {
 
   // ── Login ────────────────────────────────────────────────────────────────────
   login: (email, password) => api.post('/auth/login', { email, password }),
-
-  // ── Google OAuth ─────────────────────────────────────────────────────────────
   getGoogleAuthUrl: (userType) => api.get('/auth/google/url', {
     params: userType ? { user_type: userType } : undefined,
   }),
@@ -126,6 +124,7 @@ export const authAPI = {
   // ── User / Profile ────────────────────────────────────────────────────────────
   getCurrentUser: () => api.get('/auth/me'),
   getMe: () => api.get('/auth/me'),
+  getOrgIndustryType: (orgId) => api.get(`/auth/organization/${orgId}/industry-type`),
 
   // ── Password ─────────────────────────────────────────────────────────────────
   forgotPassword: (email) => api.post('/auth/forgot-password', { email }),
@@ -138,6 +137,17 @@ export const authAPI = {
 
 export const orgAPI = {
   // Intentionally empty: org assignment endpoints are not available in the current backend API.
+};
+
+export const adminAPI = {
+  listUsersGroupedByOrg: () => api.get('/auth/users/grouped'),
+  promoteSuperAdmin: (email) => api.post('/auth/promote-super-admin', { email }),
+  createSuperAdmin: (data) => api.post('/auth/create-super-admin', {
+    full_name: data.fullName.trim(),
+    email: data.email.trim(),
+    password: data.password,
+  }),
+  getAuditLogs: (batchUserId) => api.get(`/auth/audit-logs/${batchUserId}`),
 };
 
 export const verificationAPI = {
@@ -155,10 +165,15 @@ export const verificationAPI = {
     category_id: data.category_id, product_name: data.product_name?.trim(), custom_fields: data.custom_fields || {},
   }),
 
-  bulkUpload: (file, batchName, description = '', onProgress) => {
+  bulkUpload: (file, batchName, description = '', options = {}, onProgress) => {
     const formData = new FormData();
-    formData.append('file', file); formData.append('batch_name', batchName);
+    formData.append('file', file);
+    formData.append('batch_name', batchName);
     if (description) formData.append('description', description);
+    if (options.industry_type) formData.append('industry_type', options.industry_type);
+    if (options.verification_types) formData.append('verification_types', options.verification_types);
+    if (options.credential_visibility) formData.append('credential_visibility', options.credential_visibility);
+    if (options.template_id) formData.append('template_id', options.template_id);
     return verificationApi.post('/verification/bulk-upload', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
       onUploadProgress: onProgress ? (e) => onProgress(Math.round((e.loaded * 100) / (e.total || 1))) : undefined,
@@ -172,6 +187,22 @@ export const verificationAPI = {
     return verificationApi.post('/verification/bulk-upload/products', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
       onUploadProgress: onProgress ? (e) => onProgress(Math.round((e.loaded * 100) / (e.total || 1))) : undefined,
+    });
+  },
+
+  generateHumanTemplate: (headers, verificationTypes = '') => {
+    const normalizedHeaders = Array.isArray(headers)
+      ? [...new Set(headers.map((header) => String(header).trim()).filter(Boolean))]
+      : String(headers || '').split(',').map((header) => header.trim()).filter(Boolean);
+    const params = new URLSearchParams();
+    params.append('headers', normalizedHeaders.join(','));
+    if (verificationTypes) params.append('verification_types', verificationTypes);
+    return verificationApi.post('/verification/generate-human-template', params, {
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        Accept: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/octet-stream, application/json',
+      },
+      responseType: 'blob',
     });
   },
 
@@ -216,6 +247,26 @@ export const verificationAPI = {
   },
   generateQRAndCertificate: (userId) =>
     verificationApi.post(`/verification/user/${userId}/generate-qr`),
+
+  // Batch management
+  listBatches: () => verificationApi.get('/verification/batches'),
+  getBatchDetails: (batchId) => verificationApi.get(`/verification/batches/${batchId}`),
+
+  // Credential template management
+  createTemplate: (data) => verificationApi.post('/verification/templates', {
+    template_name: data.template_name?.trim(),
+    verification_types: Array.isArray(data.verification_types) ? data.verification_types : [],
+    json_data: data.json_data || {},
+    html_code: data.html_code || '',
+  }),
+  getTemplate: (templateId) => verificationApi.get(`/verification/templates/${templateId}`),
+  updateTemplate: (templateId, data) => verificationApi.put(`/verification/templates/${templateId}`, {
+    template_name: data.template_name?.trim(),
+    verification_types: Array.isArray(data.verification_types) ? data.verification_types : [],
+    json_data: data.json_data || {},
+    html_code: data.html_code || '',
+  }),
+  getTemplateHistory: (templateId) => verificationApi.get(`/verification/templates/${templateId}/history`),
 };
 
 export const healthCheck = () => api.get('/health');

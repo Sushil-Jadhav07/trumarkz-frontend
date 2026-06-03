@@ -6,7 +6,7 @@ import {
   LayoutDashboard, Layers, Award, Store, BarChart2,
   Wallet, HelpCircle, User, LogOut, ChevronLeft, ChevronRight,
   GitBranch, Share2, CheckSquare, Building2, DollarSign,
-  AlertTriangle, Activity, ShieldCheck
+  AlertTriangle, Activity, ShieldCheck, UserCog, UserPlus
 } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -57,6 +57,8 @@ export const Sidebar = ({ collapsed, onToggle, mobileOpen = false, onMobileClose
         { path: '/admin/pricing', label: 'Pricing Config', icon: DollarSign },
         { path: '/admin/disputes', label: 'Disputes', icon: AlertTriangle },
         { path: '/admin/platform-health', label: 'Platform Health', icon: Activity },
+        { path: '/admin/create-super-admin', label: 'Create Admin', icon: UserPlus },
+        { path: '/admin/promote-super-admin', label: 'Promote Admin', icon: UserCog },
         { path: '/account/profile', label: 'Profile', icon: User }
       ];
     }

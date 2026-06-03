@@ -39,6 +39,19 @@ const getRoleFromLoginType = (value, fallback = 'organization') => {
 const getPendingGoogleUserType = () =>
   normalizeUserType(sessionStorage.getItem('trumarkz_google_user_type'), 'organization');
 
+const isOauthDebug = () => {
+  try {
+    return new URLSearchParams(window.location.search).get('oauth_debug') === '1' ||
+      sessionStorage.getItem('trumarkz_oauth_debug') === '1';
+  } catch {
+    return false;
+  }
+};
+
+const oauthDebugLog = (...args) => {
+  if (isOauthDebug()) console.log('[OAuth][AuthContext]', ...args);
+};
+
 const buildSuperAdminUser = (email = SUPER_ADMIN_EMAIL) => ({
   id: 'super-admin',
   name: 'Super Admin',
@@ -228,7 +241,6 @@ export const AuthProvider = ({ children }) => {
     }
   }, [buildUser]);
 
-  // ── Google Auth ────────────────────────────────────────────────────────────
   const getGoogleAuthUrl = useCallback(async (userType) => {
     try {
       const { data } = await authAPI.getGoogleAuthUrl(userType);
@@ -240,73 +252,13 @@ export const AuthProvider = ({ children }) => {
     }
   }, []);
 
-  const googleAuth = useCallback(async (token) => {
-    try {
-      tokenHelpers.remove();
-      const pendingUserType = getPendingGoogleUserType();
-      const { data } = await authAPI.googleAuth(token, pendingUserType);
-      const accessToken = data.access_token;
-      if (!accessToken) return { success: false, error: 'Google auth response did not include an access token.' };
-      persistAuthData(data);
-
-      let builtUser = {
-        id: data.user_id,
-        name: data.full_name || data.organization_name || '',
-        email: data.email || '',
-        userType: data.user_type,
-        onboardingCompleted: !data.requires_onboarding,
-      };
-
-      try {
-        const { data: profile } = await authAPI.getCurrentUser();
-        builtUser = buildUser(profile, normalizeUserType(data.user_type, pendingUserType));
-      } catch {
-        // The Google endpoint already returns enough session data to route the user.
-      }
-
-      const userType = normalizeUserType(builtUser.userType || data.user_type, pendingUserType);
-      setUser({ ...builtUser, userType: builtUser.userType || userType, role: builtUser.role || userType });
-      setRole(userType);
-      setIsAuthenticated(true);
-      return { success: true, userType, requiresOnboarding: userType === 'organization' && data.requires_onboarding };
-    } catch (err) {
-      return { success: false, error: getErrorMessage(err, 'Google authentication failed.') };
-    }
-  }, [buildUser, persistAuthData]);
-
-  const googleAuthMobile = useCallback(async (token, userType) => {
-    try {
-      tokenHelpers.remove();
-      const normalizedUserType = normalizeUserType(userType, getPendingGoogleUserType());
-      const { data } = await authAPI.googleAuthMobile(token, normalizedUserType);
-      if (!data.access_token) return { success: false, error: 'Google auth response did not include an access token.' };
-      persistAuthData(data);
-      const userType = normalizeUserType(data.user_type, normalizedUserType);
-      setRole(userType);
-      setIsAuthenticated(true);
-      return { success: true, userType, requiresOnboarding: userType === 'organization' && data.requires_onboarding };
-    } catch (err) {
-      return { success: false, error: getErrorMessage(err, 'Google authentication failed.') };
-    }
-  }, [persistAuthData]);
-
-  const completeGoogleSignup = useCallback(async (userType) => {
-    try {
-      const normalizedUserType = normalizeUserType(userType, getPendingGoogleUserType());
-      const { data } = await authAPI.completeGoogleSignup(normalizedUserType);
-      if (!data.access_token) return { success: false, error: 'Signup response did not include an access token.' };
-      persistAuthData(data);
-      const userType = normalizeUserType(data.user_type, normalizedUserType);
-      setRole(userType);
-      setIsAuthenticated(true);
-      return { success: true, userType, requiresOnboarding: userType === 'organization' && data.requires_onboarding };
-    } catch (err) {
-      return { success: false, error: getErrorMessage(err, 'Failed to complete Google signup.') };
-    }
-  }, [persistAuthData]);
-
   const completeOAuthRedirect = useCallback(async (token, fallback = {}) => {
     try {
+      oauthDebugLog('completeOAuthRedirect start', {
+        hasToken: Boolean(token),
+        fallback,
+        pendingGoogleUserType: sessionStorage.getItem('trumarkz_google_user_type'),
+      });
       if (!token) return { success: false, error: 'OAuth callback did not include a token.' };
       tokenHelpers.save(token);
       if (fallback.userId) localStorage.setItem('user_id', fallback.userId);
@@ -328,9 +280,12 @@ export const AuthProvider = ({ children }) => {
         builtUser = buildUser(profile, userType);
         userType = normalizeUserType(profile.user_type, userType);
         requiresOnboarding = userType === 'organization' && !profile.onboarding_completed;
-      } catch {
-        // The backend callback already returned a valid JWT. Keep the session
-        // active even if the profile refresh is temporarily unavailable.
+      } catch (profileErr) {
+        oauthDebugLog('/auth/me failed; using fallback session data', {
+          status: profileErr?.response?.status,
+          detail: profileErr?.response?.data?.detail,
+          message: profileErr?.message,
+        });
       }
 
       setUser({ ...builtUser, userType: builtUser.userType || userType, role: builtUser.role || userType });
@@ -347,6 +302,7 @@ export const AuthProvider = ({ children }) => {
       return { success: false, error: getErrorMessage(err, 'Failed to complete Google sign-in.') };
     }
   }, [buildUser]);
+
 
   // ── Forgot / Reset Password ────────────────────────────────────────────────
   const forgotPassword = useCallback(async (email) => {
@@ -399,7 +355,7 @@ export const AuthProvider = ({ children }) => {
       registerOrg, registerIndividual,
       verifyOTP, resendOTP,
       completeOnboarding,
-      getGoogleAuthUrl, googleAuth, googleAuthMobile, completeGoogleSignup, completeOAuthRedirect,
+      getGoogleAuthUrl, completeOAuthRedirect,
       forgotPassword, resetPassword,
       updateUserProfile,
       refreshUser,

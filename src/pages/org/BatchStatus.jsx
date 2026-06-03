@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { AuthLayout } from '@/components/layout/AuthLayout';
 import { PageHeader } from '@/components/shared/PageHeader';
 import { Button } from '@/components/ui/Button';
@@ -8,6 +8,8 @@ import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { ProgressBar } from '@/components/ui/ProgressBar';
 import { Modal } from '@/components/ui/Modal';
+import { StepWizard } from '@/components/ui/StepWizard';
+import { HUMAN_VERIFICATION_STEPS, HUMAN_VERIFICATION_STEP_META } from '@/data/humanVerificationFlow';
 import { verificationAPI, getApiError } from '@/services/api';
 import {
   RefreshCw, Eye, CheckCircle, Clock, XCircle, Filter,
@@ -188,6 +190,7 @@ const BatchDetailModal = ({ batch, onClose, onRefresh }) => {
 
 // ── Main BatchStatus (Org view) ───────────────────────────────────────────────
 export const BatchStatus = () => {
+  const location = useLocation();
   const navigate = useNavigate();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -195,6 +198,8 @@ export const BatchStatus = () => {
   const [statusFilter, setStatusFilter] = useState('');
   const [page, setPage] = useState(0);
   const [selectedBatch, setSelectedBatch] = useState(null);
+  const showHumanFlowStep = location.state?.fromHumanFlow;
+  const { label, progress: flowProgress } = HUMAN_VERIFICATION_STEP_META.batch;
 
   const fetchData = useCallback(async (showRefreshSpinner = false) => {
     if (showRefreshSpinner) setRefreshing(true);
@@ -247,6 +252,18 @@ export const BatchStatus = () => {
   return (
     <AuthLayout title="Batch Status">
       <div className="w-full mx-auto lg:max-w-none">
+        {showHumanFlowStep && (
+          <div className="mb-8 rounded-[30px] border border-slate-200 bg-white p-5 shadow-[0_24px_70px_-46px_rgba(15,23,42,0.22)]">
+            <StepWizard steps={HUMAN_VERIFICATION_STEPS} currentStep={5} />
+            <div className="mt-6">
+              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-brand-blue/70">{label}</p>
+              <div className="mt-4 h-2.5 max-w-xl overflow-hidden rounded-full bg-slate-100">
+                <div className="h-full rounded-full bg-brand-blue" style={{ width: `${flowProgress}%` }} />
+              </div>
+            </div>
+          </div>
+        )}
+
         <PageHeader
           title="Verification Batch Status"
           subtitle="Monitor your batches across the full verification pipeline"
@@ -400,7 +417,7 @@ export const BatchStatus = () => {
           </div>
         )}
 
-        <Button variant="primary" className="w-full" onClick={() => navigate('/org/create-batch')} icon={RefreshCw}>
+        <Button variant="primary" className="w-full" onClick={() => navigate('/org/verifications')} icon={RefreshCw}>
           New Batch Upload
         </Button>
       </div>

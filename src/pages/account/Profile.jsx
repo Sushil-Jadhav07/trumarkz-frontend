@@ -7,9 +7,11 @@ import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
 import { Badge } from '@/components/ui/Badge';
 import { useAuth } from '@/context/AuthContext';
+import { authAPI } from '@/services/api';
+import { industries } from '@/data/mockData';
 import {
   User, Camera, Mail, Phone, Building2, Save,
-  CheckCircle, FileText, MapPin, RefreshCw, Shield,
+  CheckCircle, FileText, MapPin, RefreshCw, Shield, Briefcase,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -28,6 +30,33 @@ const normalizeForm = (user) => ({
   avatarUrl: user?.avatarUrl || '',
 });
 
+const normalizeIndustryValue = (value) => {
+  if (typeof value === 'string') return value.trim();
+  if (Array.isArray(value)) {
+    const first = value.find((v) => typeof v === 'string' && v.trim());
+    return first ? first.trim() : '';
+  }
+  return '';
+};
+
+const getIndustryLabel = (value) => {
+  const normalizedValue = normalizeIndustryValue(value);
+  if (!normalizedValue) return '';
+  const raw = normalizedValue.toLowerCase();
+  const industryAliases = {
+    info: 'others',
+    it: 'others',
+  };
+  const normalized = industryAliases[raw] || raw;
+  const matchById = industries.find((industry) => industry.id === normalized);
+  if (matchById) return matchById.name;
+
+  const matchByName = industries.find((industry) => industry.name.toLowerCase() === normalized);
+  if (matchByName) return matchByName.name;
+
+  return normalizedValue;
+};
+
 const InfoRow = ({ label, value, icon: Icon }) => (
   <div className="flex items-start gap-3 p-3 bg-gray-50 rounded-xl">
     {Icon && <Icon size={16} className="text-gray-400 mt-0.5 shrink-0" />}
@@ -44,6 +73,8 @@ export const Profile = () => {
   const [form, setForm] = useState(normalizeForm(user));
   const [saving, setSaving] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [industryType, setIndustryType] = useState(null);
+  const [industryLoading, setIndustryLoading] = useState(false);
 
   useEffect(() => {
     setForm(normalizeForm(user));
@@ -58,6 +89,32 @@ export const Profile = () => {
     }
     return () => { mounted = false; };
   }, []);
+
+  // Fetch industry type from dedicated endpoint for org users
+  useEffect(() => {
+    if (role !== 'organization' || !user?.id) return;
+    let mounted = true;
+    setIndustryLoading(true);
+    authAPI.getOrgIndustryType(user.id)
+      .then(({ data }) => {
+        if (!mounted) return;
+        const apiIndustry =
+          typeof data === 'string'
+            ? data
+            : Array.isArray(data?.industry_type)
+              ? data.industry_type[0] ?? null
+              : data?.industry_type ?? null;
+        setIndustryType(apiIndustry);
+      })
+      .catch(() => {
+        if (!mounted) return;
+        // Fallback: derive from auth context
+        const ctx = user?.industryType;
+        setIndustryType(typeof ctx === 'string' ? ctx : Array.isArray(ctx) ? ctx[0] ?? null : null);
+      })
+      .finally(() => { if (mounted) setIndustryLoading(false); });
+    return () => { mounted = false; };
+  }, [role, user?.id]);
 
   const displayName = form.name.trim() || 'User';
   const avatarInitial = displayName[0]?.toUpperCase() || 'U';
@@ -204,16 +261,25 @@ export const Profile = () => {
                 <InfoRow label="Organization Name" value={user?.organization} icon={Building2} />
                 <InfoRow label="GSTIN" value={user?.gstin} icon={FileText} />
                 <InfoRow label="Business Reg. No." value={user?.businessRegNumber} icon={FileText} />
-                {Array.isArray(user?.industryType) && user.industryType.length > 0 && (
-                  <div className="p-3 bg-gray-50 rounded-xl sm:col-span-2">
-                    <p className="text-xs text-gray-400 font-inter mb-2">Industry Types</p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {user.industryType.map((ind) => (
-                        <Badge key={ind} status="info">{ind}</Badge>
-                      ))}
-                    </div>
+                <div className="p-3 bg-gray-50 rounded-xl sm:col-span-2 flex items-center gap-3">
+                  <Briefcase size={16} className="text-gray-400 shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs text-gray-400 font-inter mb-1">Industry Type</p>
+                    {industryLoading ? (
+                      <div className="flex items-center gap-1.5">
+                        <svg className="animate-spin w-3.5 h-3.5 text-brand-blue" viewBox="0 0 24 24" fill="none">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                        </svg>
+                        <span className="text-xs text-gray-400 font-inter">Fetching…</span>
+                      </div>
+                    ) : industryType ? (
+                      <Badge status="info">{getIndustryLabel(industryType)}</Badge>
+                    ) : (
+                      <span className="text-sm text-gray-400 font-inter italic">Not configured</span>
+                    )}
                   </div>
-                )}
+                </div>
                 {(user?.addressLine1 || user?.addressLine2 || user?.addressLine3) && (
                   <div className="p-3 bg-gray-50 rounded-xl sm:col-span-2">
                     <div className="flex items-start gap-3">
