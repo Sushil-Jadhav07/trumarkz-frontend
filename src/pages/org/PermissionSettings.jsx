@@ -67,7 +67,7 @@ export const PermissionSettings = () => {
     <AuthLayout title="Permissions">
       <div className="mx-auto w-full max-w-[1380px]">
         <div className="mb-10 rounded-[32px] border border-slate-200/80 bg-white/95 p-5 shadow-[0_30px_80px_-44px_rgba(15,23,42,0.20)] backdrop-blur">
-          <StepWizard steps={HUMAN_VERIFICATION_STEPS} currentStep={1} />
+          <StepWizard steps={HUMAN_VERIFICATION_STEPS} currentStep={2} />
         </div>
 
         <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">

@@ -7,6 +7,7 @@ import { AuthLayout } from '@/components/layout/AuthLayout';
 import { PageHeader } from '@/components/shared/PageHeader';
 import { Button } from '@/components/ui/Button';
 import { StepWizard } from '@/components/ui/StepWizard';
+import { HUMAN_VERIFICATION_STEPS } from '@/data/humanVerificationFlow';
 import { industries } from '@/data/mockData';
 import { authAPI } from '@/services/api';
 import {
@@ -94,7 +95,9 @@ export const SelectIndustry = () => {
   return (
     <AuthLayout title="Select Industry">
       <div className="w-full mx-auto lg:max-w-none">
-        <StepWizard steps={['Industry', 'Verifications', 'Permissions', 'Template', 'Batch']} currentStep={0} />
+        <div className="mb-8 rounded-[30px] border border-slate-200 bg-white p-5 shadow-[0_24px_70px_-46px_rgba(15,23,42,0.22)]">
+          <StepWizard steps={HUMAN_VERIFICATION_STEPS} currentStep={0} />
+        </div>
 
         <div className="flex items-center justify-between mb-1">
           <PageHeader

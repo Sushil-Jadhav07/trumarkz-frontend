@@ -1,1 +1,0 @@
-import{j as t}from"./index-DLP5Bfay.js";import{c as d}from"./clsx-B-dksMZM.js";const m=({children:r,className:o,hover:s=!1,onClick:a})=>t.jsx("div",{onClick:a,className:d("bg-white rounded-xl border border-gray-100 shadow-sm",s&&"hover:shadow-md transition-shadow duration-200 cursor-pointer",o),children:r});export{m as C};

@@ -13,6 +13,7 @@ import {
   Check,
   ArrowRight,
   Home,
+  ChevronRight,
   GraduationCap,
   Briefcase,
   Building2,
@@ -44,7 +45,13 @@ const iconMap = {
 
 export const SelectVerifications = () => {
   const navigate = useNavigate();
-  const { selectedVerifications, setSelectedVerifications } = useApp();
+  const { selectedVerifications, setSelectedVerifications, selectedIndustry } = useApp();
+
+  const selectedIndustries = Array.isArray(selectedIndustry)
+    ? selectedIndustry
+    : selectedIndustry
+      ? [selectedIndustry]
+      : [];
 
   const toggleVerification = (id) =>
     setSelectedVerifications((prev) =>
@@ -67,11 +74,54 @@ export const SelectVerifications = () => {
   return (
     <AuthLayout title="Select Verifications">
       <div className="w-full mx-auto lg:max-w-none">
-        <StepWizard steps={HUMAN_VERIFICATION_STEPS} currentStep={0} />
-        <PageHeader
-          title="Select Verification Checks"
-          subtitle={selectedVerifications.length > 0 ? `${selectedVerifications.length} selected` : 'Choose the checks to include in this batch'}
-        />
+        <div className="mb-8 rounded-[30px] border border-slate-200 bg-white p-5 shadow-[0_24px_70px_-46px_rgba(15,23,42,0.22)]">
+          <StepWizard steps={HUMAN_VERIFICATION_STEPS} currentStep={1} />
+        </div>
+
+        <div className="flex items-start justify-between gap-4 mb-1">
+          <PageHeader
+            title="Select Verification Checks"
+            subtitle={selectedVerifications.length > 0 ? `${selectedVerifications.length} selected` : 'Choose the checks to include in this batch'}
+          />
+          {selectedVerifications.length > 0 && (
+            <motion.span
+              initial={{ opacity: 0, scale: 0.85 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="shrink-0 rounded-full bg-brand-blue px-3 py-1.5 text-xs font-semibold text-white"
+            >
+              {selectedVerifications.length} selected
+            </motion.span>
+          )}
+        </div>
+
+        {selectedIndustries.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mb-5 flex flex-wrap items-center gap-2 rounded-xl border border-brand-blue/20 bg-brand-blue/5 p-4"
+          >
+            <span className="mr-1 self-center text-xs text-gray-500">Industry:</span>
+            {selectedIndustries.map((industry) => (
+              <button
+                key={industry.id}
+                type="button"
+                onClick={() => navigate('/org/industry')}
+                className="inline-flex items-center gap-1.5 rounded-full bg-brand-blue px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-brand-blue/85"
+              >
+                <span>{industry.name}</span>
+                <ChevronRight size={12} />
+              </button>
+            ))}
+            <button
+              type="button"
+              onClick={() => navigate('/org/industry')}
+              className="inline-flex items-center gap-1.5 rounded-full border border-brand-blue/25 bg-white px-3 py-1.5 text-xs font-medium text-brand-blue transition-colors hover:bg-brand-blue/5"
+            >
+              Edit selection
+              <ChevronRight size={12} />
+            </button>
+          </motion.div>
+        )}
 
         <Card className="p-3 sm:p-6">
           <div className="space-y-3">

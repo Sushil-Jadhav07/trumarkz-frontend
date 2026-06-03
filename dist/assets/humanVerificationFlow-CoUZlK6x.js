@@ -1,1 +1,0 @@
-const e=["Verifications","Permissions","Template","Preview","Cost","Batch"],s={preview:{label:"Step 4 of 6",progress:66.67},cost:{label:"Step 5 of 6",progress:83.33},batch:{label:"Step 6 of 6",progress:100}};export{e as H,s as a};

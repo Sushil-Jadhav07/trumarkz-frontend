@@ -77,7 +77,7 @@ export const CertificatePreview = () => {
     <AuthLayout title="Certificate Preview">
       <div className="mx-auto w-full max-w-[1380px]">
         <div className="mb-8 rounded-[30px] border border-slate-200 bg-white p-5 shadow-[0_24px_70px_-46px_rgba(15,23,42,0.22)]">
-          <StepWizard steps={HUMAN_VERIFICATION_STEPS} currentStep={3} />
+          <StepWizard steps={HUMAN_VERIFICATION_STEPS} currentStep={4} />
         </div>
 
         <section className="mb-8">

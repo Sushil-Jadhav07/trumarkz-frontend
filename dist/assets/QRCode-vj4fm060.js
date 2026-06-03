@@ -1,1 +1,0 @@
-import{j as r}from"./index-DLP5Bfay.js";import{Q as l}from"./index-WKzWyCD7.js";const a=({value:e,size:o=128,className:s=""})=>r.jsx("div",{className:`inline-flex p-3 bg-white rounded-xl border border-gray-200 shadow-sm ${s}`,children:r.jsx(l,{value:e,size:o,bgColor:"#FFFFFF",fgColor:"#0B0F19",level:"M",includeMargin:!1})});export{a as Q};
