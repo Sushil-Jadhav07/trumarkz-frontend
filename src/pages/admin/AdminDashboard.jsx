@@ -11,7 +11,7 @@ import { verificationAPI, getApiError } from '@/services/api';
 import { mockDisputes } from '@/data/mockData';
 import {
   CheckSquare, Layers, AlertTriangle, ArrowRight,
-  Clock, Users, CheckCircle, XCircle, RefreshCw,
+  Clock, Users, CheckCircle, XCircle, RefreshCw, ShieldCheck, UserPlus,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -92,10 +92,44 @@ export const AdminDashboard = () => {
     },
   ];
 
+  const adminActions = [
+    {
+      title: 'Promote existing user',
+      description: 'Grant super-admin access to an existing verified account.',
+      path: '/admin/promote-super-admin',
+      icon: ShieldCheck,
+    },
+    {
+      title: 'Create new super admin',
+      description: 'Create a brand-new privileged account with platform control.',
+      path: '/admin/create-super-admin',
+      icon: UserPlus,
+    },
+  ];
+
   return (
     <AuthLayout title="Admin Dashboard">
       <div className="space-y-6">
         <PageHeader title="Super Admin Dashboard" subtitle="Full platform overview and control" />
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {adminActions.map((action, index) => (
+            <motion.button
+              key={action.title}
+              initial={{ opacity: 0, y: 18 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: index * 0.08 }}
+              onClick={() => navigate(action.path)}
+              className="rounded-2xl border border-slate-200 bg-white p-5 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:border-brand-blue/30 hover:shadow-md"
+            >
+              <div className="w-11 h-11 rounded-2xl bg-brand-blue/10 flex items-center justify-center mb-4">
+                <action.icon size={20} className="text-brand-blue" />
+              </div>
+              <p className="font-sora font-semibold text-slate-950">{action.title}</p>
+              <p className="mt-2 text-sm text-slate-500 font-inter">{action.description}</p>
+            </motion.button>
+          ))}
+        </div>
 
         {/* Stat cards */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">

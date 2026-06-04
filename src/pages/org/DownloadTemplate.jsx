@@ -1,19 +1,6 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { flushSync } from 'react-dom';
+import React, { useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
-import {
-  ArrowRight,
-  CircleCheck,
-  Download,
-  FileSpreadsheet,
-  Sparkles,
-  UploadCloud,
-  User,
-} from 'lucide-react';
-import toast from 'react-hot-toast';
-import * as XLSX from 'xlsx';
-import clsx from 'clsx';
 import { AuthLayout } from '@/components/layout/AuthLayout';
 import { PageHeader } from '@/components/shared/PageHeader';
 import { Button } from '@/components/ui/Button';
@@ -21,339 +8,194 @@ import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
 import { StepWizard } from '@/components/ui/StepWizard';
 import { FileUpload } from '@/components/ui/FileUpload';
+import {
+  ArrowRight,
+  CircleCheck,
+  Download,
+  FileSpreadsheet,
+  Plus,
+  Trash2,
+  Upload,
+  User,
+} from 'lucide-react';
+import toast from 'react-hot-toast';
 import { useApp } from '@/context/AppContext';
-import { HUMAN_VERIFICATION_STEPS } from '@/data/humanVerificationFlow';
-import { verificationAPI, getApiError, triggerBlobDownload } from '@/services/api';
+import { verificationTypes } from '@/data/mockData';
+import { verificationAPI, triggerBlobDownload, getApiError } from '@/services/api';
+import { getVerificationApiTypes } from '@/utils/verificationFlow';
+import clsx from 'clsx';
 
-const BASE_FIELD_OPTIONS = [
-  {
-    id: 'full_name',
-    label: 'Full Name',
-    helper: 'Always included in every template',
-    locked: true,
-    defaultOn: true,
-    badge: 'Fixed',
-  },
-  {
-    id: 'email',
-    label: 'Email',
-    helper: 'Optional base column',
-    defaultOn: true,
-    badge: 'On',
-  },
-  {
-    id: 'phone_number',
-    label: 'Mobile',
-    helper: 'Optional base column',
-    defaultOn: true,
-    badge: 'On',
-  },
-  {
-    id: 'dob',
-    label: 'DOB',
-    helper: 'Optional base column',
-    defaultOn: false,
-    badge: 'Off',
-  },
-  {
-    id: 'photo',
-    label: 'Photo',
-    helper: 'Added and locked by the backend automatically.',
-    locked: true,
-    auto: true,
-    defaultOn: true,
-    badge: 'Auto',
-  },
+const BASE_FIELDS = [
+  { key: 'full_name', label: 'Full Name', description: 'Always included in every template', fixed: true },
+  { key: 'email', label: 'Email', description: 'Used for invite delivery', fixed: false },
+  { key: 'phone_number', label: 'Mobile', description: 'Optional base column', fixed: false },
+  { key: 'dob', label: 'DOB', description: 'Optional base column', fixed: false },
 ];
 
-const formatLabel = (value) =>
-  value
-    .split('_')
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(' ');
+const EXTRA_FIELDS = [
+  { key: 'aadhar_number', label: 'Aadhaar Number' },
+  { key: 'pan_number', label: 'PAN Number' },
+  { key: 'address_line1', label: 'Address Line 1' },
+  { key: 'address_line2', label: 'Address Line 2' },
+  { key: 'address_line3', label: 'Address Line 3' },
+  { key: 'pincode', label: 'Pincode' },
+  { key: 'state', label: 'State' },
+  { key: 'country', label: 'Country' },
+];
 
-const normalizeCustomField = (value = '') =>
-  String(value)
+const DEFAULT_FIELD_SELECTION = {
+  email: true,
+  phone_number: true,
+  dob: false,
+};
+
+const sanitizeFieldKey = (value) =>
+  String(value || '')
     .trim()
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '_')
     .replace(/^_+|_+$/g, '');
 
-const REQUIRED_UPLOAD_COLUMNS = ['full_name', 'email', 'phone_number'];
-
-const VERIFICATION_COLUMN_MAP = {
-  police: ['police_station', 'city_of_residence'],
-  police_verification: ['police_station', 'city_of_residence'],
-  education: ['college_name', 'degree', 'graduation_year'],
-  driving_license: ['driving_licence_number', 'dl_expiry_date'],
-  address: ['address_line1', 'address_line2', 'address_line3', 'pincode', 'state', 'country'],
-  experience: ['employer_name', 'employment_duration'],
-  company: ['employer_name', 'employment_duration'],
-};
-
-const SelectedPill = ({ children, tone = 'default' }) => (
-  <span
+const FieldCard = ({ field, enabled, onToggle }) => (
+  <button
+    type="button"
+    onClick={field.fixed ? undefined : onToggle}
     className={clsx(
-      'inline-flex items-center rounded-full px-3 py-1 text-xs font-medium',
-      tone === 'blue' && 'bg-brand-blue/10 text-brand-blue',
-      tone === 'green' && 'bg-emerald-100 text-emerald-700',
-      tone === 'default' && 'bg-slate-100 text-slate-700'
+      'rounded-[20px] border p-4 text-left transition-all',
+      field.fixed || enabled
+        ? 'border-brand-blue/25 bg-brand-blue/[0.04]'
+        : 'border-slate-200 bg-white hover:border-slate-300'
     )}
   >
-    {children}
-  </span>
+    <div className="flex items-start justify-between gap-3">
+      <div>
+        <p className="font-sora text-base font-semibold text-slate-950">{field.label}</p>
+        <p className="mt-1 text-xs leading-5 text-slate-500 font-inter">{field.description}</p>
+      </div>
+      <span
+        className={clsx(
+          'inline-flex min-w-[54px] items-center justify-center rounded-full px-3 py-1 text-[11px] font-semibold',
+          field.fixed
+            ? 'bg-brand-blue/10 text-brand-blue'
+            : enabled
+              ? 'bg-brand-blue text-white'
+              : 'bg-slate-100 text-slate-600'
+        )}
+      >
+        {field.fixed ? 'Fixed' : enabled ? 'On' : 'Off'}
+      </span>
+    </div>
+  </button>
 );
 
 export const DownloadTemplate = () => {
   const navigate = useNavigate();
-  const {
-    selectedFields,
-    setSelectedFields,
-    selectedVerifications,
-    batchData,
-    setBatchData,
-  } = useApp();
+  const { selectedVerifications } = useApp();
 
   const [mode, setMode] = useState('bulk');
-  const [excelFile, setExcelFile] = useState(batchData?.file || null);
-  const [isDownloadingTemplate, setIsDownloadingTemplate] = useState(false);
-  const [isContinuingBulk, setIsContinuingBulk] = useState(false);
-  const [submittingSingle, setSubmittingSingle] = useState(false);
+  const [excelFile, setExcelFile] = useState(null);
+  const [downloadingTemplate, setDownloadingTemplate] = useState(false);
   const [customFieldInput, setCustomFieldInput] = useState('');
-  const [batchName, setBatchName] = useState(
-    batchData?.batchName || `Human Verification Batch ${new Date().toLocaleDateString('en-GB').replace(/\//g, '-')}`
-  );
-  const [customFields, setCustomFields] = useState(() => {
-    const baseIds = BASE_FIELD_OPTIONS.map((field) => field.id);
-    const verificationIds = Object.values(VERIFICATION_COLUMN_MAP).flat();
-    return (selectedFields || []).filter(
-      (field) => !baseIds.includes(field) && !verificationIds.includes(field) && field !== 'photo'
-    );
-  });
-  const [selectedBaseFields, setSelectedBaseFields] = useState(() => {
-    const enabled = BASE_FIELD_OPTIONS.filter((field) => field.defaultOn && field.id !== 'photo').map((field) => field.id);
-    if (!selectedFields?.length) return enabled;
-    return BASE_FIELD_OPTIONS
-      .filter((field) => field.id !== 'photo' && (field.locked || selectedFields.includes(field.id)))
-      .map((field) => field.id);
-  });
+  const [customFields, setCustomFields] = useState([]);
+  const [fieldSelection, setFieldSelection] = useState(DEFAULT_FIELD_SELECTION);
   const [singleForm, setSingleForm] = useState({
     fullName: '',
-    email: '',
     dob: '',
     mobile: '',
     photo: null,
   });
 
-  const basePreviewColumns = useMemo(
-    () => [...new Set(selectedBaseFields)],
-    [selectedBaseFields]
-  );
+  const selectedVerificationNames = selectedVerifications
+    .map((id) => verificationTypes.find((vt) => vt.id === id)?.name)
+    .filter(Boolean);
 
-  const verificationPreviewColumns = useMemo(
-    () => [
-      ...new Set(
-        selectedVerifications.flatMap((verificationId) => VERIFICATION_COLUMN_MAP[verificationId] || [])
-      ),
-    ],
-    [selectedVerifications]
-  );
+  const selectedVerificationTypes = getVerificationApiTypes(selectedVerifications);
 
-  const finalColumns = useMemo(
-    () => [...new Set([...basePreviewColumns, ...customFields, ...verificationPreviewColumns, 'photo'])],
-    [basePreviewColumns, customFields, verificationPreviewColumns]
+  const selectedBaseHeaders = useMemo(
+    () =>
+      BASE_FIELDS.filter((field) => field.fixed || fieldSelection[field.key])
+        .map((field) => field.key),
+    [fieldSelection]
   );
 
   const templateHeaders = useMemo(
-    () => [...new Set([...basePreviewColumns, ...verificationPreviewColumns].filter((column) => column !== 'photo'))],
-    [basePreviewColumns, verificationPreviewColumns]
+    () => [...selectedBaseHeaders, ...customFields],
+    [selectedBaseHeaders, customFields]
   );
 
-  useEffect(() => {
-    setSelectedFields(finalColumns);
-  }, [finalColumns, setSelectedFields]);
-
-  const toggleBaseField = (fieldId) => {
-    const field = BASE_FIELD_OPTIONS.find((item) => item.id === fieldId);
-    if (!field || field.locked || field.id === 'photo') return;
-    setSelectedBaseFields((current) =>
-      current.includes(fieldId)
-        ? current.filter((item) => item !== fieldId)
-        : [...current, fieldId]
-    );
+  const toggleField = (key) => {
+    setFieldSelection((current) => ({
+      ...current,
+      [key]: !current[key],
+    }));
   };
 
-  const addCustomField = () => {
-    const normalized = normalizeCustomField(customFieldInput);
+  const handleAddCustomField = () => {
+    const normalized = sanitizeFieldKey(customFieldInput);
+
     if (!normalized) {
-      toast.error('Enter a valid field name');
+      toast.error('Enter a valid custom field name');
       return;
     }
-    if (finalColumns.includes(normalized)) {
-      toast.error('That field is already included');
+
+    if (templateHeaders.includes(normalized) || EXTRA_FIELDS.some((field) => field.key === normalized)) {
+      toast.error('That field already exists');
       return;
     }
+
     setCustomFields((current) => [...current, normalized]);
     setCustomFieldInput('');
   };
 
-  const removeCustomField = (field) => {
-    setCustomFields((current) => current.filter((item) => item !== field));
+  const handleRemoveCustomField = (fieldKey) => {
+    setCustomFields((current) => current.filter((item) => item !== fieldKey));
   };
 
   const handleDownloadTemplate = async () => {
-    if (templateHeaders.length === 0) {
-      toast.error('Select at least one base field');
-      return;
-    }
-
-    setIsDownloadingTemplate(true);
+    setDownloadingTemplate(true);
     try {
       const { data } = await verificationAPI.generateHumanTemplate(
         templateHeaders,
-        selectedVerifications.join(',')
+        selectedVerificationTypes
       );
-      if (customFields.length > 0) {
-        const buffer = await data.arrayBuffer();
-        const workbook = XLSX.read(buffer, { type: 'array' });
-        const sheetName = workbook.SheetNames[0];
-        const sheet = workbook.Sheets[sheetName];
-        const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, blankrows: false });
-        const existingHeaders = Array.isArray(rows[0]) ? rows[0] : [];
-        const mergedHeaders = [...existingHeaders];
-        customFields.forEach((field) => {
-          if (!mergedHeaders.includes(field)) mergedHeaders.push(field);
-        });
-        const nextRows = [
-          mergedHeaders,
-          ...(rows.slice(1).map((row) => {
-            const normalizedRow = Array.isArray(row) ? [...row] : [];
-            while (normalizedRow.length < mergedHeaders.length) normalizedRow.push('');
-            return normalizedRow;
-          })),
-        ];
-        const nextSheet = XLSX.utils.aoa_to_sheet(nextRows);
-        nextSheet['!cols'] = mergedHeaders.map((header) => ({ wch: Math.max(18, formatLabel(String(header)).length + 3) }));
-        workbook.Sheets[sheetName] = nextSheet;
-        XLSX.writeFile(workbook, 'trumarkz-human-verification-template.xlsx');
-      } else {
-        triggerBlobDownload(data, 'trumarkz-human-verification-template.xlsx');
-      }
+      triggerBlobDownload(data, 'trumarkz-human-verification-template.xlsx');
       toast.success('Template downloaded');
-    } catch (error) {
-      toast.error(getApiError(error, 'Failed to download template'));
+    } catch (err) {
+      toast.error(getApiError(err, 'Failed to download template'));
     } finally {
-      setIsDownloadingTemplate(false);
+      setDownloadingTemplate(false);
     }
   };
 
-  const handleContinueBulk = async () => {
-    if (isContinuingBulk) return;
-    if (!batchName.trim()) {
-      toast.error('Enter a batch name');
-      return;
-    }
+  const handleContinueBulk = () => {
     if (!excelFile) {
-      toast.error('Please upload the filled Excel file');
+      toast.error('Please upload the completed Excel file');
       return;
     }
 
-    setIsContinuingBulk(true);
-    try {
-      const buffer = await excelFile.arrayBuffer();
-      const workbook = XLSX.read(buffer, { type: 'array' });
-      const sheet = workbook.Sheets[workbook.SheetNames[0]];
-      const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, blankrows: false });
-      const normalizedHeaders = (rows?.[0] || [])
-        .map((value) => normalizeCustomField(String(value || '')));
-      const missingRequiredColumns = REQUIRED_UPLOAD_COLUMNS.filter(
-        (column) => !normalizedHeaders.includes(column)
-      );
-      if (missingRequiredColumns.length > 0) {
-        toast.error(`Missing required columns: ${missingRequiredColumns.join(', ')}`);
-        return;
-      }
-      const recordCount = Math.max((rows?.length || 1) - 1, 0);
-      if (recordCount <= 0) {
-        toast.error('The uploaded sheet has no user rows');
-        return;
-      }
-
-      flushSync(() => {
-        setBatchData((current) => ({
-          ...(current || {}),
-          batchName: batchName.trim(),
-          description: '',
-          file: excelFile,
-          fileName: excelFile.name,
-          recordCount,
-          totalColumns: finalColumns.length,
-          baseFields: basePreviewColumns,
-          customFields,
-          verificationFields: verificationPreviewColumns,
-        }));
-      });
-
-      toast.dismiss('human-file-upload-success');
-      toast.success('File uploaded successfully', { id: 'human-file-upload-success' });
-      navigate('/org/certificate-preview', { replace: false });
-    } catch {
-      toast.error('Unable to read the uploaded file');
-    } finally {
-      setIsContinuingBulk(false);
-    }
+    toast.success('Template setup captured');
+    navigate('/org/create-batch', { state: { fromVerificationFlow: true } });
   };
 
-  const handleContinueSingle = async () => {
-    if (!singleForm.fullName) {
-      toast.error('Full Name is required');
-      return;
-    }
-    if (!singleForm.dob) {
-      toast.error('Date of Birth is required');
-      return;
-    }
-    if (!singleForm.email) {
-      toast.error('Email is required');
-      return;
-    }
-    if (!singleForm.mobile) {
-      toast.error('Mobile Number is required');
-      return;
-    }
-
-    setSubmittingSingle(true);
-    try {
-      await verificationAPI.uploadSingleHuman({
-        full_name: singleForm.fullName,
-        email: singleForm.email,
-        dob: singleForm.dob,
-        phone_number: singleForm.mobile,
-      });
-      toast.success('Single record submitted');
-      navigate('/org/batch-status');
-    } catch (error) {
-      toast.error(getApiError(error, 'Failed to submit single record'));
-    } finally {
-      setSubmittingSingle(false);
-    }
+  const handleContinueSingle = () => {
+    if (!singleForm.fullName) { toast.error('Full Name is required'); return; }
+    if (!singleForm.dob) { toast.error('Date of Birth is required'); return; }
+    if (!singleForm.mobile) { toast.error('Mobile Number is required'); return; }
+    toast.success('Single record submitted');
+    navigate('/org/batch-status');
   };
 
   return (
-    <AuthLayout title="Upload Data">
-      <div className="mx-auto w-full max-w-[1380px]">
-        <div className="mb-8 rounded-[30px] border border-slate-200 bg-white p-5 shadow-[0_24px_70px_-46px_rgba(15,23,42,0.22)]">
-          <StepWizard steps={HUMAN_VERIFICATION_STEPS} currentStep={3} />
-        </div>
-
+    <AuthLayout title="Template setup">
+      <div className="w-full mx-auto lg:max-w-none">
+        <StepWizard steps={['Industry', 'Verifications', 'Permissions', 'Template', 'Batch']} currentStep={3} />
         <PageHeader
           title="Upload Verification Data"
           subtitle="Choose bulk upload or fill a single record"
         />
 
-        <Card className="mb-6 rounded-[24px] border border-slate-200 p-2 shadow-[0_20px_60px_-46px_rgba(15,23,42,0.22)]">
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+        <Card className="p-2 mb-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             {[
               { id: 'bulk', label: 'Bulk Upload', icon: FileSpreadsheet, hint: 'Excel flow' },
               { id: 'single', label: 'Single Record', icon: User, hint: 'Direct form entry' },
@@ -362,300 +204,270 @@ export const DownloadTemplate = () => {
                 key={tab.id}
                 onClick={() => setMode(tab.id)}
                 className={clsx(
-                  'rounded-[18px] border px-4 py-4 text-left transition-all',
+                  'rounded-2xl px-4 py-4 text-left transition-all border',
                   mode === tab.id
-                    ? 'border-brand-blue bg-brand-blue/[0.04] shadow-[inset_0_0_0_1px_rgba(37,99,235,0.08)]'
-                    : 'border-transparent bg-white hover:bg-slate-50'
+                    ? 'bg-brand-blue/[0.04] border-brand-blue/40 shadow-[0_12px_30px_-26px_rgba(37,99,235,0.45)]'
+                    : 'bg-white border-transparent hover:bg-slate-50'
                 )}
               >
-                <div className="mb-1 flex items-center gap-3">
-                  <div className={clsx('flex h-9 w-9 items-center justify-center rounded-xl', mode === tab.id ? 'bg-brand-blue text-white' : 'bg-slate-100 text-slate-500')}>
-                    <tab.icon size={18} />
-                  </div>
-                  <span className="font-sora text-lg font-semibold text-slate-950">{tab.label}</span>
+                <div className="flex items-center gap-2 mb-1">
+                  <tab.icon size={16} className={mode === tab.id ? 'text-brand-blue' : 'text-slate-500'} />
+                  <span className={clsx('font-sora font-semibold text-sm', mode === tab.id ? 'text-slate-950' : 'text-slate-700')}>
+                    {tab.label}
+                  </span>
                 </div>
-                <p className="pl-12 text-sm text-slate-500">{tab.hint}</p>
+                <p className="text-xs text-slate-500 font-inter">{tab.hint}</p>
               </button>
             ))}
           </div>
         </Card>
 
         {mode === 'bulk' && (
-          <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_420px]">
+          <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_320px] gap-6 items-start">
             <div className="space-y-5">
-              <Card className="overflow-hidden rounded-[26px] border border-slate-200 shadow-[0_24px_70px_-46px_rgba(15,23,42,0.22)]">
-                <div className="flex flex-col gap-4 border-b border-slate-100 bg-[linear-gradient(180deg,#f6faff_0%,#ffffff_100%)] px-6 py-6 lg:flex-row lg:items-start lg:justify-between">
-                  <div className="flex gap-4">
-                    <div className="mt-1 flex h-11 w-11 items-center justify-center rounded-2xl bg-brand-blue text-white shadow-[0_18px_34px_-20px_rgba(37,99,235,0.7)]">
-                      <Sparkles size={20} />
+              <Card className="rounded-[28px] border border-slate-200 p-5">
+                <div className="flex items-start justify-between gap-4 mb-5">
+                  <div>
+                    <div className="inline-flex items-center gap-2 rounded-full bg-brand-blue/10 px-3 py-1 text-[11px] font-semibold text-brand-blue">
+                      Step 1 • build template
                     </div>
-                    <div>
-                      <SelectedPill tone="blue">Step 1 - build template</SelectedPill>
-                      <h3 className="mt-3 font-sora text-3xl font-semibold tracking-[-0.03em] text-slate-950">Download template</h3>
-                      <p className="mt-2 max-w-2xl text-base leading-8 text-slate-500">
-                        Pick the base fields you want, add extra columns if needed, and download a template aligned with your selected verification checks.
-                      </p>
-                    </div>
+                    <h3 className="mt-3 font-sora text-[30px] font-semibold tracking-[-0.04em] text-slate-950">
+                      Download template
+                    </h3>
+                    <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500 font-inter">
+                      Pick the base fields you want, add extra columns if needed, and download a template aligned with your selected verification checks.
+                    </p>
                   </div>
-                  <div className="w-fit rounded-[22px] border border-slate-200 bg-white px-6 py-4 text-center shadow-sm">
-                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Columns</p>
-                    <p className="mt-2 font-sora text-4xl font-bold text-slate-950">{finalColumns.length}</p>
-                  </div>
-                </div>
-
-                <div className="grid gap-5 px-6 py-6 xl:grid-cols-[minmax(0,1fr)_300px]">
-                  <div className="rounded-[24px] border border-slate-200 bg-slate-50/60 p-4 sm:p-5">
-                    <div className="mb-4">
-                      <h4 className="font-sora text-xl font-semibold text-slate-950">Base fields</h4>
-                      <p className="mt-1 text-sm text-slate-500">
-                        Only Full Name stays fixed. Turn the other base fields on or off as needed.
-                      </p>
-                    </div>
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      {BASE_FIELD_OPTIONS.map((field) => {
-                        const selected = field.id === 'photo' || selectedBaseFields.includes(field.id);
-                        const badgeLabel = field.locked || field.auto
-                          ? field.badge
-                          : selected
-                            ? 'On'
-                            : 'Off';
-                        return (
-                          <button
-                            key={field.id}
-                            type="button"
-                            onClick={() => toggleBaseField(field.id)}
-                            className={clsx(
-                              'rounded-[18px] border bg-white px-4 py-4 text-left transition-all',
-                              selected ? 'border-brand-blue/30 shadow-sm' : 'border-slate-200 hover:border-slate-300',
-                              (field.locked || field.auto) && 'cursor-default'
-                            )}
-                          >
-                            <div className="flex items-start justify-between gap-3">
-                              <div>
-                                <p className="font-sora text-lg font-semibold text-slate-950">{field.label}</p>
-                                <p className="mt-1 text-sm leading-6 text-slate-500">{field.helper}</p>
-                              </div>
-                              <SelectedPill tone={selected ? 'blue' : 'default'}>{badgeLabel}</SelectedPill>
-                            </div>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  <div className="rounded-[24px] border border-slate-200 bg-white p-5">
-                    <h4 className="font-sora text-xl font-semibold text-slate-950">Template summary</h4>
-                    <p className="mt-1 text-sm text-slate-500">What will be included in the file.</p>
-                    <div className="mt-5 grid grid-cols-2 gap-3">
-                      <div className="rounded-[18px] bg-slate-50 px-4 py-4">
-                        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Base</p>
-                        <p className="mt-2 font-sora text-3xl font-bold text-slate-950">{basePreviewColumns.length}</p>
-                      </div>
-                      <div className="rounded-[18px] bg-slate-50 px-4 py-4">
-                        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Custom</p>
-                        <p className="mt-2 font-sora text-3xl font-bold text-slate-950">{customFields.length}</p>
-                      </div>
-                      <div className="rounded-[18px] bg-slate-50 px-4 py-4 col-span-2">
-                        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Verification</p>
-                        <p className="mt-2 font-sora text-3xl font-bold text-slate-950">{verificationPreviewColumns.length}</p>
-                      </div>
-                    </div>
-                    <div className="mt-4 rounded-[18px] bg-brand-blue/[0.06] px-4 py-4 text-sm leading-6 text-brand-blue">
-                      Final order: required and selected base fields, your custom fields, backend-supported verification fields, then photo.
-                    </div>
+                  <div className="rounded-[18px] border border-slate-200 bg-white px-4 py-3 text-center min-w-[88px]">
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">Columns</p>
+                    <p className="mt-1 font-sora text-3xl font-semibold text-slate-950">{templateHeaders.length + 1}</p>
                   </div>
                 </div>
 
-                <div className="px-6 pb-6">
-                  <div className="rounded-[24px] border border-slate-200 bg-white p-5">
-                    <div className="flex items-start justify-between gap-4">
-                      <div>
-                        <h4 className="font-sora text-xl font-semibold text-slate-950">Custom fields</h4>
-                        <p className="mt-1 text-sm text-slate-500">
-                          Add your own extra columns. They will be added to the Excel template and uploaded with the sheet.
-                        </p>
-                      </div>
-                      <SelectedPill>snake_case</SelectedPill>
-                    </div>
-
-                    <div className="mt-5 flex flex-col gap-3 lg:flex-row">
-                      <Input
-                        placeholder="e.g. employee_id or department"
-                        value={customFieldInput}
-                        onChange={(event) => setCustomFieldInput(event.target.value)}
-                        className="flex-1"
-                      />
-                      <Button variant="outline" size="lg" onClick={addCustomField} className="lg:min-w-[160px]">
-                        Add field
-                      </Button>
-                    </div>
-
-                    {customFields.length > 0 ? (
-                      <div className="mt-4 flex flex-wrap gap-2">
-                        {customFields.map((field) => (
-                          <button
-                            key={field}
-                            type="button"
-                            onClick={() => removeCustomField(field)}
-                            className="rounded-full bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-200"
-                          >
-                            {field}
-                          </button>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="mt-4 rounded-[18px] bg-slate-50 px-4 py-4 text-sm text-slate-500">
-                        No custom fields added yet.
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                <div className="grid gap-5 border-t border-slate-100 px-6 py-6">
-                  <div className="rounded-[24px] border border-slate-200 bg-white p-5">
-                    <div className="flex items-start justify-between gap-4">
-                      <div>
-                        <h4 className="font-sora text-xl font-semibold text-slate-950">Column preview</h4>
-                        <p className="mt-1 text-sm text-slate-500">This is the final structure sent to the template API.</p>
-                      </div>
-                      <SelectedPill>{finalColumns.length} columns</SelectedPill>
-                    </div>
-                    <div className="mt-4 flex flex-wrap gap-2">
-                      {finalColumns.map((column) => (
-                        <SelectedPill
-                          key={column}
-                          tone={column === 'photo' ? 'green' : 'default'}
-                        >
-                          {formatLabel(column)}
-                        </SelectedPill>
+                <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_240px] gap-4">
+                  <div className="rounded-[22px] border border-slate-200 p-4">
+                    <p className="text-sm font-semibold text-slate-950">Base fields</p>
+                    <p className="mt-1 text-xs text-slate-500 font-inter">
+                      Only Full Name stays fixed. Turn the other base fields on or off as needed.
+                    </p>
+                    <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {BASE_FIELDS.map((field) => (
+                        <FieldCard
+                          key={field.key}
+                          field={field}
+                          enabled={field.fixed || Boolean(fieldSelection[field.key])}
+                          onToggle={() => toggleField(field.key)}
+                        />
                       ))}
                     </div>
                   </div>
+
+                  <div className="rounded-[22px] border border-slate-200 p-4">
+                    <p className="text-sm font-semibold text-slate-950">Template summary</p>
+                    <p className="mt-1 text-xs text-slate-500 font-inter">
+                      What will be included in the file.
+                    </p>
+                    <div className="mt-4 space-y-3">
+                      <div className="rounded-2xl bg-slate-50 p-4">
+                        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">Base</p>
+                        <p className="mt-1 font-sora text-3xl text-slate-950">{selectedBaseHeaders.length}</p>
+                      </div>
+                      <div className="rounded-2xl bg-slate-50 p-4">
+                        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">Custom</p>
+                        <p className="mt-1 font-sora text-3xl text-slate-950">{customFields.length}</p>
+                      </div>
+                      <div className="rounded-2xl bg-slate-50 p-4">
+                        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">Verification</p>
+                        <p className="mt-1 font-sora text-3xl text-slate-950">{selectedVerificationNames.length}</p>
+                      </div>
+                      <p className="text-[11px] leading-5 text-brand-blue font-inter">
+                        Includes Photo automatically in the downloaded template.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </Card>
+
+              <Card className="rounded-[28px] border border-slate-200 p-5">
+                <div className="flex items-start justify-between gap-3 mb-4">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-950">Custom fields</p>
+                    <p className="mt-1 text-xs text-slate-500 font-inter">
+                      Add your own extra columns. They will be added to the Excel template and uploaded with the sheet.
+                    </p>
+                  </div>
+                  <div className="rounded-full bg-slate-100 px-3 py-1 text-[11px] font-semibold text-slate-600">
+                    snake_case
+                  </div>
                 </div>
 
-                <div className="flex flex-col gap-4 border-t border-slate-100 px-6 py-5 lg:flex-row lg:items-center lg:justify-between">
-                  <p className="max-w-3xl text-sm leading-7 text-slate-500">
+                <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-3">
+                  <Input
+                    placeholder="e.g. employee_id or department"
+                    value={customFieldInput}
+                    onChange={(e) => setCustomFieldInput(e.target.value)}
+                  />
+                  <Button variant="outline" size="lg" icon={Plus} onClick={handleAddCustomField}>
+                    Add field
+                  </Button>
+                </div>
+
+                <div className="mt-4 rounded-[18px] bg-slate-50 p-4">
+                  {customFields.length === 0 ? (
+                    <p className="text-sm text-slate-500 font-inter">No custom fields added yet.</p>
+                  ) : (
+                    <div className="flex flex-wrap gap-2">
+                      {customFields.map((field) => (
+                        <div
+                          key={field}
+                          className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700"
+                        >
+                          <span>{field}</span>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveCustomField(field)}
+                            className="text-slate-400 transition-colors hover:text-red-500"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </Card>
+
+              <Card className="rounded-[28px] border border-slate-200 p-5">
+                <div className="flex items-start justify-between gap-3 mb-4">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-950">Column preview</p>
+                    <p className="mt-1 text-xs text-slate-500 font-inter">
+                      This is the final structure sent to the template API.
+                    </p>
+                  </div>
+                  <div className="rounded-full bg-slate-100 px-3 py-1 text-[11px] font-semibold text-slate-600">
+                    {templateHeaders.length + 1} columns
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  {templateHeaders.map((header) => (
+                    <span
+                      key={header}
+                      className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-[11px] font-medium text-slate-700"
+                    >
+                      {header}
+                    </span>
+                  ))}
+                  <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-[11px] font-medium text-emerald-700">
+                    Photo
+                  </span>
+                </div>
+
+                <div className="mt-5 flex items-center justify-between gap-4 rounded-[18px] bg-slate-50 px-4 py-3">
+                  <p className="text-xs text-slate-500 font-inter">
                     This screen controls only the editable base fields and your custom headers. The photo column stays locked.
                   </p>
                   <Button
                     variant="success"
-                    size="lg"
+                    size="md"
                     icon={Download}
                     onClick={handleDownloadTemplate}
-                    className="lg:min-w-[240px]"
-                    disabled={isDownloadingTemplate}
+                    loading={downloadingTemplate}
+                    className="shrink-0"
                   >
-                    {isDownloadingTemplate ? 'Downloading...' : 'Download template'}
+                    Download template
                   </Button>
                 </div>
               </Card>
 
-              <Card className="rounded-[26px] border border-slate-200 p-6 shadow-[0_24px_70px_-46px_rgba(15,23,42,0.22)]">
-                <div className="flex items-start gap-4">
-                  <div className="mt-1 flex h-11 w-11 items-center justify-center rounded-2xl bg-brand-blue text-white shadow-[0_18px_34px_-20px_rgba(37,99,235,0.7)]">
-                    <UploadCloud size={20} />
-                  </div>
+              <Card className="rounded-[28px] border border-slate-200 p-5">
+                <div className="flex items-start justify-between gap-3 mb-4">
                   <div>
-                    <h3 className="font-sora text-3xl font-semibold tracking-[-0.03em] text-slate-950">Upload filled file</h3>
-                    <p className="mt-2 text-base leading-8 text-slate-500">
+                    <div className="inline-flex items-center gap-2 rounded-full bg-brand-blue/10 px-3 py-1 text-[11px] font-semibold text-brand-blue">
+                      Step 2
+                    </div>
+                    <h3 className="mt-3 font-sora text-[28px] font-semibold tracking-[-0.04em] text-slate-950">
+                      Upload filled file
+                    </h3>
+                    <p className="mt-2 text-sm leading-6 text-slate-500 font-inter">
                       Upload the completed spreadsheet after you fill in the downloaded template.
                     </p>
                   </div>
                 </div>
 
-                <div className="mt-6 space-y-4">
+                <div className="space-y-4">
                   <Input
                     label="Batch Name"
-                    placeholder="e.g. Security Staff Verification - June 2026"
-                    value={batchName}
-                    onChange={(event) => setBatchName(event.target.value)}
+                    placeholder="Human Verification Batch 04-06-2026"
+                    value="Human Verification Batch 04-06-2026"
+                    readOnly
                   />
                   <FileUpload
-                    label="Upload Excel File (.xlsx)"
+                    label="Upload completed Excel file (.xlsx)"
                     fileType="xlsx"
-                    accept={{
-                      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
-                      'application/vnd.ms-excel': ['.xls'],
-                    }}
+                    accept={{ 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'] }}
                     selectedFile={excelFile}
                     onFileSelect={setExcelFile}
                     onRemove={() => setExcelFile(null)}
-                    maxSize={5 * 1024 * 1024}
                   />
                 </div>
               </Card>
             </div>
 
             <div>
-              <Card className="sticky top-24 overflow-hidden rounded-[26px] border border-slate-200 shadow-[0_24px_70px_-46px_rgba(15,23,42,0.22)]">
-                <div className="bg-slate-900 px-5 py-5 text-white">
-                  <p className="text-xs font-semibold uppercase tracking-[0.22em] text-blue-200/80">Ready to submit</p>
-                  <h4 className="mt-3 font-sora text-3xl font-semibold tracking-[-0.03em]">Upload checklist</h4>
-                  <p className="mt-2 text-sm leading-7 text-slate-300">
+              <Card className="sticky top-24 rounded-[28px] overflow-hidden border border-slate-200 p-0">
+                <div className="bg-slate-950 px-5 py-5 text-white">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/60">Ready to submit</p>
+                  <h3 className="mt-2 font-sora text-[28px] font-semibold tracking-[-0.04em]">
+                    Upload checklist
+                  </h3>
+                  <p className="mt-2 text-xs leading-6 text-white/70 font-inter">
                     Download the file, fill it offline, then continue with the batch upload.
                   </p>
                 </div>
 
-                <div className="space-y-4 p-5">
-                  <div className="rounded-[20px] bg-slate-50 px-4 py-4">
-                    <div className="flex items-start gap-3">
-                      <CircleCheck size={16} className="mt-1 text-emerald-600" />
+                <div className="p-5">
+                  <div className="space-y-4">
+                    <div className="flex items-start gap-3 rounded-[18px] bg-slate-50 p-4">
+                      <CircleCheck size={16} className="mt-0.5 text-emerald-600 shrink-0" />
                       <div>
-                        <p className="font-medium text-slate-950">Template builder ready</p>
-                        <p className="mt-1 text-sm leading-6 text-slate-500">
-                          Base fields, your custom fields, and backend-supported verification fields are configured for template generation.
+                        <p className="text-sm font-semibold text-slate-950">Template builder ready</p>
+                        <p className="mt-1 text-xs leading-5 text-slate-500 font-inter">
+                          Base fields, your custom fields, and selected verification fields are configured.
                         </p>
                       </div>
                     </div>
-                  </div>
 
-                  <div className="rounded-[20px] bg-slate-50 px-4 py-4">
-                    <div className="flex items-start gap-3">
-                      <UploadCloud size={16} className={excelFile ? 'mt-1 text-emerald-600' : 'mt-1 text-slate-400'} />
+                    <div className="flex items-start gap-3 rounded-[18px] bg-slate-50 p-4">
+                      <Upload size={16} className={clsx('mt-0.5 shrink-0', excelFile ? 'text-emerald-600' : 'text-slate-300')} />
                       <div>
-                        <p className="font-medium text-slate-950">Excel upload</p>
-                        <p className="mt-1 text-sm leading-6 text-slate-500">
-                          {excelFile ? `${excelFile.name} is ready to submit.` : 'Upload is required to continue'}
+                        <p className="text-sm font-semibold text-slate-950">Excel upload</p>
+                        <p className="mt-1 text-xs leading-5 text-slate-500 font-inter">
+                          {excelFile
+                            ? `${excelFile.name} is attached`
+                            : 'Upload the completed template file (.xlsx) to continue'}
                         </p>
                       </div>
                     </div>
-                  </div>
 
-                  <div className="rounded-[20px] border border-brand-blue/10 bg-brand-blue/[0.04] px-4 py-4">
-                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-brand-blue/70">Current setup</p>
-                    <div className="mt-3 space-y-3 text-sm text-slate-700">
-                      <div className="flex items-center justify-between">
-                        <span>Base fields</span>
-                        <span className="font-semibold text-slate-950">{basePreviewColumns.length}</span>
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <span>Custom fields</span>
-                        <span className="font-semibold text-slate-950">{customFields.length}</span>
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <span>Verification fields</span>
-                        <span className="font-semibold text-slate-950">{verificationPreviewColumns.length}</span>
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <span>Total download columns</span>
-                        <span className="font-semibold text-slate-950">{finalColumns.length}</span>
+                    <div className="rounded-[18px] border border-slate-200 bg-white p-4">
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">Current setup</p>
+                      <div className="mt-3 space-y-2 text-xs font-inter text-slate-600">
+                        <div className="flex items-center justify-between"><span>Base fields</span><span className="font-semibold text-slate-950">{selectedBaseHeaders.length}</span></div>
+                        <div className="flex items-center justify-between"><span>Custom fields</span><span className="font-semibold text-slate-950">{customFields.length}</span></div>
+                        <div className="flex items-center justify-between"><span>Verification fields</span><span className="font-semibold text-slate-950">{selectedVerificationNames.length}</span></div>
+                        <div className="flex items-center justify-between"><span>Total columns</span><span className="font-semibold text-slate-950">{templateHeaders.length + 1}</span></div>
                       </div>
                     </div>
                   </div>
 
-                  <p className="text-sm leading-7 text-slate-500">
+                  <p className="mt-4 text-xs leading-5 text-slate-400 font-inter">
                     Once the spreadsheet is uploaded, continue to review and submit your batch.
                   </p>
 
-                  <Button
-                    variant="primary"
-                    size="lg"
-                    className="w-full py-4 text-lg shadow-[0_20px_42px_-24px_rgba(37,99,235,0.62)]"
-                    onClick={handleContinueBulk}
-                    icon={ArrowRight}
-                    disabled={isContinuingBulk}
-                  >
-                    {isContinuingBulk ? 'Continuing...' : 'Continue'}
+                  <Button variant="primary" size="lg" className="w-full mt-5" onClick={handleContinueBulk} icon={ArrowRight}>
+                    Continue
                   </Button>
                 </div>
               </Card>
@@ -665,62 +477,65 @@ export const DownloadTemplate = () => {
 
         {mode === 'single' && (
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
-            <Card className="rounded-[26px] border border-slate-200 p-6 shadow-[0_24px_70px_-46px_rgba(15,23,42,0.22)]">
-              <h3 className="font-sora text-3xl font-semibold tracking-[-0.03em] text-slate-950">Single Record Details</h3>
-              <p className="mt-2 text-base leading-8 text-slate-500">
+            <Card className="p-6 space-y-4">
+              <h3 className="font-sora font-semibold text-brand-dark mb-1">Single record details</h3>
+              <p className="text-sm text-gray-500 font-inter -mt-1 mb-3">
                 Fill in this form to verify one individual record directly.
               </p>
 
-              <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <Input
                   label="Full Name"
                   placeholder="e.g. Ravi Kumar"
                   value={singleForm.fullName}
-                  onChange={(event) => setSingleForm((current) => ({ ...current, fullName: event.target.value }))}
+                  onChange={(e) => setSingleForm((p) => ({ ...p, fullName: e.target.value }))}
                 />
-                <Input
-                  label="Email"
-                  type="email"
-                  placeholder="e.g. ravi@example.com"
-                  value={singleForm.email}
-                  onChange={(event) => setSingleForm((current) => ({ ...current, email: event.target.value }))}
-                />
-              </div>
-
-              <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
                 <Input
                   label="Date of Birth"
                   type="date"
                   value={singleForm.dob}
-                  onChange={(event) => setSingleForm((current) => ({ ...current, dob: event.target.value }))}
+                  onChange={(e) => setSingleForm((p) => ({ ...p, dob: e.target.value }))}
                 />
               </div>
 
-              <div className="mt-4">
+              <Input
+                label="Mobile Number"
+                placeholder="+91 9876543210"
+                value={singleForm.mobile}
+                onChange={(e) => setSingleForm((p) => ({ ...p, mobile: e.target.value }))}
+              />
+
+              {selectedVerifications.includes('identity') && (
                 <Input
-                  label="Mobile Number"
-                  placeholder="+91 9876543210"
-                  value={singleForm.mobile}
-                  onChange={(event) => setSingleForm((current) => ({ ...current, mobile: event.target.value }))}
+                  label="Aadhaar Number"
+                  placeholder="XXXX XXXX XXXX"
+                  value={singleForm.aadhaar || ''}
+                  onChange={(e) => setSingleForm((p) => ({ ...p, aadhaar: e.target.value }))}
                 />
-              </div>
+              )}
+              {selectedVerifications.includes('pan') && (
+                <Input
+                  label="PAN Number"
+                  placeholder="ABCDE1234F"
+                  value={singleForm.pan || ''}
+                  onChange={(e) => setSingleForm((p) => ({ ...p, pan: e.target.value }))}
+                />
+              )}
 
-              <div className="mt-4">
-                <label className="mb-1.5 block text-sm font-medium text-brand-dark font-inter">Photo</label>
+              <div>
+                <label className="block text-sm font-medium text-brand-dark font-inter mb-1.5">Photo</label>
                 <FileUpload
                   label="Upload Photo"
                   accept={{ 'image/*': ['.jpg', '.jpeg', '.png'] }}
                   selectedFile={singleForm.photo}
-                  onFileSelect={(file) => setSingleForm((current) => ({ ...current, photo: file }))}
-                  onRemove={() => setSingleForm((current) => ({ ...current, photo: null }))}
+                  onFileSelect={(f) => setSingleForm((p) => ({ ...p, photo: f }))}
+                  onRemove={() => setSingleForm((p) => ({ ...p, photo: null }))}
                 />
               </div>
 
-              <div className="mt-6">
-                <Button variant="primary" size="lg" className="w-full" onClick={handleContinueSingle} icon={ArrowRight} disabled={submittingSingle}>
-                  {submittingSingle ? 'Submitting...' : 'Submit for Verification'}
-                </Button>
-              </div>
+              <Button variant="primary" size="lg" className="w-full" onClick={handleContinueSingle} icon={ArrowRight}>
+                Submit for verification
+              </Button>
             </Card>
           </motion.div>
         )}

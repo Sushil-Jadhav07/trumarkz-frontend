@@ -1,6 +1,5 @@
 import axios from 'axios';
 
-// ─── Base Configuration ───────────────────────────────────────────────────────
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
 const VERIFICATION_BASE_URL = import.meta.env.VITE_VERIFICATION_API_URL || API_BASE_URL;
 
@@ -16,9 +15,15 @@ const verificationApi = axios.create({
 });
 
 const PUBLIC_AUTH_ENDPOINTS = [
-  '/auth/login', '/auth/signup/individual', '/auth/signup/organization',
-  '/auth/verify-otp', '/auth/resend-otp', '/auth/forgot-password', '/auth/reset-password',
-  '/auth/google/url', '/auth/google',
+  '/auth/login',
+  '/auth/signup/individual',
+  '/auth/signup/organization',
+  '/auth/verify-otp',
+  '/auth/resend-otp',
+  '/auth/forgot-password',
+  '/auth/reset-password',
+  '/auth/google/url',
+  '/auth/google',
 ];
 
 const isPublicAuthEndpoint = (url = '') =>
@@ -33,198 +38,329 @@ const clearAuthStorage = () => {
   localStorage.removeItem('trumarkz_user');
 };
 
-const buildUseCasesPayload = (useCases = {}) => {
-  return useCases;
+const getStoredToken = () =>
+  localStorage.getItem('access_token') || localStorage.getItem('trumarkz_access_token');
+
+const cleanObject = (input = {}) =>
+  Object.fromEntries(
+    Object.entries(input).filter(([, value]) => {
+      if (value === undefined || value === null) return false;
+      if (typeof value === 'string') return value.trim() !== '';
+      if (Array.isArray(value)) return value.length > 0;
+      if (typeof value === 'object') return Object.keys(value).length > 0;
+      return true;
+    })
+  );
+
+const normalizeUploadArgs = (maybeOptions, maybeProgress) => {
+  const onProgress = typeof maybeOptions === 'function' ? maybeOptions : maybeProgress;
+  const options =
+    maybeOptions && typeof maybeOptions === 'object' && !Array.isArray(maybeOptions) && typeof maybeOptions !== 'function'
+      ? maybeOptions
+      : {};
+
+  return { options, onProgress };
 };
 
-api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('access_token') || localStorage.getItem('trumarkz_access_token');
-  if (token && !isPublicAuthEndpoint(config.url)) { config.headers.Authorization = `Bearer ${token}`; }
-  else if (config.headers?.Authorization) { delete config.headers.Authorization; }
-  return config;
-}, (error) => Promise.reject(error));
-
-api.interceptors.response.use((response) => response, (error) => {
-  const isLoginRequest = error.config?.url?.includes('/auth/login');
-  if (error.response?.status === 401 && !isLoginRequest) {
-    clearAuthStorage();
-    if (window.location.pathname !== '/login') window.location.replace('/login');
+const appendFormValue = (formData, key, value) => {
+  if (value === undefined || value === null || value === '') return;
+  if (Array.isArray(value)) {
+    if (value.length > 0) formData.append(key, value.join(','));
+    return;
   }
-  return Promise.reject(error);
-});
-
-verificationApi.interceptors.request.use((config) => {
-  const token = localStorage.getItem('access_token') || localStorage.getItem('trumarkz_access_token');
-  const isPublicUpload = config.url?.includes('/verification/upload/photo') || config.url?.includes('/verification/upload/document');
-  if (token && !isPublicUpload) { config.headers.Authorization = `Bearer ${token}`; }
-  return config;
-}, (error) => Promise.reject(error));
-
-verificationApi.interceptors.response.use((response) => response, (error) => {
-  if (error.response?.status === 401) {
-    clearAuthStorage();
-    if (window.location.pathname !== '/login') window.location.replace('/login');
+  if (typeof value === 'object') {
+    if (Object.keys(value).length > 0) formData.append(key, JSON.stringify(value));
+    return;
   }
-  return Promise.reject(error);
-});
+  formData.append(key, value);
+};
+
+const buildUseCasesPayload = (useCases = {}) => useCases;
+
+api.interceptors.request.use(
+  (config) => {
+    const token = getStoredToken();
+    if (token && !isPublicAuthEndpoint(config.url)) {
+      config.headers.Authorization = `Bearer ${token}`;
+    } else if (config.headers?.Authorization) {
+      delete config.headers.Authorization;
+    }
+    return config;
+  },
+  (error) => Promise.reject(error)
+);
+
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    const isLoginRequest = error.config?.url?.includes('/auth/login');
+    if (error.response?.status === 401 && !isLoginRequest) {
+      clearAuthStorage();
+      if (window.location.pathname !== '/login') window.location.replace('/login');
+    }
+    return Promise.reject(error);
+  }
+);
+
+verificationApi.interceptors.request.use(
+  (config) => {
+    const token = getStoredToken();
+    const isPublicUpload =
+      config.url?.includes('/verification/upload/photo') ||
+      config.url?.includes('/verification/upload/document') ||
+      config.url?.includes('/verification/categories');
+
+    if (token && !isPublicUpload) {
+      config.headers.Authorization = `Bearer ${token}`;
+    } else if (config.headers?.Authorization && isPublicUpload) {
+      delete config.headers.Authorization;
+    }
+
+    return config;
+  },
+  (error) => Promise.reject(error)
+);
+
+verificationApi.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401) {
+      clearAuthStorage();
+      if (window.location.pathname !== '/login') window.location.replace('/login');
+    }
+    return Promise.reject(error);
+  }
+);
 
 export const authAPI = {
-  // ── Signup ──────────────────────────────────────────────────────────────────
-  signupOrganization: (data) => api.post('/auth/signup/organization', {
-    org_name: data.orgName.trim(),
-    email: data.email.trim(),
-    phone_number: data.phoneNumber ? data.phoneNumber.trim() : undefined,
-    password: data.password,
-  }),
+  signupOrganization: (data) =>
+    api.post('/auth/signup/organization', {
+      org_name: data.orgName.trim(),
+      email: data.email.trim(),
+      phone_number: data.phoneNumber ? data.phoneNumber.trim() : undefined,
+      password: data.password,
+    }),
 
-  signupIndividual: (data) => api.post('/auth/signup/individual', {
-    full_name: data.fullName.trim(),
-    email: data.email.trim(),
-    phone_number: data.phoneNumber ? data.phoneNumber.trim() : undefined,
-    password: data.password,
-  }),
+  signupIndividual: (data) =>
+    api.post('/auth/signup/individual', {
+      full_name: data.fullName.trim(),
+      email: data.email.trim(),
+      phone_number: data.phoneNumber ? data.phoneNumber.trim() : undefined,
+      password: data.password,
+    }),
 
-  // ── OTP ─────────────────────────────────────────────────────────────────────
-  verifyOTP: (email, otpCode) => api.post('/auth/verify-otp', {
-    email,
-    otp_code: otpCode,
-  }),
-  verifyOtp: (email, otpCode) => api.post('/auth/verify-otp', {
-    email,
-    otp_code: otpCode,
-  }),
-
+  verifyOTP: (email, otpCode) => api.post('/auth/verify-otp', { email, otp_code: otpCode }),
+  verifyOtp: (email, otpCode) => api.post('/auth/verify-otp', { email, otp_code: otpCode }),
   resendOTP: (email) => api.post('/auth/resend-otp', { email }),
   resendOtp: (email) => api.post('/auth/resend-otp', { email }),
-
-  // ── Login ────────────────────────────────────────────────────────────────────
   login: (email, password) => api.post('/auth/login', { email, password }),
-  getGoogleAuthUrl: (userType) => api.get('/auth/google/url', {
-    params: userType ? { user_type: userType } : undefined,
-  }),
-  googleAuth: (token, userType) => api.post('/auth/google', { token }, {
-    params: userType ? { user_type: userType } : undefined,
-  }),
-  googleAuthMobile: (token, userType) => api.post('/auth/google', { token }, {
-    params: userType ? { user_type: userType } : undefined,
-  }),
-  completeGoogleSignup: (userType) => api.post('/auth/complete-google-signup', userType ? { user_type: userType } : {}),
 
-  // ── Onboarding ───────────────────────────────────────────────────────────────
-  completeOnboarding: (data) => api.post('/auth/onboarding', {
-    industry_type: data.industryType,
-    gstin: data.gstin,
-    business_reg_number: data.businessRegNumber,
-    address_line1: data.addressLine1,
-    address_line2: data.addressLine2 || undefined,
-    address_line3: data.addressLine3 || undefined,
-    use_cases: buildUseCasesPayload(data.useCases),
-  }),
+  getGoogleAuthUrl: (userType) =>
+    api.get('/auth/google/url', {
+      params: userType ? { user_type: userType } : undefined,
+    }),
 
-  // ── User / Profile ────────────────────────────────────────────────────────────
+  googleAuth: (token, userType) =>
+    api.post(
+      '/auth/google',
+      { token },
+      { params: userType ? { user_type: userType } : undefined }
+    ),
+
+  googleAuthMobile: (token, userType) =>
+    api.post(
+      '/auth/google',
+      { token },
+      { params: userType ? { user_type: userType } : undefined }
+    ),
+
+  completeGoogleSignup: (userType) =>
+    api.post('/auth/complete-google-signup', userType ? { user_type: userType } : {}),
+
+  completeOnboarding: (data) =>
+    api.post(
+      '/auth/onboarding',
+      cleanObject({
+        industry_type: data.industryType,
+        gstin: data.gstin,
+        business_reg_number: data.businessRegNumber,
+        address_line1: data.addressLine1,
+        address_line2: data.addressLine2,
+        address_line3: data.addressLine3,
+        use_cases: buildUseCasesPayload(data.useCases),
+      })
+    ),
+
   getCurrentUser: () => api.get('/auth/me'),
   getMe: () => api.get('/auth/me'),
-  getOrgIndustryType: (orgId) => api.get(`/auth/organization/${orgId}/industry-type`),
-
-  // ── Password ─────────────────────────────────────────────────────────────────
   forgotPassword: (email) => api.post('/auth/forgot-password', { email }),
-  resetPassword: (email, otpCode, newPassword) => api.post('/auth/reset-password', {
-    email,
-    otp_code: otpCode,
-    new_password: newPassword,
-  }),
+  resetPassword: (email, otpCode, newPassword) =>
+    api.post('/auth/reset-password', {
+      email,
+      otp_code: otpCode,
+      new_password: newPassword,
+    }),
+
+  getUsersGrouped: () => api.get('/auth/users/grouped'),
+  promoteSuperAdmin: (email) => api.post('/auth/promote-super-admin', { email }),
+  createSuperAdmin: (payload) => api.post('/auth/create-super-admin', payload),
+  getOrganizationIndustryType: (orgId) => api.get(`/auth/organization/${orgId}/industry-type`),
+  getAuditLogs: (batchUserId) => api.get(`/auth/audit-logs/${batchUserId}`),
 };
 
-export const orgAPI = {
-  // Intentionally empty: org assignment endpoints are not available in the current backend API.
-};
+export const orgAPI = {};
 
 export const adminAPI = {
-  listUsersGroupedByOrg: () => api.get('/auth/users/grouped'),
-  promoteSuperAdmin: (email) => api.post('/auth/promote-super-admin', { email }),
-  createSuperAdmin: (data) => api.post('/auth/create-super-admin', {
-    full_name: data.fullName.trim(),
-    email: data.email.trim(),
-    password: data.password,
-  }),
-  getAuditLogs: (batchUserId) => api.get(`/auth/audit-logs/${batchUserId}`),
+  getUsersGrouped: authAPI.getUsersGrouped,
+  promoteSuperAdmin: authAPI.promoteSuperAdmin,
+  createSuperAdmin: (payload) =>
+    authAPI.createSuperAdmin(
+      cleanObject({
+        full_name: payload.full_name || payload.fullName,
+        email: payload.email,
+        password: payload.password,
+      })
+    ),
+  getAuditLogs: authAPI.getAuditLogs,
 };
 
 export const verificationAPI = {
   getCategories: () => verificationApi.get('/verification/categories'),
 
-  uploadSingleHuman: (data) => verificationApi.post('/verification/single/human', {
-    full_name: data.full_name?.trim(), dob: data.dob || undefined, phone_number: data.phone_number?.trim(),
-    email: data.email?.trim(), aadhar_number: data.aadhar_number?.trim() || undefined, pan_number: data.pan_number?.trim() || undefined,
-    address_line1: data.address_line1?.trim() || undefined, address_line2: data.address_line2?.trim() || undefined,
-    address_line3: data.address_line3?.trim() || undefined, pincode: data.pincode?.trim() || undefined,
-    state: data.state?.trim() || undefined, country: data.country?.trim() || undefined,
-  }),
+  uploadSingleHuman: (data) =>
+    verificationApi.post(
+      '/verification/single/human',
+      cleanObject({
+        full_name: data.full_name?.trim(),
+        phone_number: data.phone_number?.trim(),
+        email: data.email?.trim(),
+        dob: data.dob,
+        aadhar_number: data.aadhar_number?.trim(),
+        pan_number: data.pan_number?.trim(),
+        address_line1: data.address_line1?.trim(),
+        address_line2: data.address_line2?.trim(),
+        address_line3: data.address_line3?.trim(),
+        pincode: data.pincode?.trim(),
+        state: data.state?.trim(),
+        country: data.country?.trim(),
+        industry_type: data.industry_type,
+        verification_types: data.verification_types,
+        credential_visibility: data.credential_visibility,
+        template_id: data.template_id,
+      })
+    ),
 
-  uploadSingleProduct: (data) => verificationApi.post('/verification/single/product', {
-    category_id: data.category_id, product_name: data.product_name?.trim(), custom_fields: data.custom_fields || {},
-  }),
+  uploadSingleProduct: (data) =>
+    verificationApi.post(
+      '/verification/single/product',
+      cleanObject({
+        category_id: data.category_id,
+        product_name: data.product_name?.trim(),
+        custom_fields: data.custom_fields || {},
+        verification_types: data.verification_types,
+        credential_visibility: data.credential_visibility,
+        template_id: data.template_id,
+      })
+    ),
 
-  bulkUpload: (file, batchName, description = '', options = {}, onProgress) => {
+  bulkUpload: (file, batchName, description = '', maybeOptions, maybeProgress) => {
     const formData = new FormData();
+    const { options, onProgress } = normalizeUploadArgs(maybeOptions, maybeProgress);
+
     formData.append('file', file);
     formData.append('batch_name', batchName);
-    if (description) formData.append('description', description);
-    if (options.industry_type) formData.append('industry_type', options.industry_type);
-    if (options.verification_types) formData.append('verification_types', options.verification_types);
-    if (options.credential_visibility) formData.append('credential_visibility', options.credential_visibility);
-    if (options.template_id) formData.append('template_id', options.template_id);
+    appendFormValue(formData, 'description', description);
+    appendFormValue(formData, 'industry_type', options.industryType || options.industry_type);
+    appendFormValue(formData, 'verification_types', options.verificationTypes || options.verification_types);
+    appendFormValue(
+      formData,
+      'credential_visibility',
+      options.credentialVisibility || options.credential_visibility
+    );
+    appendFormValue(formData, 'template_id', options.templateId || options.template_id);
+
     return verificationApi.post('/verification/bulk-upload', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
-      onUploadProgress: onProgress ? (e) => onProgress(Math.round((e.loaded * 100) / (e.total || 1))) : undefined,
+      onUploadProgress: onProgress
+        ? (event) => onProgress(Math.round((event.loaded * 100) / (event.total || 1)))
+        : undefined,
     });
   },
 
-  bulkUploadProducts: (file, batchName, categoryId, description = '', onProgress) => {
+  bulkUploadProducts: (
+    file,
+    batchName,
+    categoryId,
+    description = '',
+    maybeOptions,
+    maybeProgress
+  ) => {
     const formData = new FormData();
-    formData.append('file', file); formData.append('batch_name', batchName); formData.append('category_id', categoryId);
-    if (description) formData.append('description', description);
+    const { options, onProgress } = normalizeUploadArgs(maybeOptions, maybeProgress);
+
+    formData.append('file', file);
+    formData.append('batch_name', batchName);
+    appendFormValue(formData, 'description', description);
+    appendFormValue(formData, 'category_id', categoryId || options.categoryId || options.category_id);
+    appendFormValue(
+      formData,
+      'credential_visibility',
+      options.credentialVisibility || options.credential_visibility
+    );
+    appendFormValue(formData, 'verification_types', options.verificationTypes || options.verification_types);
+    appendFormValue(formData, 'template_id', options.templateId || options.template_id);
+
     return verificationApi.post('/verification/bulk-upload/products', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
-      onUploadProgress: onProgress ? (e) => onProgress(Math.round((e.loaded * 100) / (e.total || 1))) : undefined,
+      onUploadProgress: onProgress
+        ? (event) => onProgress(Math.round((event.loaded * 100) / (event.total || 1)))
+        : undefined,
     });
   },
 
-  generateHumanTemplate: (headers, verificationTypes = '') => {
-    const normalizedHeaders = Array.isArray(headers)
-      ? [...new Set(headers.map((header) => String(header).trim()).filter(Boolean))]
-      : String(headers || '').split(',').map((header) => header.trim()).filter(Boolean);
-    const params = new URLSearchParams();
-    params.append('headers', normalizedHeaders.join(','));
-    if (verificationTypes) params.append('verification_types', verificationTypes);
-    return verificationApi.post('/verification/generate-human-template', params, {
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        Accept: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/octet-stream, application/json',
-      },
+  generateHumanTemplate: (headers, verificationTypes = []) => {
+    const formData = new FormData();
+    appendFormValue(formData, 'headers', Array.isArray(headers) ? headers.join(',') : headers);
+    appendFormValue(
+      formData,
+      'verification_types',
+      Array.isArray(verificationTypes) ? verificationTypes.join(',') : verificationTypes
+    );
+
+    return verificationApi.post('/verification/generate-human-template', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
       responseType: 'blob',
     });
   },
 
   generateProductTemplate: (categoryId, headers) => {
     const formData = new FormData();
-    formData.append('category_id', categoryId);
-    formData.append('headers', Array.isArray(headers) ? headers.join(',') : headers);
+    appendFormValue(formData, 'category_id', categoryId);
+    appendFormValue(formData, 'headers', Array.isArray(headers) ? headers.join(',') : headers);
+
     return verificationApi.post('/verification/products/template', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' }, responseType: 'blob',
+      headers: { 'Content-Type': 'multipart/form-data' },
+      responseType: 'blob',
     });
   },
 
   uploadPhoto: (inviteToken, file) => {
     const formData = new FormData();
-    formData.append('token', inviteToken); formData.append('file', file);
-    return verificationApi.post('/verification/upload/photo', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
+    formData.append('token', inviteToken);
+    formData.append('file', file);
+    return verificationApi.post('/verification/upload/photo', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
   },
 
   uploadDocument: (inviteToken, documentLabel, file) => {
     const formData = new FormData();
-    formData.append('token', inviteToken); formData.append('document_label', documentLabel); formData.append('file', file);
-    return verificationApi.post('/verification/upload/document', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
+    formData.append('token', inviteToken);
+    formData.append('document_label', documentLabel);
+    formData.append('file', file);
+    return verificationApi.post('/verification/upload/document', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
   },
 
   getAllVerifications: (filters = {}) => {
@@ -234,39 +370,31 @@ export const verificationAPI = {
     if (filters.status) params.append('status', filters.status);
     if (filters.limit != null) params.append('limit', String(filters.limit));
     if (filters.offset != null) params.append('offset', String(filters.offset));
-    const q = params.toString();
-    return verificationApi.get(`/verification/all${q ? `?${q}` : ''}`);
+    const query = params.toString();
+    return verificationApi.get(`/verification/all${query ? `?${query}` : ''}`);
   },
 
   getUserVerification: (userId) => verificationApi.get(`/verification/user/${userId}`),
+
   updateVerificationStatus: (userId, status, reason = null) => {
     const payload = {};
     if (status != null) payload.status = status;
     if (reason != null && reason !== '') payload.reason = reason;
     return verificationApi.patch(`/verification/user/${userId}/status`, payload);
   },
+
   generateQRAndCertificate: (userId) =>
     verificationApi.post(`/verification/user/${userId}/generate-qr`),
 
-  // Batch management
-  listBatches: () => verificationApi.get('/verification/batches'),
+  getBatches: () => verificationApi.get('/verification/batches'),
   getBatchDetails: (batchId) => verificationApi.get(`/verification/batches/${batchId}`),
 
-  // Credential template management
-  createTemplate: (data) => verificationApi.post('/verification/templates', {
-    template_name: data.template_name?.trim(),
-    verification_types: Array.isArray(data.verification_types) ? data.verification_types : [],
-    json_data: data.json_data || {},
-    html_code: data.html_code || '',
-  }),
+  createTemplate: (payload) => verificationApi.post('/verification/templates', payload),
   getTemplate: (templateId) => verificationApi.get(`/verification/templates/${templateId}`),
-  updateTemplate: (templateId, data) => verificationApi.put(`/verification/templates/${templateId}`, {
-    template_name: data.template_name?.trim(),
-    verification_types: Array.isArray(data.verification_types) ? data.verification_types : [],
-    json_data: data.json_data || {},
-    html_code: data.html_code || '',
-  }),
-  getTemplateHistory: (templateId) => verificationApi.get(`/verification/templates/${templateId}/history`),
+  updateTemplate: (templateId, payload) =>
+    verificationApi.put(`/verification/templates/${templateId}`, payload),
+  getTemplateHistory: (templateId) =>
+    verificationApi.get(`/verification/templates/${templateId}/history`),
 };
 
 export const healthCheck = () => api.get('/health');
@@ -283,13 +411,15 @@ export const tokenHelpers = {
     if (email) localStorage.setItem('email', email);
   },
   remove: clearAuthStorage,
-  get: () => localStorage.getItem('access_token') || localStorage.getItem('trumarkz_access_token'),
+  get: getStoredToken,
 };
 
 export const getApiError = (err, fallback = 'Something went wrong. Please try again.') => {
   const detail = err?.response?.data?.detail;
   if (typeof detail === 'string') return detail;
-  if (Array.isArray(detail)) { return detail.map((d) => d?.msg || d?.message).filter(Boolean).join('. ') || fallback; }
+  if (Array.isArray(detail)) {
+    return detail.map((item) => item?.msg || item?.message).filter(Boolean).join('. ') || fallback;
+  }
   if (detail && typeof detail === 'object') return detail.message || detail.error || fallback;
   return err?.response?.data?.message || fallback;
 };
@@ -297,9 +427,12 @@ export const getApiError = (err, fallback = 'Something went wrong. Please try ag
 export const triggerBlobDownload = (blob, fileName) => {
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
-  anchor.href = url; anchor.download = fileName;
-  document.body.appendChild(anchor); anchor.click();
-  document.body.removeChild(anchor); URL.revokeObjectURL(url);
+  anchor.href = url;
+  anchor.download = fileName;
+  document.body.appendChild(anchor);
+  anchor.click();
+  document.body.removeChild(anchor);
+  URL.revokeObjectURL(url);
 };
 
 export default api;

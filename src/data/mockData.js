@@ -65,17 +65,15 @@ export const industries = [
 ];
 
 export const verificationTypes = [
-  { id: 'police', name: 'Police', price: 186, type: 'api', apiLabel: 'Police API', description: 'Police station verification' },
-  { id: 'dob', name: 'DOB', price: 62, type: 'api', apiLabel: 'DOB API', description: 'Date of birth validation' },
-  { id: 'education', name: 'Education', price: 306, type: 'manual', turnaround: '2-4 days', description: 'Degree and institute verification' },
-  { id: 'skills', name: 'Skills', price: 222, type: 'manual', turnaround: '2-4 days', description: 'Skill match and competency check' },
-  { id: 'criminal_record', name: 'Criminal Record', price: 288, type: 'manual', turnaround: '3-5 days', description: 'Criminal record screening' },
-  { id: 'address', name: 'Address', price: 144, type: 'manual', turnaround: '2-3 days', description: 'Address and residence validation' },
-  { id: 'driving_license', name: 'Driving License', price: 174, type: 'api', apiLabel: 'DL API', description: 'Driving licence authenticity check' },
-  { id: 'experience', name: 'Experience', price: 258, type: 'manual', turnaround: '3-5 days', description: 'Employment and work experience verification' },
-  { id: 'drug_test', name: 'Drug Test', price: 349, type: 'manual', turnaround: '2-5 days', description: 'Drug screening verification' },
-  { id: 'police_verification', name: 'Police Verification', price: 228, type: 'manual', turnaround: '3-6 days', description: 'Formal police verification process' },
-  { id: 'company', name: 'Company', price: 198, type: 'manual', turnaround: '2-4 days', description: 'Company and employer verification' }
+  { id: 'identity', name: 'Identity Verification', price: 50, type: 'api', apiLabel: 'Aadhaar API' },
+  { id: 'pan', name: 'PAN Verification', price: 30, type: 'api', apiLabel: 'PAN API' },
+  { id: 'driving', name: 'Driving Licence Check', price: 40, type: 'api', apiLabel: 'Govt DL API' },
+  { id: 'education', name: 'Education Verification', price: 100, type: 'api', apiLabel: 'NAD API' },
+  { id: 'employment', name: 'Employment Verification', price: 80, type: 'api', apiLabel: 'EPFO API' },
+  { id: 'address', name: 'Address Verification', price: 150, type: 'manual', turnaround: '2-3 days' },
+  { id: 'police', name: 'Police Clearance', price: 200, type: 'manual', turnaround: '3-5 days' },
+  { id: 'criminal', name: 'Criminal Record Check', price: 180, type: 'manual', turnaround: '3-5 days' },
+  { id: 'compliance', name: 'Product / Compliance', price: 250, type: 'manual', turnaround: '4-7 days' }
 ];
 
 export const assignmentData = {

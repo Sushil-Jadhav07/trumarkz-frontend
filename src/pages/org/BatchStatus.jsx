@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { AuthLayout } from '@/components/layout/AuthLayout';
 import { PageHeader } from '@/components/shared/PageHeader';
 import { Button } from '@/components/ui/Button';
@@ -8,9 +8,6 @@ import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { ProgressBar } from '@/components/ui/ProgressBar';
 import { Modal } from '@/components/ui/Modal';
-import { StepWizard } from '@/components/ui/StepWizard';
-import { HUMAN_VERIFICATION_STEPS, HUMAN_VERIFICATION_STEP_META } from '@/data/humanVerificationFlow';
-import { useApp } from '@/context/AppContext';
 import { verificationAPI, getApiError } from '@/services/api';
 import {
   RefreshCw, Eye, CheckCircle, Clock, XCircle, Filter,
@@ -191,18 +188,13 @@ const BatchDetailModal = ({ batch, onClose, onRefresh }) => {
 
 // ── Main BatchStatus (Org view) ───────────────────────────────────────────────
 export const BatchStatus = () => {
-  const location = useLocation();
   const navigate = useNavigate();
-  const { resetHumanVerificationFlow } = useApp();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [statusFilter, setStatusFilter] = useState('');
   const [page, setPage] = useState(0);
   const [selectedBatch, setSelectedBatch] = useState(null);
-  const showHumanFlowStep = location.state?.fromHumanFlow;
-  const createdBatch = location.state?.createdBatch;
-  const { label, progress: flowProgress } = HUMAN_VERIFICATION_STEP_META.batch;
 
   const fetchData = useCallback(async (showRefreshSpinner = false) => {
     if (showRefreshSpinner) setRefreshing(true);
@@ -219,12 +211,6 @@ export const BatchStatus = () => {
   }, []);
 
   useEffect(() => { fetchData(); }, [fetchData]);
-
-  useEffect(() => {
-    if (showHumanFlowStep) {
-      resetHumanVerificationFlow();
-    }
-  }, [showHumanFlowStep, resetHumanVerificationFlow]);
 
   // Auto-refresh every 30 seconds
   useEffect(() => {
@@ -243,61 +229,24 @@ export const BatchStatus = () => {
     };
   });
 
-  const optimisticCreatedBatch = createdBatch?.batch_id
-    ? {
-        id: createdBatch.batch_id,
-        name: `Batch ${String(createdBatch.batch_id).slice(0, 8)}`,
-        orgName: 'Organization',
-        records: [],
-        total: Number(createdBatch.total_uploaded || createdBatch.successful_users?.length || 0),
-        pending: Number(createdBatch.total_uploaded || createdBatch.successful_users?.length || 0),
-        verified: 0,
-        failed: Number(createdBatch.total_skipped || createdBatch.skipped_users?.length || 0),
-        createdAt: new Date().toISOString(),
-        status: 'pending_verification',
-        statusMeta: batchStatusMeta.pending_verification,
-      }
-    : null;
-
-  const mergedBatches = optimisticCreatedBatch && !rawBatches.some((batch) => batch.id === optimisticCreatedBatch.id)
-    ? [optimisticCreatedBatch, ...rawBatches]
-    : rawBatches;
-
   const filteredBatches = statusFilter
-    ? mergedBatches.filter((b) => b.status === statusFilter)
-    : mergedBatches;
+    ? rawBatches.filter((b) => b.status === statusFilter)
+    : rawBatches;
 
   const totalPages = Math.ceil(filteredBatches.length / PAGE_SIZE);
   const pagedBatches = filteredBatches.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
 
-  const totalRecords  = mergedBatches.reduce((s, b) => s + b.total,    0);
-  const totalPending  = mergedBatches.reduce((s, b) => s + b.pending,  0);
-  const totalVerified = mergedBatches.reduce((s, b) => s + b.verified, 0);
-  const totalFailed   = mergedBatches.reduce((s, b) => s + b.failed,   0);
+  const totalRecords  = rawBatches.reduce((s, b) => s + b.total,    0);
+  const totalPending  = rawBatches.reduce((s, b) => s + b.pending,  0);
+  const totalVerified = rawBatches.reduce((s, b) => s + b.verified, 0);
+  const totalFailed   = rawBatches.reduce((s, b) => s + b.failed,   0);
   const progress = totalRecords > 0
     ? Math.round(((totalVerified + totalFailed) / totalRecords) * 100)
     : 0;
 
-  const handleNewBatchUpload = () => {
-    resetHumanVerificationFlow();
-    navigate('/org/industry');
-  };
-
   return (
     <AuthLayout title="Batch Status">
       <div className="w-full mx-auto lg:max-w-none">
-        {showHumanFlowStep && (
-          <div className="mb-8 rounded-[30px] border border-slate-200 bg-white p-5 shadow-[0_24px_70px_-46px_rgba(15,23,42,0.22)]">
-            <StepWizard steps={HUMAN_VERIFICATION_STEPS} currentStep={6} />
-            <div className="mt-6">
-              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-brand-blue/70">{label}</p>
-              <div className="mt-4 h-2.5 max-w-xl overflow-hidden rounded-full bg-slate-100">
-                <div className="h-full rounded-full bg-brand-blue" style={{ width: `${flowProgress}%` }} />
-              </div>
-            </div>
-          </div>
-        )}
-
         <PageHeader
           title="Verification Batch Status"
           subtitle="Monitor your batches across the full verification pipeline"
@@ -451,7 +400,7 @@ export const BatchStatus = () => {
           </div>
         )}
 
-        <Button variant="primary" className="w-full" onClick={handleNewBatchUpload} icon={RefreshCw}>
+        <Button variant="primary" className="w-full" onClick={() => navigate('/org/create-batch')} icon={RefreshCw}>
           New Batch Upload
         </Button>
       </div>

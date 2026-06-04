@@ -12,8 +12,14 @@ import { Badge } from '@/components/ui/Badge';
 import { Modal } from '@/components/ui/Modal';
 import { Dropdown } from '@/components/ui/Dropdown';
 import { StepWizard } from '@/components/ui/StepWizard';
-import { verificationAPI, getApiError } from '@/services/api';
+import { verificationAPI, getApiError, triggerBlobDownload } from '@/services/api';
 import { verificationTypes } from '@/data/mockData';
+import {
+  getHumanTemplateHeaders,
+  getIndustryTypeList,
+  getProductVerificationTypes,
+  getVerificationApiTypes,
+} from '@/utils/verificationFlow';
 import {
   ArrowRight, FileSpreadsheet, Layers, Eye, Upload,
   CheckCircle, AlertTriangle, XCircle, Users, X, User,
@@ -45,10 +51,7 @@ const buildExampleValue = (header) => {
 };
 
 const downloadProductTemplateWorkbook = (headers, fileName = 'product-template') => {
-  const worksheet = XLSX.utils.aoa_to_sheet([
-    headers,
-    headers.map(buildExampleValue),
-  ]);
+  const worksheet = XLSX.utils.aoa_to_sheet([headers, headers.map(buildExampleValue)]);
   worksheet['!cols'] = headers.map((header) => ({ wch: Math.max(18, header.length + 4) }));
 
   const workbook = XLSX.utils.book_new();
@@ -160,7 +163,7 @@ const ProductProgress = ({ step }) => {
 };
 
 // ─── Single Human Modal ───────────────────────────────────────────────────────
-const SingleHumanModal = ({ isOpen, onClose, onSuccess }) => {
+const SingleHumanModal = ({ isOpen, onClose, onSuccess, selectedIndustry, selectedVerifications }) => {
   const [loading, setLoading] = useState(false);
   const [form, setForm] = useState({
     full_name: '', phone_number: '', email: '',
@@ -178,7 +181,12 @@ const SingleHumanModal = ({ isOpen, onClose, onSuccess }) => {
 
     setLoading(true);
     try {
-      const { data } = await verificationAPI.uploadSingleHuman(form);
+      const { data } = await verificationAPI.uploadSingleHuman({
+        ...form,
+        industry_type: getIndustryTypeList(selectedIndustry),
+        verification_types: getVerificationApiTypes(selectedVerifications),
+        credential_visibility: 'private',
+      });
       toast.success('Human record created! Invite link generated.');
       onSuccess(data);
       onClose();
@@ -286,8 +294,9 @@ const SingleProductModal = ({ isOpen, onClose, onSuccess, categories, selectedCa
       const { data } = await verificationAPI.uploadSingleProduct({
         category_id: categoryId,
         product_name: productName,
-        warranty_status: warrantyStatus,
         custom_fields,
+        verification_types: getProductVerificationTypes(selectedService),
+        credential_visibility: selectedService?.id === 'verification' ? 'public' : 'private',
       });
       toast.success('Product record created! Invite link generated.');
       onSuccess(data);
@@ -418,13 +427,14 @@ const InviteResultCard = ({ result, onDismiss }) => (
 );
 
 // ─── Human Bulk Upload Panel ───────────────────────────────────────────────────
-const HumanBulkPanel = ({ onResult }) => {
+const HumanBulkPanel = ({ onResult, selectedIndustry, selectedVerifications }) => {
   const fileInputRef = useRef(null);
   const [batchName, setBatchName] = useState('');
   const [description, setDescription] = useState('');
   const [selectedFile, setSelectedFile] = useState(null);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [templateLoading, setTemplateLoading] = useState(false);
   const [uploadResult, setUploadResult] = useState(null);
   const [showPreview, setShowPreview] = useState(false);
   const navigate = useNavigate();
@@ -443,7 +453,17 @@ const HumanBulkPanel = ({ onResult }) => {
     if (!selectedFile) { toast.error('Please select an Excel file'); return; }
     setLoading(true); setUploadProgress(0);
     try {
-      const { data } = await verificationAPI.bulkUpload(selectedFile, batchName.trim(), description.trim(), setUploadProgress);
+      const { data } = await verificationAPI.bulkUpload(
+        selectedFile,
+        batchName.trim(),
+        description.trim(),
+        {
+          industryType: getIndustryTypeList(selectedIndustry),
+          verificationTypes: getVerificationApiTypes(selectedVerifications),
+          credentialVisibility: 'private',
+        },
+        setUploadProgress
+      );
       setUploadResult(data);
       onResult && onResult(data);
       toast.success(`Uploaded ${data.total_uploaded} records. Batch: ${data.batch_id}`);
@@ -452,6 +472,22 @@ const HumanBulkPanel = ({ onResult }) => {
       toast.error(getApiError(err, 'Batch upload failed. Please try again.'));
     } finally {
       setLoading(false); setUploadProgress(0);
+    }
+  };
+
+  const handleGenerateTemplate = async () => {
+    setTemplateLoading(true);
+    try {
+      const { data } = await verificationAPI.generateHumanTemplate(
+        getHumanTemplateHeaders(selectedVerifications),
+        getVerificationApiTypes(selectedVerifications)
+      );
+      triggerBlobDownload(data, 'trumarkz-human-template.xlsx');
+      toast.success('Template downloaded.');
+    } catch (err) {
+      toast.error(getApiError(err, 'Failed to generate template'));
+    } finally {
+      setTemplateLoading(false);
     }
   };
 
@@ -568,11 +604,18 @@ const HumanBulkPanel = ({ onResult }) => {
         />
       </div>
       <div className="p-4 bg-blue-50 rounded-xl border border-blue-100">
-        <p className="text-xs font-semibold text-blue-700 font-inter mb-1">Required Excel columns</p>
-        <p className="text-xs text-blue-600 font-inter">
-          <span className="font-semibold">full_name</span>, <span className="font-semibold">email</span>, <span className="font-semibold">phone_number</span>
-          {' '}— plus optional: dob, aadhar_number, pan_number, address_line1–3, pincode, state, country
-        </p>
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div>
+            <p className="text-xs font-semibold text-blue-700 font-inter mb-1">Required Excel columns</p>
+            <p className="text-xs text-blue-600 font-inter">
+              <span className="font-semibold">full_name</span>, <span className="font-semibold">email</span>, <span className="font-semibold">phone_number</span>
+              {' '}plus optional verification-specific columns. The backend template also appends the locked <span className="font-semibold">Photo</span> column.
+            </p>
+          </div>
+          <Button variant="outline" size="sm" icon={Download} onClick={handleGenerateTemplate} loading={templateLoading}>
+            Template
+          </Button>
+        </div>
       </div>
       <div>
         <label className="block text-sm font-medium text-gray-700 font-inter mb-2">Excel File (.xlsx / .xls) *</label>
@@ -628,8 +671,8 @@ const ProductBulkPanel = ({ categories, onResult, selectedCategory, selectedServ
   const [templateLoading, setTemplateLoading] = useState(false);
   const [templateHeaders, setTemplateHeaders] = useState(
     selectedService?.id === 'warranty'
-      ? 'Product Name, Serial Number, Warranty Start Date, Warranty End Date, Invoice Number'
-      : 'Product Name, Serial Number, Model, Batch Number, Certificate Number'
+      ? 'product_name,serial_number,warranty_start_date,warranty_end_date,invoice_number'
+      : 'product_name,serial_number,model,batch_number,certificate_number'
   );
   const [selectedFile, setSelectedFile] = useState(null);
   const [uploadProgress, setUploadProgress] = useState(0);
@@ -645,8 +688,8 @@ const ProductBulkPanel = ({ categories, onResult, selectedCategory, selectedServ
   useEffect(() => {
     setTemplateHeaders(
       selectedService?.id === 'warranty'
-        ? 'Product Name, Serial Number, Warranty Start Date, Warranty End Date, Invoice Number'
-        : 'Product Name, Serial Number, Model, Batch Number, Certificate Number'
+        ? 'product_name,serial_number,warranty_start_date,warranty_end_date,invoice_number'
+        : 'product_name,serial_number,model,batch_number,certificate_number'
     );
   }, [selectedService]);
 
@@ -665,7 +708,17 @@ const ProductBulkPanel = ({ categories, onResult, selectedCategory, selectedServ
     if (!selectedFile) { toast.error('Please select an Excel file'); return; }
     setLoading(true); setUploadProgress(0);
     try {
-      const { data } = await verificationAPI.bulkUploadProducts(selectedFile, batchName.trim(), categoryId, description.trim(), setUploadProgress);
+      const { data } = await verificationAPI.bulkUploadProducts(
+        selectedFile,
+        batchName.trim(),
+        categoryId,
+        description.trim(),
+        {
+          verificationTypes: getProductVerificationTypes(selectedService),
+          credentialVisibility: visibility,
+        },
+        setUploadProgress
+      );
       setUploadResult(data);
       onResult && onResult(data);
       toast.success(`Uploaded ${data.total_uploaded} products. Batch: ${data.batch_id}`);
@@ -681,17 +734,22 @@ const ProductBulkPanel = ({ categories, onResult, selectedCategory, selectedServ
     if (!categoryId) { toast.error('Please select a category first'); return; }
     const headers = parseTemplateHeaders(templateHeaders);
     if (headers.length === 0) { toast.error('Add at least one template column'); return; }
-    if (headers[0].toLowerCase() !== 'product name') {
-      toast.error('First column must be Product Name for product batch upload');
+    if (headers[0].trim().toLowerCase().replace(/\s+/g, '_') !== 'product_name') {
+      toast.error('First column must be product_name for product batch upload');
       return;
     }
 
     setTemplateLoading(true);
     try {
-      downloadProductTemplateWorkbook(headers, batchName.trim() || 'product-template');
+      const normalizedHeaders = headers.map((header) =>
+        header.trim().toLowerCase().replace(/\s+/g, '_')
+      );
+      const { data } = await verificationAPI.generateProductTemplate(categoryId, normalizedHeaders);
+      triggerBlobDownload(data, `${batchName.trim() || 'product-template'}.xlsx`);
       toast.success('Template downloaded.');
     } catch (err) {
-      toast.error(getApiError(err, 'Failed to generate product template'));
+      downloadProductTemplateWorkbook(headers, batchName.trim() || 'product-template');
+      toast.success('Template downloaded using the local fallback.');
     } finally {
       setTemplateLoading(false);
     }
@@ -843,7 +901,7 @@ const ProductBulkPanel = ({ categories, onResult, selectedCategory, selectedServ
               className="w-full border border-blue-200 rounded-lg px-3 py-2 text-xs font-inter focus:outline-none focus:ring-2 focus:ring-brand-blue/30 bg-white"
               value={templateHeaders}
               onChange={(e) => setTemplateHeaders(e.target.value)}
-              placeholder="Product Name, Serial Number, Purchase Date"
+              placeholder="product_name,serial_number,purchase_date"
             />
             <Button
               variant="outline"
@@ -1293,6 +1351,8 @@ export const CreateBatch = () => {
             isOpen={showSingleHumanModal}
             onClose={() => setShowSingleHumanModal(false)}
             onSuccess={handleSingleSuccess}
+            selectedIndustry={selectedIndustry}
+            selectedVerifications={selectedVerifications}
           />
           <SingleProductModal
             isOpen={showSingleProductModal}
@@ -1368,7 +1428,7 @@ export const CreateBatch = () => {
 
         <Card className="p-6">
           {isHuman
-            ? <HumanBulkPanel onResult={() => {}} />
+            ? <HumanBulkPanel onResult={() => {}} selectedIndustry={selectedIndustry} selectedVerifications={selectedVerifications} />
             : (categoriesLoading
               ? <div className="py-10 text-center text-sm text-gray-400 font-inter">Loading categories…</div>
               : <ProductBulkPanel categories={categories} onResult={() => {}} selectedCategory={selectedProductSector} selectedService={activeProductService} />

@@ -6,11 +6,10 @@ import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { ProgressBar } from '@/components/ui/ProgressBar';
-import { verificationAPI, authAPI, getApiError } from '@/services/api';
-import { useAuth } from '@/context/AuthContext';
+import { verificationAPI, getApiError } from '@/services/api';
 import {
   Layers, Award, BarChart2, Store, ArrowRight,
-  Clock, CheckCircle, TrendingUp, Users, Shield, Globe, Lock, Zap, Briefcase
+  Clock, CheckCircle, TrendingUp, Users, Shield, Globe, Lock, Zap
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -74,18 +73,9 @@ const buildBatchSummary = (users = []) => {
 
 export const OrgDashboard = () => {
   const navigate = useNavigate();
-  const { user } = useAuth();
   const [loading, setLoading] = useState(false);
   const [verificationData, setVerificationData] = useState(null);
   const [statsSummary, setStatsSummary] = useState({ total: '-', pending: '-', verified: '-', failed: '-' });
-  const [industryType, setIndustryType] = useState(
-    typeof user?.industryType === 'string'
-      ? user.industryType
-      : Array.isArray(user?.industryType) && user.industryType.length > 0
-        ? user.industryType[0]
-        : null,
-  );
-  const [industryLoading, setIndustryLoading] = useState(false);
 
   useEffect(() => {
     let isMounted = true;
@@ -105,16 +95,8 @@ export const OrgDashboard = () => {
         if (isMounted) toast.error(getApiError(err, 'Failed to load dashboard data'));
       });
 
-    if (user?.id) {
-      setIndustryLoading(true);
-      authAPI.getOrgIndustryType(user.id)
-        .then(({ data }) => { if (isMounted) setIndustryType(typeof data === 'string' ? data : data?.industry_type ?? null); })
-        .catch(() => { /* industry type unavailable — keep auth-context fallback */ })
-        .finally(() => { if (isMounted) setIndustryLoading(false); });
-    }
-
     return () => { isMounted = false; };
-  }, [user?.id]);
+  }, []);
 
   const usersList = verificationData?.users || [];
   const activeBatches = buildBatchSummary(usersList);
@@ -177,47 +159,6 @@ export const OrgDashboard = () => {
   return (
     <AuthLayout title="Organization Dashboard">
       <div className="space-y-6">
-
-        {/* Industry type welcome banner */}
-        <motion.div
-          initial={{ opacity: 0, y: -10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.25 }}
-          className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-2xl bg-gradient-to-r from-brand-dark to-brand-blue text-white"
-        >
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center shrink-0">
-              <Briefcase size={20} className="text-white" />
-            </div>
-            <div>
-              <p className="text-xs text-white/60 font-inter">Welcome back</p>
-              <p className="font-sora font-bold text-base leading-tight">
-                {user?.organization || user?.name || 'Your Organization'}
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2 sm:shrink-0">
-            <span className="text-xs text-white/60 font-inter">Industry</span>
-            {industryLoading ? (
-              <span className="inline-flex items-center gap-1.5 bg-white/10 text-white text-xs font-inter px-3 py-1.5 rounded-full">
-                <svg className="animate-spin w-3 h-3" viewBox="0 0 24 24" fill="none">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
-                </svg>
-                Loading…
-              </span>
-            ) : industryType ? (
-              <span className="bg-white/15 text-white text-xs font-semibold font-inter px-3 py-1.5 rounded-full capitalize">
-                {industryType}
-              </span>
-            ) : (
-              <span className="bg-white/10 text-white/50 text-xs font-inter px-3 py-1.5 rounded-full italic">
-                Not set
-              </span>
-            )}
-          </div>
-        </motion.div>
-
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           {stats.map((stat, i) => (
             <motion.div
@@ -296,7 +237,7 @@ export const OrgDashboard = () => {
             {activeBatches.length === 0 ? (
               <div className="p-8 text-center">
                 <p className="text-sm text-gray-400 font-inter mb-3">No batches found</p>
-                <Button variant="outline" size="sm" onClick={() => navigate('/org/verifications')}>
+                <Button variant="outline" size="sm" onClick={() => navigate('/org/create-batch')}>
                   Create Batch
                 </Button>
               </div>

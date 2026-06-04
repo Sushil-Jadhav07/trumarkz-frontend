@@ -1,4 +1,4 @@
-import React, { Suspense, lazy } from 'react';
+import React from 'react';
 import { Navigate, Routes, Route, useLocation } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Toaster } from 'react-hot-toast';
@@ -27,63 +27,64 @@ const AuthLoadingScreen = () => (
   </motion.div>
 );
 import { AppProvider } from '@/context/AppContext';
-const LoginRegister = lazy(() => import('@/pages/public/LoginRegister'));
-const ForgotPassword = lazy(() => import('@/pages/public/ForgotPassword'));
-const ResetPassword = lazy(() => import('@/pages/public/ResetPassword'));
-const AuthCallback = lazy(() => import('@/pages/public/AuthCallback'));
-const AuthError = lazy(() => import('@/pages/public/AuthError'));
-const GoogleCallback = lazy(() => import('@/pages/public/GoogleCallback'));
-const DocumentUpload = lazy(() => import('@/pages/public/DocumentUpload'));
-const OrgRegistration = lazy(() => import('@/pages/org/OrgRegistration'));
-const IndividualRegistration = lazy(() => import('@/pages/individual/IndividualRegistration'));
-const OTPVerification = lazy(() => import('@/pages/org/OTPVerification'));
-const WelcomeKYC = lazy(() => import('@/pages/org/WelcomeKYC'));
-const OrgOnboarding = lazy(() => import('@/pages/org/OrgOnboarding'));
-const PendingApproval = lazy(() => import('@/pages/org/PendingApproval'));
-const OrgDashboard = lazy(() => import('@/pages/org/OrgDashboard'));
-const SelectIndustry = lazy(() => import('@/pages/org/SelectIndustry'));
-const SelectVerifications = lazy(() => import('@/pages/org/SelectVerifications'));
-const DownloadTemplate = lazy(() => import('@/pages/org/DownloadTemplate'));
-const CertificatePreview = lazy(() => import('@/pages/org/CertificatePreview'));
-const CostBreakdown = lazy(() => import('@/pages/org/CostBreakdown'));
-const BatchStatus = lazy(() => import('@/pages/org/BatchStatus'));
-const RecordDetail = lazy(() => import('@/pages/org/RecordDetail'));
-const PermissionSettings = lazy(() => import('@/pages/org/PermissionSettings'));
-const SelectTemplate = lazy(() => import('@/pages/credential/SelectTemplate'));
-const SelectFields = lazy(() => import('@/pages/credential/SelectFields'));
-const CredentialPreview = lazy(() => import('@/pages/credential/CredentialPreview'));
-const ShareCredential = lazy(() => import('@/pages/credential/ShareCredential'));
-const QRScanner = lazy(() => import('@/pages/qr/QRScanner'));
-const VerificationResult = lazy(() => import('@/pages/qr/VerificationResult'));
-const ReportsList = lazy(() => import('@/pages/qr/ReportsList'));
-const ReportView = lazy(() => import('@/pages/qr/ReportView'));
-const RegistryHome = lazy(() => import('@/pages/marketplace/RegistryHome'));
-const SearchResults = lazy(() => import('@/pages/marketplace/SearchResults'));
-const MarketplaceRecordDetail = lazy(() => import('@/pages/marketplace/RecordDetail'));
-const SelectDocuments = lazy(() => import('@/pages/marketplace/SelectDocuments'));
-const Payment = lazy(() => import('@/pages/marketplace/Payment'));
-const DownloadDocuments = lazy(() => import('@/pages/marketplace/DownloadDocuments'));
-const BlockchainRecord = lazy(() => import('@/pages/marketplace/BlockchainRecord'));
-const PurchaseHistory = lazy(() => import('@/pages/marketplace/PurchaseHistory'));
-const Profile = lazy(() => import('@/pages/account/Profile'));
-const Notifications = lazy(() => import('@/pages/account/Notifications'));
-const Wallet = lazy(() => import('@/pages/account/Wallet'));
-const ActivityLog = lazy(() => import('@/pages/account/ActivityLog'));
-const Support = lazy(() => import('@/pages/account/Support'));
-const Logout = lazy(() => import('@/pages/account/Logout'));
-const IndividualDashboard = lazy(() => import('@/pages/individual/IndividualDashboard'));
-const SkillTree = lazy(() => import('@/pages/individual/SkillTree'));
-const SkillTreeForm = lazy(() => import('@/pages/individual/SkillTreeForm'));
-const IndividualCredentials = lazy(() => import('@/pages/individual/IndividualCredentials'));
-const ShareProfile = lazy(() => import('@/pages/individual/ShareProfile'));
-const AdminDashboard = lazy(() => import('@/pages/admin/AdminDashboard'));
-const OrgApprovals = lazy(() => import('@/pages/admin/OrgApprovals'));
-const BatchMonitor = lazy(() => import('@/pages/admin/BatchMonitor'));
-const Verifiers = lazy(() => import('@/pages/admin/Verifiers'));
-const PricingConfig = lazy(() => import('@/pages/admin/PricingConfig'));
-const Disputes = lazy(() => import('@/pages/admin/Disputes'));
-const PlatformHealth = lazy(() => import('@/pages/admin/PlatformHealth'));
-const SDCVerification = lazy(() => import('@/pages/admin/SDCVerification'));
+import LoginRegister from '@/pages/public/LoginRegister';
+import ForgotPassword from '@/pages/public/ForgotPassword';
+import ResetPassword from '@/pages/public/ResetPassword';
+import AuthCallback from '@/pages/public/AuthCallback';
+import AuthError from '@/pages/public/AuthError';
+import GoogleCallback from '@/pages/public/GoogleCallback';
+import DocumentUpload from '@/pages/public/DocumentUpload';
+import OrgRegistration from '@/pages/org/OrgRegistration';
+import IndividualRegistration from '@/pages/individual/IndividualRegistration';
+import OTPVerification from '@/pages/org/OTPVerification';
+import WelcomeKYC from '@/pages/org/WelcomeKYC';
+import OrgOnboarding from '@/pages/org/OrgOnboarding';
+import PendingApproval from '@/pages/org/PendingApproval';
+import OrgDashboard from '@/pages/org/OrgDashboard';
+import SelectIndustry from '@/pages/org/SelectIndustry';
+import SelectVerifications from '@/pages/org/SelectVerifications';
+import DownloadTemplate from '@/pages/org/DownloadTemplate';
+import CreateBatch from '@/pages/org/CreateBatch';
+import BatchStatus from '@/pages/org/BatchStatus';
+import RecordDetail from '@/pages/org/RecordDetail';
+import PermissionSettings from '@/pages/org/PermissionSettings';
+import SelectTemplate from '@/pages/credential/SelectTemplate';
+import SelectFields from '@/pages/credential/SelectFields';
+import CredentialPreview from '@/pages/credential/CredentialPreview';
+import ShareCredential from '@/pages/credential/ShareCredential';
+import QRScanner from '@/pages/qr/QRScanner';
+import VerificationResult from '@/pages/qr/VerificationResult';
+import ReportsList from '@/pages/qr/ReportsList';
+import ReportView from '@/pages/qr/ReportView';
+import RegistryHome from '@/pages/marketplace/RegistryHome';
+import SearchResults from '@/pages/marketplace/SearchResults';
+import MarketplaceRecordDetail from '@/pages/marketplace/RecordDetail';
+import SelectDocuments from '@/pages/marketplace/SelectDocuments';
+import Payment from '@/pages/marketplace/Payment';
+import DownloadDocuments from '@/pages/marketplace/DownloadDocuments';
+import BlockchainRecord from '@/pages/marketplace/BlockchainRecord';
+import PurchaseHistory from '@/pages/marketplace/PurchaseHistory';
+import Profile from '@/pages/account/Profile';
+import Notifications from '@/pages/account/Notifications';
+import Wallet from '@/pages/account/Wallet';
+import ActivityLog from '@/pages/account/ActivityLog';
+import Support from '@/pages/account/Support';
+import Logout from '@/pages/account/Logout';
+import IndividualDashboard from '@/pages/individual/IndividualDashboard';
+import SkillTree from '@/pages/individual/SkillTree';
+import SkillTreeForm from '@/pages/individual/SkillTreeForm';
+import IndividualCredentials from '@/pages/individual/IndividualCredentials';
+import ShareProfile from '@/pages/individual/ShareProfile';
+import AdminDashboard from '@/pages/admin/AdminDashboard';
+import OrgApprovals from '@/pages/admin/OrgApprovals';
+import BatchMonitor from '@/pages/admin/BatchMonitor';
+import Verifiers from '@/pages/admin/Verifiers';
+import PricingConfig from '@/pages/admin/PricingConfig';
+import Disputes from '@/pages/admin/Disputes';
+import PlatformHealth from '@/pages/admin/PlatformHealth';
+import SDCVerification from '@/pages/admin/SDCVerification';
+import PromoteSuperAdmin from '@/pages/admin/PromoteSuperAdmin';
+import CreateSuperAdmin from '@/pages/admin/CreateSuperAdmin';
 
 const ProtectedRoute = ({ children }) => {
   const { isAuthenticated, loading } = useAuth();
@@ -127,7 +128,6 @@ const AnimatedRoutes = () => {
   return (
     <AnimatePresence mode="wait">
       <div key={location.pathname}>
-        <Suspense fallback={<AuthLoadingScreen />}>
         <Routes location={location}>
           <Route path="/" element={<Navigate to="/login" replace />} />
           <Route path="/login" element={<LoginRegister />} />
@@ -154,15 +154,13 @@ const AnimatedRoutes = () => {
           <Route path="/org/onboarding" element={<ProtectedRoute><OrgOnboarding /></ProtectedRoute>} />
           <Route path="/org/pending-approval" element={<PendingApproval />} />
           <Route path="/org/dashboard" element={<ProtectedRoute><OrgDashboard /></ProtectedRoute>} />
-          <Route path="/org/industry" element={<ProtectedRoute><SelectIndustry /></ProtectedRoute>} />
-          <Route path="/org/verifications" element={<ProtectedRoute><SelectVerifications /></ProtectedRoute>} />
-          <Route path="/org/permissions" element={<ProtectedRoute><PermissionSettings /></ProtectedRoute>} />
-          <Route path="/org/template" element={<ProtectedRoute><DownloadTemplate /></ProtectedRoute>} />
-          <Route path="/org/certificate-preview" element={<ProtectedRoute><CertificatePreview /></ProtectedRoute>} />
-          <Route path="/org/cost-breakdown" element={<ProtectedRoute><CostBreakdown /></ProtectedRoute>} />
-          <Route path="/org/create-batch" element={<ProtectedRoute><CertificatePreview /></ProtectedRoute>} />
-          <Route path="/org/batch-status" element={<ProtectedRoute><BatchStatus /></ProtectedRoute>} />
-          <Route path="/org/record/:id" element={<ProtectedRoute><RecordDetail /></ProtectedRoute>} />
+          <Route path="/org/industry" element={<SelectIndustry />} />
+          <Route path="/org/verifications" element={<SelectVerifications />} />
+          <Route path="/org/permissions" element={<PermissionSettings />} />
+          <Route path="/org/template" element={<DownloadTemplate />} />
+          <Route path="/org/create-batch" element={<CreateBatch />} />
+          <Route path="/org/batch-status" element={<BatchStatus />} />
+          <Route path="/org/record/:id" element={<RecordDetail />} />
 
           {/* ── Credential routes ── */}
           <Route path="/credential/template" element={<SelectTemplate />} />
@@ -210,8 +208,9 @@ const AnimatedRoutes = () => {
           <Route path="/admin/pricing" element={<ProtectedRoute><AdminRoute><PricingConfig /></AdminRoute></ProtectedRoute>} />
           <Route path="/admin/disputes" element={<ProtectedRoute><AdminRoute><Disputes /></AdminRoute></ProtectedRoute>} />
           <Route path="/admin/platform-health" element={<ProtectedRoute><AdminRoute><PlatformHealth /></AdminRoute></ProtectedRoute>} />
+          <Route path="/admin/promote-super-admin" element={<ProtectedRoute><AdminRoute><PromoteSuperAdmin /></AdminRoute></ProtectedRoute>} />
+          <Route path="/admin/create-super-admin" element={<ProtectedRoute><AdminRoute><CreateSuperAdmin /></AdminRoute></ProtectedRoute>} />
         </Routes>
-        </Suspense>
       </div>
     </AnimatePresence>
   );

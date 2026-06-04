@@ -24,9 +24,10 @@ export const MobileNav = () => {
     ? [
         { path: '/admin/dashboard', label: 'Home', icon: LayoutDashboard },
         { path: '/admin/org-approvals', label: 'Approvals', icon: CheckSquare },
+        { path: '/admin/promote-super-admin', label: 'Admins', icon: CheckSquare },
         { path: '/admin/batch-monitor', label: 'Batches', icon: Layers },
         { path: '/admin/disputes', label: 'Disputes', icon: AlertTriangle },
-        { path: '/marketplace', label: 'Market', icon: Store },
+        { path: '/admin/platform-health', label: 'Health', icon: BarChart2 },
       ]
     : role === 'individual'
     ? [

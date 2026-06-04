@@ -22,6 +22,7 @@ const spring = {
   entrance: { type: 'spring', stiffness: 280, damping: 30 },
 };
 
+// ── Google Icon ───────────────────────────────────────────────────────────────
 const GoogleIcon = () => (
   <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
     <path d="M17.64 9.205c0-.639-.057-1.252-.164-1.841H9v3.481h4.844a4.14 4.14 0 01-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.615z" fill="#4285F4"/>
@@ -31,7 +32,6 @@ const GoogleIcon = () => (
   </svg>
 );
 
-// ── Google Icon ───────────────────────────────────────────────────────────────
 // ── Forgot Password Modal ─────────────────────────────────────────────────────
 const ForgotPasswordModal = ({ onClose, forgotPassword }) => {
   const [email, setEmail] = useState('');
@@ -254,7 +254,6 @@ export const LoginRegister = () => {
     sessionStorage.setItem('trumarkz_google_user_type', userType);
     window.location.assign(result.authUrl);
   };
-
 
   const activeRole = roles.find(r => r.id === userType);
 
@@ -611,7 +610,7 @@ export const LoginRegister = () => {
                         className="w-full flex items-center justify-center gap-3 py-2.5 px-4 rounded-xl border border-gray-200 bg-white text-brand-dark font-inter text-sm font-medium disabled:opacity-60 cursor-pointer shadow-sm"
                       >
                         <GoogleIcon />
-                        {googleLoading ? 'Redirecting...' : 'Continue with Google'}
+                        {googleLoading ? 'Redirecting…' : 'Continue with Google'}
                       </motion.button>
                       <p className="text-center text-sm text-gray-500 font-inter">
                         {userType === 'individual' ? "Don't have an account? " : 'New organization? '}
@@ -692,7 +691,7 @@ export const LoginRegister = () => {
                     className="w-full flex items-center justify-center gap-3 py-2.5 px-4 rounded-xl border border-gray-200 bg-white text-brand-dark font-inter text-sm font-medium disabled:opacity-60 cursor-pointer shadow-sm"
                   >
                     <GoogleIcon />
-                    {googleLoading ? 'Redirecting...' : 'Continue with Google'}
+                    {googleLoading ? 'Redirecting…' : 'Continue with Google'}
                   </motion.button>
                   <p className="text-center text-sm text-gray-500 font-inter">
                     Already have an account?{' '}
@@ -718,4 +717,3 @@ export const LoginRegister = () => {
 };
 
 export default LoginRegister;
-

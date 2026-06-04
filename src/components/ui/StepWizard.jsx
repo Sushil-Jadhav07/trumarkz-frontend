@@ -5,9 +5,9 @@ import clsx from 'clsx';
 export const StepWizard = ({ steps, currentStep }) => {
   return (
     <div
-      className="pb-1 -mx-1 px-1 overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
+      className="mb-10 pb-1 -mx-1 px-1 overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
     >
-      <div className="min-w-max flex items-start justify-center gap-2.5 sm:gap-3">
+      <div className="min-w-max flex items-start justify-center sm:justify-center gap-2">
       {steps.map((step, index) => {
         const isActive = index === currentStep;
         const isCompleted = index < currentStep;
@@ -15,18 +15,16 @@ export const StepWizard = ({ steps, currentStep }) => {
 
         return (
           <React.Fragment key={step}>
-            <div className="flex min-w-[78px] flex-col items-center shrink-0 pt-2">
+            <div className="flex flex-col items-center shrink-0 pt-2">
               <motion.div
                 animate={{
-                  backgroundColor: isActive || isCompleted ? '#2563EB' : '#FFFFFF',
-                  color: isActive || isCompleted ? '#FFFFFF' : '#94A3B8',
-                  scale: isActive ? 1.05 : 1
+                  backgroundColor: isActive || isCompleted ? '#2563EB' : '#F3F5F7',
+                  color: isActive || isCompleted ? '#FFFFFF' : '#CBD2D9',
+                  scale: isActive ? 1.1 : 1
                 }}
                 className={clsx(
-                  'flex h-10 w-10 items-center justify-center rounded-full border text-sm font-semibold font-sora shadow-sm',
-                  isActive || isCompleted
-                    ? 'border-brand-blue shadow-[0_16px_30px_-18px_rgba(37,99,235,0.65)]'
-                    : 'border-slate-200 bg-white'
+                  'w-8 h-8 rounded-full flex items-center justify-center text-sm font-semibold font-sora border-2',
+                  isActive || isCompleted ? 'border-brand-blue' : 'border-brand-gray'
                 )}
               >
                 {isCompleted ? (
@@ -38,16 +36,16 @@ export const StepWizard = ({ steps, currentStep }) => {
                 )}
               </motion.div>
               <span className={clsx(
-                'mt-2.5 text-center text-[11px] font-inter font-medium leading-tight whitespace-nowrap',
-                isActive ? 'text-brand-blue' : isCompleted ? 'text-slate-700' : 'text-slate-400'
+                'text-[11px] leading-tight mt-1.5 font-inter font-medium text-center whitespace-nowrap',
+                isActive ? 'text-brand-blue' : isCompleted ? 'text-brand-dark' : 'text-brand-gray'
               )}>
                 {step}
               </span>
             </div>
             {!isLast && (
               <div className={clsx(
-                'mt-[28px] h-[2px] w-10 shrink-0 rounded-full sm:w-14',
-                isCompleted ? 'bg-brand-blue' : 'bg-slate-200'
+                'w-8 sm:w-12 h-0.5 rounded-full mt-[25px] shrink-0',
+                isCompleted ? 'bg-brand-blue' : 'bg-brand-gray'
               )} />
             )}
           </React.Fragment>
