@@ -984,10 +984,15 @@ export const CreateBatch = () => {
   const arrivedFromVerificationFlow = location.state?.fromVerificationFlow === true;
   const hasVerificationFlow =
     arrivedFromVerificationFlow &&
-    !!selectedIndustry &&
+    (Array.isArray(selectedIndustry) ? selectedIndustry.length > 0 : !!selectedIndustry) &&
     selectedVerifications.length > 0;
+  const selectedIndustryList = Array.isArray(selectedIndustry)
+    ? selectedIndustry
+    : (selectedIndustry ? [selectedIndustry] : []);
+  const selectedIndustryPrimary = selectedIndustryList[0] || null;
+  const selectedIndustryLabel = selectedIndustryList.map((industry) => industry?.name).filter(Boolean).join(', ');
   const inferredBatchType =
-    selectedIndustry?.id === 'products' || selectedVerifications.includes('compliance')
+    selectedIndustryList.some((industry) => industry?.id === 'products') || selectedVerifications.includes('compliance')
       ? 'product'
       : 'human';
   const selectedVerificationNames = selectedVerifications
@@ -1264,7 +1269,7 @@ export const CreateBatch = () => {
               <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
                 <div>
                   <p className="font-sora font-semibold text-brand-dark text-sm">
-                    {selectedIndustry.name} verification batch
+                    {selectedIndustryLabel || 'Selected industry'} verification batch
                   </p>
                   <p className="text-xs text-gray-500 font-inter mt-1">
                     {selectedVerificationNames.length > 0
@@ -1410,8 +1415,8 @@ export const CreateBatch = () => {
           <Card className="p-4 mb-5 border border-gray-100">
             <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
               <div>
-                <p className="font-sora font-semibold text-brand-dark text-sm">
-                  {selectedIndustry.name} verification batch
+                  <p className="font-sora font-semibold text-brand-dark text-sm">
+                  {selectedIndustryLabel || 'Selected industry'} verification batch
                 </p>
                 <p className="text-xs text-gray-500 font-inter mt-1">
                   {selectedVerificationNames.length > 0

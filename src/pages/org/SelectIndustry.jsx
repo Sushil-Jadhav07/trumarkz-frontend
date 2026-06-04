@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '@/context/AppContext';
+import { useAuth } from '@/context/AuthContext';
 import { AuthLayout } from '@/components/layout/AuthLayout';
 import { PageHeader } from '@/components/shared/PageHeader';
 import { Button } from '@/components/ui/Button';
@@ -43,16 +44,80 @@ const industryDescriptions = {
   others: 'Custom verification workflows for your organisation.'
 };
 
+const normalizeValue = (value = '') =>
+  String(value).trim().toLowerCase().replace(/&/g, 'and').replace(/[^a-z0-9]+/g, ' ').trim();
+
+const INDUSTRY_MATCH_MAP = {
+  transport: 'transport',
+  logistics: 'transport',
+  'transport logistics': 'transport',
+  healthcare: 'healthcare',
+  education: 'education',
+  manufacturing: 'manufacturing',
+  security: 'security',
+  'security services': 'security',
+  agriculture: 'agriculture',
+  products: 'products',
+  'products services': 'products',
+  'product services': 'products',
+  others: 'others',
+  other: 'others',
+};
+
+const normalizeIndustrySelection = (value) => {
+  if (!value) return [];
+  if (Array.isArray(value)) return value.filter(Boolean);
+  return [value].filter(Boolean);
+};
+
 export const SelectIndustry = () => {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const { selectedIndustry, setSelectedIndustry } = useApp();
+  const selectedIndustries = useMemo(() => normalizeIndustrySelection(selectedIndustry), [selectedIndustry]);
 
-  const handleContinue = () => {
-    if (!selectedIndustry) {
-      toast.error('Please select an industry');
+  useEffect(() => {
+    if (selectedIndustries.length > 0) return;
+
+    const savedIndustries = Array.isArray(user?.industryType)
+      ? user.industryType
+      : (user?.industryType ? [user.industryType] : []);
+
+    const matchedIndustries = savedIndustries
+      .map((item) => {
+        const normalized = normalizeValue(item);
+        const matchedId =
+          INDUSTRY_MATCH_MAP[normalized] ||
+          industries.find((industry) => normalizeValue(industry.name) === normalized)?.id;
+        return industries.find((industry) => industry.id === matchedId) || null;
+      })
+      .filter(Boolean)
+      .filter((industry, index, list) => list.findIndex((item) => item.id === industry.id) === index);
+
+    if (matchedIndustries.length > 0) {
+      setSelectedIndustry(matchedIndustries);
+    }
+  }, [selectedIndustries.length, setSelectedIndustry, user?.industryType]);
+
+  const selectedIndustryNames = selectedIndustries.map((industry) => industry.name);
+
+  const toggleIndustry = (industry) => {
+    const exists = selectedIndustries.some((item) => item.id === industry.id);
+    if (exists) {
+      const next = selectedIndustries.filter((item) => item.id !== industry.id);
+      setSelectedIndustry(next.length > 0 ? next : null);
       return;
     }
-    toast.success(`${selectedIndustry.name} selected`);
+
+    setSelectedIndustry([...selectedIndustries, industry]);
+  };
+
+  const handleContinue = () => {
+    if (selectedIndustries.length === 0) {
+      toast.error('Please select at least one industry');
+      return;
+    }
+    toast.success(`${selectedIndustries.length} industry${selectedIndustries.length > 1 ? 'ies' : ''} selected`);
     navigate('/org/verifications');
   };
 
@@ -60,11 +125,16 @@ export const SelectIndustry = () => {
     <AuthLayout title="Select Industry">
       <div className="w-full mx-auto lg:max-w-none">
         <StepWizard steps={['Industry', 'Verifications', 'Permissions', 'Template', 'Batch']} currentStep={0} />
-        <PageHeader title="Select Industry" subtitle="Choose the industry for your verification batch" />
+        <PageHeader
+          title="Select Industry"
+          subtitle={selectedIndustries.length > 0
+            ? `${selectedIndustries.length} selected${selectedIndustryNames.length > 0 ? ` • ${selectedIndustryNames.join(', ')}` : ''}`
+            : 'Choose one or more industries for your verification batch'}
+        />
 
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
           {industries.map((industry, i) => {
-            const isSelected = selectedIndustry?.id === industry.id;
+            const isSelected = selectedIndustries.some((item) => item.id === industry.id);
             const Icon = industryIconMap[industry.id] || Grid2X2;
             return (
               <motion.div
@@ -74,7 +144,7 @@ export const SelectIndustry = () => {
                 transition={{ delay: i * 0.05 }}
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
-                onClick={() => setSelectedIndustry(industry)}
+                onClick={() => toggleIndustry(industry)}
                 className={`relative flex min-h-[170px] cursor-pointer flex-col items-center justify-center rounded-2xl border-2 bg-white p-6 text-center shadow-sm transition-all ${
                   isSelected
                     ? 'border-brand-blue shadow-md shadow-brand-blue/10'
@@ -110,7 +180,8 @@ export const SelectIndustry = () => {
           })}
         </div>
 
-        <div className="mt-8 flex justify-end">
+        <div className="mt-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-end">
+          
           <Button variant="primary" size="lg" className="w-full sm:w-auto" onClick={handleContinue} icon={ArrowRight}>
             Continue
           </Button>
@@ -121,4 +192,3 @@ export const SelectIndustry = () => {
 };
 
 export default SelectIndustry;
-

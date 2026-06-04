@@ -4,53 +4,59 @@ import clsx from 'clsx';
 
 export const StepWizard = ({ steps, currentStep }) => {
   return (
-    <div
-      className="mb-10 pb-1 -mx-1 px-1 overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
-    >
-      <div className="min-w-max flex items-start justify-center sm:justify-center gap-2">
-      {steps.map((step, index) => {
-        const isActive = index === currentStep;
-        const isCompleted = index < currentStep;
-        const isLast = index === steps.length - 1;
+    <div className="mb-10 overflow-x-auto pb-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+      <div className="min-w-max rounded-[32px] border border-slate-200/80 bg-white px-6 py-7 shadow-[0_18px_50px_-36px_rgba(15,23,42,0.25)] sm:px-10">
+        <div className="flex items-start justify-center gap-0">
+          {steps.map((step, index) => {
+            const isActive = index === currentStep;
+            const isCompleted = index < currentStep;
+            const isLast = index === steps.length - 1;
 
-        return (
-          <React.Fragment key={step}>
-            <div className="flex flex-col items-center shrink-0 pt-2">
-              <motion.div
-                animate={{
-                  backgroundColor: isActive || isCompleted ? '#2563EB' : '#F3F5F7',
-                  color: isActive || isCompleted ? '#FFFFFF' : '#CBD2D9',
-                  scale: isActive ? 1.1 : 1
-                }}
-                className={clsx(
-                  'w-8 h-8 rounded-full flex items-center justify-center text-sm font-semibold font-sora border-2',
-                  isActive || isCompleted ? 'border-brand-blue' : 'border-brand-gray'
+            return (
+              <React.Fragment key={step}>
+                <div className="flex min-w-[128px] flex-col items-center shrink-0">
+                  <motion.div
+                    animate={{
+                      backgroundColor: isActive ? '#2563EB' : '#FFFFFF',
+                      borderColor: isActive || isCompleted ? '#2563EB' : '#D6E0EC',
+                      color: isActive ? '#FFFFFF' : isCompleted ? '#2563EB' : '#94A3B8',
+                      scale: isActive ? 1.02 : 1,
+                    }}
+                    className={clsx(
+                      'flex h-11 w-11 items-center justify-center rounded-full border text-base font-semibold font-sora transition-colors'
+                    )}
+                  >
+                    {isCompleted ? (
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="20 6 9 17 4 12" />
+                      </svg>
+                    ) : (
+                      index + 1
+                    )}
+                  </motion.div>
+                  <span
+                    className={clsx(
+                      'mt-4 text-sm font-medium font-inter whitespace-nowrap text-center',
+                      isActive ? 'text-brand-blue' : isCompleted ? 'text-slate-700' : 'text-slate-400'
+                    )}
+                  >
+                    {step}
+                  </span>
+                </div>
+                {!isLast && (
+                  <div className="flex w-16 items-center justify-center pt-5 sm:w-28">
+                    <div
+                      className={clsx(
+                        'h-px w-full rounded-full',
+                        isCompleted ? 'bg-brand-blue/55' : 'bg-slate-200'
+                      )}
+                    />
+                  </div>
                 )}
-              >
-                {isCompleted ? (
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                    <polyline points="20 6 9 17 4 12" />
-                  </svg>
-                ) : (
-                  index + 1
-                )}
-              </motion.div>
-              <span className={clsx(
-                'text-[11px] leading-tight mt-1.5 font-inter font-medium text-center whitespace-nowrap',
-                isActive ? 'text-brand-blue' : isCompleted ? 'text-brand-dark' : 'text-brand-gray'
-              )}>
-                {step}
-              </span>
-            </div>
-            {!isLast && (
-              <div className={clsx(
-                'w-8 sm:w-12 h-0.5 rounded-full mt-[25px] shrink-0',
-                isCompleted ? 'bg-brand-blue' : 'bg-brand-gray'
-              )} />
-            )}
-          </React.Fragment>
-        );
-      })}
+              </React.Fragment>
+            );
+          })}
+        </div>
       </div>
     </div>
   );

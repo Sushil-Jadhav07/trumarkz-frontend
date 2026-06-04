@@ -1,4 +1,4 @@
-﻿import React, { useState } from 'react';
+import React, { useState } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '@/context/AppContext';
@@ -8,14 +8,36 @@ import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { StepWizard } from '@/components/ui/StepWizard';
 import { verificationTypes } from '@/data/mockData';
-import { Check, ArrowRight, Shield, MapPin, FileText, Car, GraduationCap, Briefcase } from 'lucide-react';
+import {
+  Check,
+  ArrowRight,
+  Shield,
+  MapPin,
+  GraduationCap,
+  Briefcase,
+  CalendarDays,
+  Sparkles,
+  ShieldAlert,
+  Car,
+  FlaskConical,
+  ShieldCheck,
+  Building2,
+} from 'lucide-react';
 import toast from 'react-hot-toast';
 import clsx from 'clsx';
 
 const iconMap = {
-  identity: Shield, pan: FileText, address: MapPin,
-  police: FileText, criminal: FileText, driving: Car,
-  education: GraduationCap, compliance: Shield, employment: Briefcase,
+  police: Shield,
+  dob: CalendarDays,
+  education: GraduationCap,
+  skills: Sparkles,
+  criminal_record: ShieldAlert,
+  address: MapPin,
+  driving_license: Car,
+  experience: Briefcase,
+  drug_test: FlaskConical,
+  police_verification: ShieldCheck,
+  company: Building2,
 };
 
 export const SelectVerifications = () => {
