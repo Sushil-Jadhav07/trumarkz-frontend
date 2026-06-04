@@ -1,6 +1,0 @@
-import{j as t}from"./index-CwXiQr1u.js";import{c as l}from"./clsx-B-dksMZM.js";import{c as f}from"./createLucideIcon-HhumGrSa.js";import{X as i}from"./x-BgwhBzya.js";import{C as o}from"./clock-Jatquydk.js";import{C as a}from"./check-DW-PJyZX.js";/**
- * @license lucide-react v0.446.0 - ISC
- *
- * This source code is licensed under the ISC license.
- * See the LICENSE file in the root directory of this source tree.
- */const s=f("LoaderCircle",[["path",{d:"M21 12a9 9 0 1 1-6.219-8.56",key:"13zald"}]]),C=({status:e,children:c,className:d})=>{const r={verified:"bg-green-500 text-white",pending:"bg-orange-500 text-white",failed:"bg-red-500 text-white","in-progress":"bg-brand-blue text-white",success:"bg-green-500 text-white",warning:"bg-orange-500 text-white",error:"bg-red-500 text-white",info:"bg-brand-blue text-white",default:"bg-brand-gray text-brand-dark"},n={verified:a,success:a,pending:o,warning:o,failed:i,error:i,"in-progress":s,info:s}[e]||null,g=r[e]||r.default;return t.jsxs("span",{className:l("inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium font-inter",g,d),children:[n&&t.jsx(n,{size:12,className:e==="in-progress"||e==="info"?"animate-spin":""}),c||e]})};export{C as B};

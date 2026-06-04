@@ -62,6 +62,7 @@ export const AuthProvider = ({ children }) => {
     const userType = getRoleFromLoginType(data.login_type || data.user_type, fallbackUserType);
     return {
       id: data.id,
+      organizationId: data.organization_id || data.org_id || null,
       name: data.full_name || data.organization_name || '',
       email: data.email || '',
       phoneNumber: data.phone_number || '',

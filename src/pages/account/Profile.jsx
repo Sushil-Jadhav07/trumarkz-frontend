@@ -7,6 +7,7 @@ import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
 import { Badge } from '@/components/ui/Badge';
 import { useAuth } from '@/context/AuthContext';
+import { authAPI } from '@/services/api';
 import {
   User, Camera, Mail, Phone, Building2, Save,
   CheckCircle, FileText, MapPin, RefreshCw, Shield,
@@ -28,6 +29,12 @@ const normalizeForm = (user) => ({
   avatarUrl: user?.avatarUrl || '',
 });
 
+const normalizeIndustryList = (value) => {
+  if (Array.isArray(value)) return value.filter(Boolean);
+  if (typeof value === 'string' && value.trim()) return [value.trim()];
+  return [];
+};
+
 const InfoRow = ({ label, value, icon: Icon }) => (
   <div className="flex items-start gap-3 p-3 bg-gray-50 rounded-xl">
     {Icon && <Icon size={16} className="text-gray-400 mt-0.5 shrink-0" />}
@@ -44,10 +51,38 @@ export const Profile = () => {
   const [form, setForm] = useState(normalizeForm(user));
   const [saving, setSaving] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [organizationIndustry, setOrganizationIndustry] = useState(() => normalizeIndustryList(user?.industryType));
 
   useEffect(() => {
     setForm(normalizeForm(user));
   }, [user]);
+
+  useEffect(() => {
+    let mounted = true;
+
+    const loadOrganizationIndustry = async () => {
+      if (role !== 'organization') {
+        if (mounted) setOrganizationIndustry([]);
+        return;
+      }
+
+      const fallback = normalizeIndustryList(user?.industryType);
+      if (mounted) setOrganizationIndustry(fallback);
+
+      if (!user?.organizationId) return;
+
+      try {
+        const { data } = await authAPI.getOrganizationIndustryType(user.organizationId);
+        const next = normalizeIndustryList(data);
+        if (mounted) setOrganizationIndustry(next);
+      } catch {
+        if (mounted) setOrganizationIndustry(fallback);
+      }
+    };
+
+    loadOrganizationIndustry();
+    return () => { mounted = false; };
+  }, [role, user?.industryType, user?.organizationId]);
 
   // Load fresh data from /auth/me on mount
   useEffect(() => {
@@ -204,11 +239,11 @@ export const Profile = () => {
                 <InfoRow label="Organization Name" value={user?.organization} icon={Building2} />
                 <InfoRow label="GSTIN" value={user?.gstin} icon={FileText} />
                 <InfoRow label="Business Reg. No." value={user?.businessRegNumber} icon={FileText} />
-                {Array.isArray(user?.industryType) && user.industryType.length > 0 && (
+                {organizationIndustry.length > 0 && (
                   <div className="p-3 bg-gray-50 rounded-xl sm:col-span-2">
-                    <p className="text-xs text-gray-400 font-inter mb-2">Industry Types</p>
+                    <p className="text-xs text-gray-400 font-inter mb-2">Industry Type</p>
                     <div className="flex flex-wrap gap-1.5">
-                      {user.industryType.map((ind) => (
+                      {organizationIndustry.map((ind) => (
                         <Badge key={ind} status="info">{ind}</Badge>
                       ))}
                     </div>

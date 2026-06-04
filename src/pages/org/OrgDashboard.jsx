@@ -6,10 +6,11 @@ import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { ProgressBar } from '@/components/ui/ProgressBar';
-import { verificationAPI, getApiError } from '@/services/api';
+import { useAuth } from '@/context/AuthContext';
+import { authAPI, verificationAPI, getApiError } from '@/services/api';
 import {
   Layers, Award, BarChart2, Store, ArrowRight,
-  Clock, CheckCircle, TrendingUp, Users, Shield, Globe, Lock, Zap
+  Clock, CheckCircle, TrendingUp, Users, Shield, Globe, Lock, Zap, Briefcase
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -24,6 +25,12 @@ const statusMeta = {
   verified: { action: 'Verification completed', color: 'green', icon: CheckCircle },
   failed: { action: 'Verification failed', color: 'red', icon: Clock },
   pending_verification: { action: 'Verification pending', color: 'orange', icon: Clock },
+};
+
+const normalizeIndustryValue = (value) => {
+  if (Array.isArray(value)) return value.find(Boolean) || '';
+  if (typeof value === 'string') return value.trim();
+  return '';
 };
 
 const formatDateTime = (value) => {
@@ -73,9 +80,11 @@ const buildBatchSummary = (users = []) => {
 
 export const OrgDashboard = () => {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [loading, setLoading] = useState(false);
   const [verificationData, setVerificationData] = useState(null);
   const [statsSummary, setStatsSummary] = useState({ total: '-', pending: '-', verified: '-', failed: '-' });
+  const [organizationIndustry, setOrganizationIndustry] = useState(() => normalizeIndustryValue(user?.industryType));
 
   useEffect(() => {
     let isMounted = true;
@@ -97,6 +106,30 @@ export const OrgDashboard = () => {
 
     return () => { isMounted = false; };
   }, []);
+
+  useEffect(() => {
+    let mounted = true;
+
+    const loadOrganizationIndustry = async () => {
+      const fallback = normalizeIndustryValue(user?.industryType);
+      if (mounted) setOrganizationIndustry(fallback);
+
+      if (!user?.organizationId) {
+        return;
+      }
+
+      try {
+        const { data } = await authAPI.getOrganizationIndustryType(user.organizationId);
+        const next = normalizeIndustryValue(data);
+        if (mounted) setOrganizationIndustry(next || '');
+      } catch {
+        if (mounted) setOrganizationIndustry(fallback || '');
+      }
+    };
+
+    loadOrganizationIndustry();
+    return () => { mounted = false; };
+  }, [user?.industryType, user?.organizationId]);
 
   const usersList = verificationData?.users || [];
   const activeBatches = buildBatchSummary(usersList);
@@ -159,6 +192,31 @@ export const OrgDashboard = () => {
   return (
     <AuthLayout title="Organization Dashboard">
       <div className="space-y-6">
+        <Card className="overflow-hidden border-0 bg-[linear-gradient(135deg,_#141b2d,_#1a2a4d_52%,_#2f63e0)] p-6 text-white shadow-[0_28px_70px_-38px_rgba(20,27,45,0.55)]">
+          <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex items-start gap-4">
+              <div className="w-14 h-14 rounded-2xl bg-white/10 flex items-center justify-center shrink-0">
+                <Briefcase size={24} className="text-white" />
+              </div>
+              <div>
+                <p className="text-sm text-white/70 font-inter">Welcome back</p>
+                <h2 className="font-sora font-bold text-3xl tracking-[-0.04em]">
+                  {user?.organization || user?.name || 'Organization'}
+                </h2>
+              </div>
+            </div>
+
+            {organizationIndustry && (
+              <div className="self-start lg:self-auto">
+                <p className="text-xs uppercase tracking-[0.16em] text-white/60 font-inter mb-2">Industry</p>
+                <div className="inline-flex items-center rounded-full bg-white/14 px-4 py-2 text-sm font-semibold">
+                  {organizationIndustry}
+                </div>
+              </div>
+            )}
+          </div>
+        </Card>
+
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           {stats.map((stat, i) => (
             <motion.div

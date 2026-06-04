@@ -79,6 +79,20 @@ export const PromoteSuperAdmin = () => {
     [allUsers, email]
   );
 
+  const handleSelectUser = (userEmail) => {
+    const normalizedCurrent = email.trim().toLowerCase();
+    const normalizedNext = String(userEmail || '').trim().toLowerCase();
+
+    if (normalizedCurrent === normalizedNext) {
+      setEmail('');
+      setError('');
+      return;
+    }
+
+    setEmail(userEmail || '');
+    setError('');
+  };
+
   const isValidEmail = (v) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim());
 
   const handleSubmit = (e) => {
@@ -195,7 +209,7 @@ export const PromoteSuperAdmin = () => {
                 <div>
                   <h3 className="font-sora font-semibold text-brand-dark">User directory</h3>
                   <p className="text-xs text-gray-500 font-inter mt-1">
-                    Search existing users and click one to prefill the promotion form.
+                    Search existing users and click one to prefill the promotion form, or type an email manually.
                   </p>
                 </div>
                 {usersLoading && <RefreshCw size={16} className="animate-spin text-gray-400" />}
@@ -221,7 +235,7 @@ export const PromoteSuperAdmin = () => {
                     <button
                       key={`${user.id}-${user.email}`}
                       type="button"
-                      onClick={() => { setEmail(user.email || ''); setError(''); }}
+                      onClick={() => handleSelectUser(user.email || '')}
                       className={`
                         w-full rounded-2xl border p-4 text-left transition-all
                         ${email.trim().toLowerCase() === String(user.email || '').toLowerCase()
