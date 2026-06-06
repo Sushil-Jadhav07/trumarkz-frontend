@@ -200,7 +200,7 @@ export const OrgDashboard = () => {
               </div>
               <div className="min-w-0">
                 <p className="font-inter text-xs font-medium text-white/70">Welcome back</p>
-                <h2 className="truncate font-sora text-2xl font-semibold tracking-[-0.02em] lg:text-[1.75rem]">
+                <h2 className="truncate font-sora text-base font-semibold lg:text-lg">
                   {user?.organization || user?.name || 'Organization'}
                 </h2>
               </div>
