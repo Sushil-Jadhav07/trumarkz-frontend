@@ -192,24 +192,24 @@ export const OrgDashboard = () => {
   return (
     <AuthLayout title="Organization Dashboard">
       <div className="space-y-6">
-        <Card className="overflow-hidden border-0 bg-[linear-gradient(135deg,_#141b2d,_#1a2a4d_52%,_#2f63e0)] p-6 text-white shadow-[0_28px_70px_-38px_rgba(20,27,45,0.55)]">
-          <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
-            <div className="flex items-start gap-4">
-              <div className="w-14 h-14 rounded-2xl bg-white/10 flex items-center justify-center shrink-0">
-                <Briefcase size={24} className="text-white" />
+        <Card className="overflow-hidden border-0 bg-[linear-gradient(135deg,_#141b2d,_#1a2a4d_52%,_#2f63e0)] px-5 py-4 text-white shadow-[0_24px_56px_-40px_rgba(20,27,45,0.5)]">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex items-start gap-3">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-white/10">
+                <Briefcase size={20} className="text-white" />
               </div>
-              <div>
-                <p className="text-sm text-white/70 font-inter">Welcome back</p>
-                <h2 className="font-sora font-bold text-3xl tracking-[-0.04em]">
+              <div className="min-w-0">
+                <p className="font-inter text-xs font-medium text-white/70">Welcome back</p>
+                <h2 className="truncate font-sora text-2xl font-semibold tracking-[-0.02em] lg:text-[1.75rem]">
                   {user?.organization || user?.name || 'Organization'}
                 </h2>
               </div>
             </div>
 
             {organizationIndustry && (
-              <div className="self-start lg:self-auto">
-                <p className="text-xs uppercase tracking-[0.16em] text-white/60 font-inter mb-2">Industry</p>
-                <div className="inline-flex items-center rounded-full bg-white/14 px-4 py-2 text-sm font-semibold">
+              <div className="self-start text-left lg:self-auto lg:text-right">
+                <p className="mb-1 font-inter text-[11px] font-medium uppercase tracking-[0.14em] text-white/55">Industry</p>
+                <div className="inline-flex items-center rounded-full bg-white/12 px-3 py-1.5 text-sm font-medium">
                   {organizationIndustry}
                 </div>
               </div>

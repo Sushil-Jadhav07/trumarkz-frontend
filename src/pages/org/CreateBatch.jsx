@@ -163,7 +163,7 @@ const ProductProgress = ({ step }) => {
 };
 
 // ─── Single Human Modal ───────────────────────────────────────────────────────
-const SingleHumanModal = ({ isOpen, onClose, onSuccess, selectedIndustry, selectedVerifications }) => {
+const SingleHumanModal = ({ isOpen, onClose, onSuccess, selectedIndustry, selectedVerifications, selectedPermission }) => {
   const [loading, setLoading] = useState(false);
   const [form, setForm] = useState({
     full_name: '', phone_number: '', email: '',
@@ -185,7 +185,7 @@ const SingleHumanModal = ({ isOpen, onClose, onSuccess, selectedIndustry, select
         ...form,
         industry_type: getIndustryTypeList(selectedIndustry),
         verification_types: getVerificationApiTypes(selectedVerifications),
-        credential_visibility: 'private',
+        credential_visibility: selectedPermission || 'private',
       });
       toast.success('Human record created! Invite link generated.');
       onSuccess(data);
@@ -427,7 +427,7 @@ const InviteResultCard = ({ result, onDismiss }) => (
 );
 
 // ─── Human Bulk Upload Panel ───────────────────────────────────────────────────
-const HumanBulkPanel = ({ onResult, selectedIndustry, selectedVerifications }) => {
+const HumanBulkPanel = ({ onResult, selectedIndustry, selectedVerifications, selectedPermission }) => {
   const fileInputRef = useRef(null);
   const [batchName, setBatchName] = useState('');
   const [description, setDescription] = useState('');
@@ -460,14 +460,13 @@ const HumanBulkPanel = ({ onResult, selectedIndustry, selectedVerifications }) =
         {
           industryType: getIndustryTypeList(selectedIndustry),
           verificationTypes: getVerificationApiTypes(selectedVerifications),
-          credentialVisibility: 'private',
+          credentialVisibility: selectedPermission || 'private',
         },
         setUploadProgress
       );
       setUploadResult(data);
       onResult && onResult(data);
       toast.success(`Uploaded ${data.total_uploaded} records. Batch: ${data.batch_id}`);
-      navigate('/org/batch-status');
     } catch (err) {
       toast.error(getApiError(err, 'Batch upload failed. Please try again.'));
     } finally {
@@ -661,13 +660,13 @@ const HumanBulkPanel = ({ onResult, selectedIndustry, selectedVerifications }) =
 };
 
 // ─── Product Bulk Upload Panel ─────────────────────────────────────────────────
-const ProductBulkPanel = ({ categories, onResult, selectedCategory, selectedService }) => {
+const ProductBulkPanel = ({ categories, onResult, selectedCategory, selectedService, selectedPermission }) => {
   const fileInputRef = useRef(null);
   const [batchName, setBatchName] = useState('');
   const [description, setDescription] = useState('');
   const [categoryId, setCategoryId] = useState(selectedCategory?.categoryId || '');
   const [numberOfUnits, setNumberOfUnits] = useState('');
-  const [visibility, setVisibility] = useState('private');
+  const [visibility, setVisibility] = useState(selectedPermission || 'private');
   const [templateLoading, setTemplateLoading] = useState(false);
   const [templateHeaders, setTemplateHeaders] = useState(
     selectedService?.id === 'warranty'
@@ -692,6 +691,10 @@ const ProductBulkPanel = ({ categories, onResult, selectedCategory, selectedServ
         : 'product_name,serial_number,model,batch_number,certificate_number'
     );
   }, [selectedService]);
+
+  useEffect(() => {
+    setVisibility(selectedPermission || 'private');
+  }, [selectedPermission]);
 
   const handleFileSelect = (e) => {
     const file = e.target.files?.[0];
@@ -722,7 +725,6 @@ const ProductBulkPanel = ({ categories, onResult, selectedCategory, selectedServ
       setUploadResult(data);
       onResult && onResult(data);
       toast.success(`Uploaded ${data.total_uploaded} products. Batch: ${data.batch_id}`);
-      navigate('/org/batch-status');
     } catch (err) {
       toast.error(getApiError(err, 'Product batch upload failed. Please try again.'));
     } finally {
@@ -972,11 +974,14 @@ const ProductBulkPanel = ({ categories, onResult, selectedCategory, selectedServ
 export const CreateBatch = () => {
   const navigate = useNavigate();
   const location = useLocation();
+  const flowBatchType = location.state?.batchType || null;
+  const flowSubMode = location.state?.subMode || null;
   const {
     selectedIndustry,
     setSelectedIndustry,
     selectedVerifications,
     setSelectedVerifications,
+    selectedPermission,
     setSelectedTemplate,
     setSelectedFields,
   } = useApp();
@@ -1000,9 +1005,9 @@ export const CreateBatch = () => {
     .filter(Boolean);
 
   // 'human' | 'product' | null
-  const [batchType, setBatchType] = useState(null);
+  const [batchType, setBatchType] = useState(flowBatchType);
   // 'single' | 'bulk' | null
-  const [subMode, setSubMode] = useState(null);
+  const [subMode, setSubMode] = useState(flowSubMode);
 
   // Modals
   const [showSingleHumanModal, setShowSingleHumanModal] = useState(false);
@@ -1035,6 +1040,14 @@ export const CreateBatch = () => {
       setBatchType(inferredBatchType);
     }
   }, [hasVerificationFlow, inferredBatchType, batchType]);
+
+  useEffect(() => {
+    if (!hasVerificationFlow || !batchType || subMode) return;
+
+    if (batchType === 'human') {
+      setSubMode(flowSubMode || 'bulk');
+    }
+  }, [hasVerificationFlow, batchType, subMode, flowSubMode]);
 
   const startHumanFlow = () => {
     setSelectedIndustry(null);
@@ -1358,6 +1371,7 @@ export const CreateBatch = () => {
             onSuccess={handleSingleSuccess}
             selectedIndustry={selectedIndustry}
             selectedVerifications={selectedVerifications}
+            selectedPermission={selectedPermission}
           />
           <SingleProductModal
             isOpen={showSingleProductModal}
@@ -1433,10 +1447,10 @@ export const CreateBatch = () => {
 
         <Card className="p-6">
           {isHuman
-            ? <HumanBulkPanel onResult={() => {}} selectedIndustry={selectedIndustry} selectedVerifications={selectedVerifications} />
+            ? <HumanBulkPanel onResult={() => {}} selectedIndustry={selectedIndustry} selectedVerifications={selectedVerifications} selectedPermission={selectedPermission} />
             : (categoriesLoading
               ? <div className="py-10 text-center text-sm text-gray-400 font-inter">Loading categories…</div>
-              : <ProductBulkPanel categories={categories} onResult={() => {}} selectedCategory={selectedProductSector} selectedService={activeProductService} />
+              : <ProductBulkPanel categories={categories} onResult={() => {}} selectedCategory={selectedProductSector} selectedService={activeProductService} selectedPermission={selectedPermission} />
             )
           }
         </Card>

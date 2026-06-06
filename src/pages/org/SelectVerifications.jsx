@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '@/context/AppContext';
+import { HUMAN_VERIFICATION_STEPS, HUMAN_VERIFICATION_STEP_META } from '@/data/humanVerificationFlow';
 import { AuthLayout } from '@/components/layout/AuthLayout';
 import { PageHeader } from '@/components/shared/PageHeader';
 import { Button } from '@/components/ui/Button';
@@ -43,114 +44,118 @@ const iconMap = {
 export const SelectVerifications = () => {
   const navigate = useNavigate();
   const { selectedVerifications, setSelectedVerifications } = useApp();
-  const [agreedToCost, setAgreedToCost] = useState(false);
 
-  const toggleVerification = (id) =>
-    setSelectedVerifications(prev =>
-      prev.includes(id) ? prev.filter(v => v !== id) : [...prev, id]
+  const toggleVerification = (id) => {
+    setSelectedVerifications((prev) =>
+      prev.includes(id) ? prev.filter((value) => value !== id) : [...prev, id]
     );
-
-  const totalCost = selectedVerifications.reduce((sum, id) => {
-    const v = verificationTypes.find(vt => vt.id === id);
-    return sum + (v?.price || 0);
-  }, 0);
+  };
 
   const handleContinue = () => {
-    if (selectedVerifications.length === 0) { toast.error('Select at least one verification'); return; }
-    if (!agreedToCost) { toast.error('Please agree to the cost before continuing'); return; }
+    if (selectedVerifications.length === 0) {
+      toast.error('Select at least one verification');
+      return;
+    }
     navigate('/org/permissions');
   };
 
   return (
     <AuthLayout title="Select Verifications">
       <div className="w-full mx-auto lg:max-w-none">
-        <StepWizard steps={['Industry', 'Verifications', 'Permissions', 'Template', 'Batch']} currentStep={1} />
-        <PageHeader title="Select Verifications" subtitle={`${selectedVerifications.length} selected`} />
+        <StepWizard
+          steps={HUMAN_VERIFICATION_STEPS}
+          currentStep={HUMAN_VERIFICATION_STEP_META.verifications.currentStep}
+        />
+        <PageHeader
+          title="Select Verifications"
+          subtitle={`${selectedVerifications.length} selected`}
+        />
 
-        <Card className="p-3 sm:p-6">
-          <div className="space-y-3">
-            {verificationTypes.map((v, i) => {
-              const isSelected = selectedVerifications.includes(v.id);
-              const Icon = iconMap[v.id] || Shield;
-              return (
-                <motion.div
-                  key={v.id}
-                  initial={{ opacity: 0, x: -10 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: i * 0.05 }}
-                  onClick={() => toggleVerification(v.id)}
-                  className={clsx(
-                    'flex items-start sm:items-center gap-3 sm:gap-4 p-3 sm:p-4 rounded-xl cursor-pointer border-2 transition-all',
-                    isSelected ? 'border-brand-blue bg-brand-blue/5' : 'border-gray-100 hover:border-gray-200'
-                  )}
-                >
-                  <div className={clsx(
-                    'w-6 h-6 rounded-lg border-2 flex items-center justify-center transition-colors shrink-0',
-                    isSelected ? 'bg-brand-blue border-brand-blue' : 'border-gray-300'
-                  )}>
-                    {isSelected && <Check size={14} className="text-white" />}
-                  </div>
-                  <div className="p-2 bg-gray-100 rounded-lg shrink-0">
-                    <Icon size={18} className="text-gray-600" />
-                  </div>
-                  <span className="flex-1 text-sm font-medium text-brand-dark font-inter leading-snug pr-2">{v.name}</span>
-                  <div className="flex flex-col sm:flex-row items-end sm:items-center gap-1.5 sm:gap-2 ml-auto shrink-0">
-                    {v.type === 'api' ? (
-                      <span className="text-[11px] sm:text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-700 font-inter font-medium whitespace-nowrap">
-                        Auto &middot; {v.apiLabel}
-                      </span>
-                    ) : (
-                      <span className="text-[11px] sm:text-xs px-2 py-0.5 rounded-full bg-orange-100 text-orange-700 font-inter font-medium whitespace-nowrap">
-                        Manual &middot; {v.turnaround}
-                      </span>
+        <div>
+          <Card className="overflow-hidden border border-blue-100 p-4 shadow-[0_18px_48px_-40px_rgba(37,99,235,0.35)] sm:p-5">
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <div>
+                <p className="font-inter text-xs font-medium uppercase tracking-[0.14em] text-brand-blue/70">Verification catalog</p>
+                <h3 className="mt-1 font-sora text-lg font-semibold text-brand-dark">Choose checks for this batch</h3>
+              </div>
+              <div className="rounded-xl bg-blue-50 px-3 py-2 text-right">
+                <p className="font-inter text-[11px] uppercase tracking-[0.14em] text-brand-blue/65">Available</p>
+                <p className="font-sora text-lg font-semibold text-brand-dark">{verificationTypes.length}</p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
+              {verificationTypes.map((verification, index) => {
+                const isSelected = selectedVerifications.includes(verification.id);
+                const Icon = iconMap[verification.id] || Shield;
+
+                return (
+                  <motion.button
+                    key={verification.id}
+                    type="button"
+                    initial={{ opacity: 0, y: 12 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: index * 0.03 }}
+                    onClick={() => toggleVerification(verification.id)}
+                    className={clsx(
+                      'relative flex min-h-[180px] flex-col rounded-2xl border p-4 text-left transition-all',
+                      isSelected
+                        ? 'border-brand-blue bg-brand-blue/[0.06] shadow-[0_16px_34px_-26px_rgba(37,99,235,0.75)]'
+                        : 'border-slate-200 bg-white hover:border-blue-200 hover:bg-blue-50/30'
                     )}
-                    <span className="text-sm font-semibold text-brand-dark font-inter whitespace-nowrap">Rs. {v.price}</span>
-                  </div>
-                </motion.div>
-              );
-            })}
-          </div>
-        </Card>
-
-        {selectedVerifications.length > 0 && (
-          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
-            <Card className="p-5 mt-4 border-2 border-brand-blue/20 bg-brand-blue/5">
-              <h4 className="font-sora font-semibold text-brand-dark mb-3">Cost per person / product</h4>
-              <div className="space-y-2 mb-3">
-                {selectedVerifications.map(id => {
-                  const v = verificationTypes.find(vt => vt.id === id);
-                  return v ? (
-                    <div key={id} className="flex justify-between text-sm font-inter">
-                      <span className="text-gray-600">{v.name}</span>
-                      <span className="font-medium text-brand-dark">Rs. {v.price}</span>
+                  >
+                    <div className="mb-4 flex items-start justify-between gap-3">
+                      <div className={clsx(
+                        'flex h-10 w-10 items-center justify-center rounded-xl',
+                        isSelected ? 'bg-brand-blue text-white' : 'bg-slate-100 text-slate-600'
+                      )}>
+                        <Icon size={18} />
+                      </div>
+                      <div className={clsx(
+                        'flex h-6 w-6 items-center justify-center rounded-full border transition-colors',
+                        isSelected ? 'border-brand-blue bg-brand-blue text-white' : 'border-slate-300 bg-white text-transparent'
+                      )}>
+                        <Check size={13} />
+                      </div>
                     </div>
-                  ) : null;
-                })}
-              </div>
-              <div className="border-t border-brand-blue/20 pt-3 flex justify-between">
-                <span className="font-sora font-semibold text-brand-dark">Total per record</span>
-                <span className="font-sora font-bold text-brand-blue text-lg">Rs. {totalCost}</span>
-              </div>
-              <p className="text-xs text-gray-400 font-inter mt-2">
-                * You will be charged this amount x number of records when the batch is submitted
-              </p>
-            </Card>
 
-            <label className="flex items-start gap-3 cursor-pointer mt-4">
-              <input
-                type="checkbox"
-                checked={agreedToCost}
-                onChange={e => setAgreedToCost(e.target.checked)}
-                className="mt-0.5 rounded border-gray-300 text-brand-blue focus:ring-brand-blue"
-              />
-              <span className="text-sm text-gray-600 font-inter">
-                I agree to the per-unit cost shown above for this verification batch.
-              </span>
-            </label>
-          </motion.div>
-        )}
+                    <div className="flex-1">
+                      <h4 className="font-inter text-sm font-semibold text-brand-dark">{verification.name}</h4>
+                      <p className="mt-2 font-inter text-xs leading-5 text-slate-500">
+                        {verification.type === 'api'
+                          ? `Auto flow via ${verification.apiLabel}`
+                          : `Manual review in ${verification.turnaround}`}
+                      </p>
+                    </div>
 
-        <div className="mt-8 flex justify-end">
+                    <div className="mt-4 space-y-2">
+                      <span
+                        className={clsx(
+                          'inline-flex rounded-full px-2.5 py-1 font-inter text-[11px] font-medium',
+                          verification.type === 'api'
+                            ? 'bg-blue-50 text-brand-blue'
+                            : 'bg-slate-100 text-slate-600'
+                        )}
+                      >
+                        {verification.type === 'api' ? 'Auto check' : 'Manual check'}
+                      </span>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-inter text-[11px] uppercase tracking-[0.12em] text-slate-400">
+                          Per record
+                        </span>
+                        <span className="font-sora text-base font-semibold text-brand-dark">
+                          Rs. {verification.price}
+                        </span>
+                      </div>
+                    </div>
+                  </motion.button>
+                );
+              })}
+            </div>
+          </Card>
+        </div>
+
+        <div className="mt-6 flex justify-end">
           <Button variant="primary" size="lg" onClick={handleContinue} icon={ArrowRight}>
             Continue
           </Button>

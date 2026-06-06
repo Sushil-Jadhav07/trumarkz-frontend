@@ -1,10 +1,24 @@
-﻿import React, { createContext, useContext, useState } from 'react';
+import React, { createContext, useContext, useEffect, useState } from 'react';
 
 const AppContext = createContext(null);
+const STORAGE_KEY = 'trumarkz_app_state';
+
+const readStoredState = () => {
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY);
+    return stored ? JSON.parse(stored) : {};
+  } catch {
+    return {};
+  }
+};
 
 export const AppProvider = ({ children }) => {
-  const [selectedIndustry, setSelectedIndustry] = useState(null);
-  const [selectedVerifications, setSelectedVerifications] = useState([]);
+  const persistedState = readStoredState();
+
+  const [selectedIndustry, setSelectedIndustry] = useState(persistedState.selectedIndustry ?? null);
+  const [selectedVerifications, setSelectedVerifications] = useState(persistedState.selectedVerifications ?? []);
+  const [selectedPermission, setSelectedPermission] = useState(persistedState.selectedPermission ?? 'private');
+  const [selectedHumanTemplate, setSelectedHumanTemplate] = useState(persistedState.selectedHumanTemplate ?? 'classic-blue');
   const [selectedTemplate, setSelectedTemplate] = useState(null);
   const [selectedFields, setSelectedFields] = useState([]);
   const [batchData, setBatchData] = useState(null);
@@ -19,6 +33,22 @@ export const AppProvider = ({ children }) => {
     { id: 5, title: 'New agency email sent', time: '2 days ago', read: true, icon: 'user' }
   ]);
 
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify({
+          selectedIndustry,
+          selectedVerifications,
+          selectedPermission,
+          selectedHumanTemplate,
+        })
+      );
+    } catch {
+      // Ignore persistence failures.
+    }
+  }, [selectedIndustry, selectedVerifications, selectedPermission, selectedHumanTemplate]);
+
   const markNotificationRead = (id) => {
     setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
   };
@@ -31,6 +61,8 @@ export const AppProvider = ({ children }) => {
     <AppContext.Provider value={{
       selectedIndustry, setSelectedIndustry,
       selectedVerifications, setSelectedVerifications,
+      selectedPermission, setSelectedPermission,
+      selectedHumanTemplate, setSelectedHumanTemplate,
       selectedTemplate, setSelectedTemplate,
       selectedFields, setSelectedFields,
       batchData, setBatchData,
@@ -45,4 +77,3 @@ export const AppProvider = ({ children }) => {
 };
 
 export const useApp = () => useContext(AppContext);
-

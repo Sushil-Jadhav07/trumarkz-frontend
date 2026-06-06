@@ -44,6 +44,8 @@ import OrgDashboard from '@/pages/org/OrgDashboard';
 import SelectIndustry from '@/pages/org/SelectIndustry';
 import SelectVerifications from '@/pages/org/SelectVerifications';
 import DownloadTemplate from '@/pages/org/DownloadTemplate';
+import CostBreakdown from '@/pages/org/CostBreakdown';
+import CertificatePreview from '@/pages/org/CertificatePreview';
 import CreateBatch from '@/pages/org/CreateBatch';
 import BatchStatus from '@/pages/org/BatchStatus';
 import RecordDetail from '@/pages/org/RecordDetail';
@@ -158,6 +160,8 @@ const AnimatedRoutes = () => {
           <Route path="/org/verifications" element={<SelectVerifications />} />
           <Route path="/org/permissions" element={<PermissionSettings />} />
           <Route path="/org/template" element={<DownloadTemplate />} />
+          <Route path="/org/costing" element={<CostBreakdown />} />
+          <Route path="/org/certificate-preview" element={<CertificatePreview />} />
           <Route path="/org/create-batch" element={<CreateBatch />} />
           <Route path="/org/batch-status" element={<BatchStatus />} />
           <Route path="/org/record/:id" element={<RecordDetail />} />

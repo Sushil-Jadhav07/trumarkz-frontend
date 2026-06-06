@@ -2,6 +2,7 @@ import React, { useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '@/context/AppContext';
+import { HUMAN_VERIFICATION_STEPS, HUMAN_VERIFICATION_STEP_META } from '@/data/humanVerificationFlow';
 import { useAuth } from '@/context/AuthContext';
 import { AuthLayout } from '@/components/layout/AuthLayout';
 import { PageHeader } from '@/components/shared/PageHeader';
@@ -124,7 +125,10 @@ export const SelectIndustry = () => {
   return (
     <AuthLayout title="Select Industry">
       <div className="w-full mx-auto lg:max-w-none">
-        <StepWizard steps={['Industry', 'Verifications', 'Permissions', 'Template', 'Batch']} currentStep={0} />
+        <StepWizard
+          steps={HUMAN_VERIFICATION_STEPS}
+          currentStep={HUMAN_VERIFICATION_STEP_META.industry.currentStep}
+        />
         <PageHeader
           title="Select Industry"
           subtitle={selectedIndustries.length > 0
@@ -132,7 +136,7 @@ export const SelectIndustry = () => {
             : 'Choose one or more industries for your verification batch'}
         />
 
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-4">
           {industries.map((industry, i) => {
             const isSelected = selectedIndustries.some((item) => item.id === industry.id);
             const Icon = industryIconMap[industry.id] || Grid2X2;
@@ -142,10 +146,10 @@ export const SelectIndustry = () => {
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: i * 0.05 }}
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
+                whileHover={{ scale: 1.01 }}
+                whileTap={{ scale: 0.985 }}
                 onClick={() => toggleIndustry(industry)}
-                className={`relative flex min-h-[170px] cursor-pointer flex-col items-center justify-center rounded-2xl border-2 bg-white p-6 text-center shadow-sm transition-all ${
+                className={`relative flex min-h-[132px] cursor-pointer flex-col items-center justify-center rounded-xl border bg-white p-4 text-center shadow-sm transition-all ${
                   isSelected
                     ? 'border-brand-blue shadow-md shadow-brand-blue/10'
                     : 'border-gray-100 hover:border-brand-blue/30 hover:shadow-md'
@@ -153,27 +157,27 @@ export const SelectIndustry = () => {
               >
                 <motion.div
                   initial={false}
-                  animate={{ scale: isSelected ? 1.06 : 1 }}
-                  className={`mb-4 flex h-16 w-16 items-center justify-center rounded-2xl transition-all ${
+                  animate={{ scale: isSelected ? 1.04 : 1 }}
+                  className={`mb-3 flex h-11 w-11 items-center justify-center rounded-xl transition-all ${
                     isSelected
-                      ? 'bg-brand-blue text-white shadow-lg shadow-brand-blue/25'
+                      ? 'bg-brand-blue text-white shadow-md shadow-brand-blue/20'
                       : 'bg-brand-blue/10 text-brand-blue'
                   }`}
                 >
-                  <Icon size={30} strokeWidth={2.2} />
+                  <Icon size={20} strokeWidth={2.1} />
                 </motion.div>
 
-                <p className="font-inter text-lg font-semibold text-brand-dark">{industry.name}</p>
-                <p className="mt-2 max-w-[300px] text-sm leading-6 text-gray-500">
+                <p className="font-inter text-[15px] font-semibold leading-5 text-brand-dark">{industry.name}</p>
+                <p className="mt-1.5 max-w-[180px] text-xs leading-5 text-gray-500">
                   {industryDescriptions[industry.id] || 'Verification workflow for this industry.'}
                 </p>
 
                 <motion.div
                   initial={false}
                   animate={{ scale: isSelected ? 1 : 0.85, opacity: isSelected ? 1 : 0 }}
-                  className="absolute right-4 top-4 flex h-7 w-7 items-center justify-center rounded-full bg-brand-blue text-white shadow-sm"
+                  className="absolute right-3 top-3 flex h-6 w-6 items-center justify-center rounded-full bg-brand-blue text-white shadow-sm"
                 >
-                  <Check size={16} />
+                  <Check size={14} />
                 </motion.div>
               </motion.div>
             );
