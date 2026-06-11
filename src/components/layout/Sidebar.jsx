@@ -27,7 +27,6 @@ export const Sidebar = ({ collapsed, onToggle, mobileOpen = false, onMobileClose
       return [
         { path: '/org/dashboard', label: 'Dashboard', icon: LayoutDashboard },
         { path: '/org/batch-status', label: 'Batches', icon: Layers },
-        { path: '/credential/template', label: 'Credentials', icon: Award },
         { path: '/marketplace', label: 'Registry', icon: Store },
         { path: '/qr/reports', label: 'Reports', icon: BarChart2 },
         { path: '/account/wallet', label: 'Wallet', icon: Wallet },
@@ -55,7 +54,7 @@ export const Sidebar = ({ collapsed, onToggle, mobileOpen = false, onMobileClose
         { path: '/admin/sdc-verification', label: 'SDC Verification', icon: ShieldCheck },
         { path: '/admin/promote-super-admin', label: 'Promote Admin', icon: UserCog },
         { path: '/admin/create-super-admin', label: 'Create Admin', icon: UserPlus },
-        { path: '/admin/verifiers', label: ' Third party verifiier', icon: Building2 },
+        { path: '/admin/verifiers', label: 'Verifiers', icon: Building2 },
         { path: '/admin/pricing', label: 'Pricing Config', icon: DollarSign },
         { path: '/admin/disputes', label: 'Disputes', icon: AlertTriangle },
         { path: '/admin/platform-health', label: 'Platform Health', icon: Activity },

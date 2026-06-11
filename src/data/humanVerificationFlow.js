@@ -8,6 +8,16 @@ export const HUMAN_VERIFICATION_STEPS = [
   'Batch',
 ];
 
+export const HUMAN_VERIFICATION_STEP_ROUTES = [
+  '/org/industry',
+  '/org/verifications',
+  '/org/permissions',
+  '/org/template',
+  '/org/costing',
+  '/org/certificate-preview',
+  '/org/create-batch',
+];
+
 export const HUMAN_VERIFICATION_STEP_META = {
   industry: { currentStep: 0, label: 'Step 1 of 7', progress: 14.29 },
   verifications: { currentStep: 1, label: 'Step 2 of 7', progress: 28.57 },

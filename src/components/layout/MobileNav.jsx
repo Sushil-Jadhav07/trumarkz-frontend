@@ -16,7 +16,6 @@ export const MobileNav = () => {
     ? [
         { path: '/org/dashboard', label: 'Home', icon: LayoutDashboard },
         { path: '/org/batch-status', label: 'Batches', icon: Layers },
-        { path: '/credential/template', label: 'Credentials', icon: Award },
         { path: '/marketplace', label: 'Market', icon: Store },
         { path: '/qr/reports', label: 'Reports', icon: BarChart2 },
       ]

@@ -2,7 +2,7 @@ import React from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '@/context/AppContext';
-import { HUMAN_VERIFICATION_STEPS, HUMAN_VERIFICATION_STEP_META } from '@/data/humanVerificationFlow';
+import { HUMAN_VERIFICATION_STEPS, HUMAN_VERIFICATION_STEP_META, HUMAN_VERIFICATION_STEP_ROUTES } from '@/data/humanVerificationFlow';
 import { AuthLayout } from '@/components/layout/AuthLayout';
 import { PageHeader } from '@/components/shared/PageHeader';
 import { Button } from '@/components/ui/Button';
@@ -48,6 +48,7 @@ export const PermissionSettings = () => {
         <StepWizard
           steps={HUMAN_VERIFICATION_STEPS}
           currentStep={HUMAN_VERIFICATION_STEP_META.permissions.currentStep}
+          stepRoutes={HUMAN_VERIFICATION_STEP_ROUTES}
         />
         <PageHeader
           title="Permission Settings"

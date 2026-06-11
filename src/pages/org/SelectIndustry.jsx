@@ -2,115 +2,90 @@ import React, { useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '@/context/AppContext';
-import { HUMAN_VERIFICATION_STEPS, HUMAN_VERIFICATION_STEP_META } from '@/data/humanVerificationFlow';
+import { HUMAN_VERIFICATION_STEPS, HUMAN_VERIFICATION_STEP_META, HUMAN_VERIFICATION_STEP_ROUTES } from '@/data/humanVerificationFlow';
 import { useAuth } from '@/context/AuthContext';
 import { AuthLayout } from '@/components/layout/AuthLayout';
 import { PageHeader } from '@/components/shared/PageHeader';
 import { Button } from '@/components/ui/Button';
 import { StepWizard } from '@/components/ui/StepWizard';
-import { industries } from '@/data/mockData';
+import { humanIndustries, productIndustries } from '@/data/mockData';
 import {
-  Check,
   ArrowRight,
-  Truck,
   BriefcaseMedical,
-  GraduationCap,
-  Factory,
-  ShieldCheck,
-  Tractor,
+  Building2,
+  Check,
+  Cpu,
+  Laptop,
   Package,
-  Grid2X2
+  Sparkles,
+  Truck,
+  Warehouse,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
-const industryIconMap = {
-  transport: Truck,
-  healthcare: BriefcaseMedical,
-  education: GraduationCap,
-  manufacturing: Factory,
-  security: ShieldCheck,
-  agriculture: Tractor,
-  products: Package,
-  others: Grid2X2
+const humanIconMap = {
+  healthcare:     BriefcaseMedical,
+  transportation: Truck,
+  logistics:      Warehouse,
+  it:             Laptop,
+  real_estate:    Building2,
 };
 
-const industryDescriptions = {
-  transport: 'Driver, fleet, and logistics credential checks.',
-  healthcare: 'Staff, licence, and healthcare compliance checks.',
-  education: 'Academic records, certificates, and institute proof.',
-  manufacturing: 'Factory staff, plant, and compliance verification.',
-  security: 'Guard identity, background, and clearance workflows.',
-  agriculture: 'Farm, supplier, and origin verification records.',
-  products: 'Product certificates, warranties, and batch records.',
-  others: 'Custom verification workflows for your organisation.'
+const productIconMap = {
+  electronics:      Cpu,
+  beauty_cosmetics: Sparkles,
 };
 
-const normalizeValue = (value = '') =>
-  String(value).trim().toLowerCase().replace(/&/g, 'and').replace(/[^a-z0-9]+/g, ' ').trim();
-
-const INDUSTRY_MATCH_MAP = {
-  transport: 'transport',
-  logistics: 'transport',
-  'transport logistics': 'transport',
-  healthcare: 'healthcare',
-  education: 'education',
-  manufacturing: 'manufacturing',
-  security: 'security',
-  'security services': 'security',
-  agriculture: 'agriculture',
-  products: 'products',
-  'products services': 'products',
-  'product services': 'products',
-  others: 'others',
-  other: 'others',
+const humanDescriptions = {
+  healthcare:     'Staff, licence, and healthcare compliance checks.',
+  transportation: 'Driver credentials and vehicle verification.',
+  logistics:      'Supply chain and courier staff verification.',
+  it:             'Employee background and technical credential checks.',
+  real_estate:    'Agent, property, and compliance verification.',
 };
 
-const normalizeIndustrySelection = (value) => {
-  if (!value) return [];
-  if (Array.isArray(value)) return value.filter(Boolean);
-  return [value].filter(Boolean);
+const productDescriptions = {
+  electronics:      'Device warranty and serial number certificates.',
+  beauty_cosmetics: 'Authenticity certificates with lab reports and batch proofs.',
 };
 
 export const SelectIndustry = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const { selectedIndustry, setSelectedIndustry } = useApp();
-  const selectedIndustries = useMemo(() => normalizeIndustrySelection(selectedIndustry), [selectedIndustry]);
+  const { batchEntityType, selectedIndustry, setSelectedIndustry } = useApp();
 
+  const isProduct     = batchEntityType === 'product';
+  const industries    = isProduct ? productIndustries : humanIndustries;
+  const iconMap       = isProduct ? productIconMap    : humanIconMap;
+  const descMap       = isProduct ? productDescriptions : humanDescriptions;
+
+  const selectedIndustries = useMemo(() => {
+    if (!selectedIndustry) return [];
+    return Array.isArray(selectedIndustry)
+      ? selectedIndustry.filter(Boolean)
+      : [selectedIndustry].filter(Boolean);
+  }, [selectedIndustry]);
+
+  // Pre-select from user profile on first visit
   useEffect(() => {
     if (selectedIndustries.length > 0) return;
-
-    const savedIndustries = Array.isArray(user?.industryType)
+    const saved = Array.isArray(user?.industryType)
       ? user.industryType
       : (user?.industryType ? [user.industryType] : []);
-
-    const matchedIndustries = savedIndustries
-      .map((item) => {
-        const normalized = normalizeValue(item);
-        const matchedId =
-          INDUSTRY_MATCH_MAP[normalized] ||
-          industries.find((industry) => normalizeValue(industry.name) === normalized)?.id;
-        return industries.find((industry) => industry.id === matchedId) || null;
-      })
-      .filter(Boolean)
-      .filter((industry, index, list) => list.findIndex((item) => item.id === industry.id) === index);
-
-    if (matchedIndustries.length > 0) {
-      setSelectedIndustry(matchedIndustries);
-    }
-  }, [selectedIndustries.length, setSelectedIndustry, user?.industryType]);
-
-  const selectedIndustryNames = selectedIndustries.map((industry) => industry.name);
+    const matched = saved
+      .map((item) => industries.find((ind) => ind.name.toLowerCase() === String(item).toLowerCase()))
+      .filter(Boolean);
+    if (matched.length > 0) setSelectedIndustry(matched);
+  }, [selectedIndustries.length, setSelectedIndustry, user?.industryType, industries]);
 
   const toggleIndustry = (industry) => {
     const exists = selectedIndustries.some((item) => item.id === industry.id);
     if (exists) {
       const next = selectedIndustries.filter((item) => item.id !== industry.id);
       setSelectedIndustry(next.length > 0 ? next : null);
-      return;
+    } else {
+      setSelectedIndustry([...selectedIndustries, industry]);
     }
-
-    setSelectedIndustry([...selectedIndustries, industry]);
   };
 
   const handleContinue = () => {
@@ -118,9 +93,10 @@ export const SelectIndustry = () => {
       toast.error('Please select at least one industry');
       return;
     }
-    toast.success(`${selectedIndustries.length} industry${selectedIndustries.length > 1 ? 'ies' : ''} selected`);
     navigate('/org/verifications');
   };
+
+  const selectedNames = selectedIndustries.map((ind) => ind.name).join(', ');
 
   return (
     <AuthLayout title="Select Industry">
@@ -128,18 +104,21 @@ export const SelectIndustry = () => {
         <StepWizard
           steps={HUMAN_VERIFICATION_STEPS}
           currentStep={HUMAN_VERIFICATION_STEP_META.industry.currentStep}
+          stepRoutes={HUMAN_VERIFICATION_STEP_ROUTES}
         />
         <PageHeader
           title="Select Industry"
-          subtitle={selectedIndustries.length > 0
-            ? `${selectedIndustries.length} selected${selectedIndustryNames.length > 0 ? ` • ${selectedIndustryNames.join(', ')}` : ''}`
-            : 'Choose one or more industries for your verification batch'}
+          subtitle={
+            selectedIndustries.length > 0
+              ? `${selectedIndustries.length} selected • ${selectedNames}`
+              : `Choose one or more industries for your ${isProduct ? 'product' : 'human'} verification batch`
+          }
         />
 
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-4">
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-3 ">
           {industries.map((industry, i) => {
             const isSelected = selectedIndustries.some((item) => item.id === industry.id);
-            const Icon = industryIconMap[industry.id] || Grid2X2;
+            const Icon = iconMap[industry.id] || Package;
             return (
               <motion.div
                 key={industry.id}
@@ -167,9 +146,11 @@ export const SelectIndustry = () => {
                   <Icon size={20} strokeWidth={2.1} />
                 </motion.div>
 
-                <p className="font-inter text-[15px] font-semibold leading-5 text-brand-dark">{industry.name}</p>
+                <p className="font-inter text-[15px] font-semibold leading-5 text-brand-dark">
+                  {industry.name}
+                </p>
                 <p className="mt-1.5 max-w-[180px] text-xs leading-5 text-gray-500">
-                  {industryDescriptions[industry.id] || 'Verification workflow for this industry.'}
+                  {descMap[industry.id] || 'Verification workflow for this industry.'}
                 </p>
 
                 <motion.div
@@ -184,9 +165,14 @@ export const SelectIndustry = () => {
           })}
         </div>
 
-        <div className="mt-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-end">
-          
-          <Button variant="primary" size="lg" className="w-full sm:w-auto" onClick={handleContinue} icon={ArrowRight}>
+        <div className="mt-8 flex justify-end">
+          <Button
+            variant="primary"
+            size="lg"
+            className="w-full sm:w-auto"
+            onClick={handleContinue}
+            icon={ArrowRight}
+          >
             Continue
           </Button>
         </div>

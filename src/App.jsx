@@ -50,10 +50,6 @@ import CreateBatch from '@/pages/org/CreateBatch';
 import BatchStatus from '@/pages/org/BatchStatus';
 import RecordDetail from '@/pages/org/RecordDetail';
 import PermissionSettings from '@/pages/org/PermissionSettings';
-import SelectTemplate from '@/pages/credential/SelectTemplate';
-import SelectFields from '@/pages/credential/SelectFields';
-import CredentialPreview from '@/pages/credential/CredentialPreview';
-import ShareCredential from '@/pages/credential/ShareCredential';
 import QRScanner from '@/pages/qr/QRScanner';
 import VerificationResult from '@/pages/qr/VerificationResult';
 import ReportsList from '@/pages/qr/ReportsList';
@@ -165,12 +161,6 @@ const AnimatedRoutes = () => {
           <Route path="/org/create-batch" element={<CreateBatch />} />
           <Route path="/org/batch-status" element={<BatchStatus />} />
           <Route path="/org/record/:id" element={<RecordDetail />} />
-
-          {/* ── Credential routes ── */}
-          <Route path="/credential/template" element={<SelectTemplate />} />
-          <Route path="/credential/fields" element={<SelectFields />} />
-          <Route path="/credential/preview" element={<CredentialPreview />} />
-          <Route path="/credential/share" element={<ShareCredential />} />
 
           {/* ── QR routes ── */}
           <Route path="/qr/scan" element={<QRScanner />} />

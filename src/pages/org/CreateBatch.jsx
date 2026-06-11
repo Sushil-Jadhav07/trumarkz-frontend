@@ -60,16 +60,8 @@ const downloadProductTemplateWorkbook = (headers, fileName = 'product-template')
 };
 
 const PRODUCT_SECTOR_DEFS = [
-  { id: 'consumer_goods', title: 'Consumer Goods', description: 'Digital certificates for everyday products and packaged goods.', icon: ClipboardCheck, aliases: ['consumer goods', 'consumer products'], fallbackWarranty: 'optional' },
+  { id: 'electronics_appliances', title: 'Electronics', description: 'Warranty and serial based certificates for devices and appliances.', icon: Plug, aliases: ['electronics & appliances', 'electronics', 'appliances'], fallbackWarranty: 'required' },
   { id: 'beauty_cosmetics', title: 'Beauty & Cosmetics', description: 'Authenticity certificates with lab reports and batch proofs.', icon: Leaf, aliases: ['beauty & cosmetics', 'beauty products', 'cosmetics', 'personal care'], fallbackWarranty: 'disabled' },
-  { id: 'electronics_appliances', title: 'Electronics & Appliances', description: 'Warranty and serial based certificates for devices and appliances.', icon: Plug, aliases: ['electronics & appliances', 'electronics', 'appliances'], fallbackWarranty: 'required' },
-  { id: 'ev_automotive', title: 'EV & Automotive', description: 'Vehicle, battery, and component certificates.', icon: Car, aliases: ['ev & automotive', 'automotive', 'vehicles', 'vehicle'], fallbackWarranty: 'optional' },
-  { id: 'insurance_policies', title: 'Insurance Policies', description: 'Policy certificates and agent-issued proofs.', icon: ShieldCheck, aliases: ['insurance policies', 'insurance'], fallbackWarranty: 'disabled' },
-  { id: 'healthcare_products', title: 'Healthcare Products', description: 'Certificates for pharma, devices, and healthcare supplies.', icon: BriefcaseMedical, aliases: ['healthcare products', 'healthcare', 'pharma', 'medical devices'], fallbackWarranty: 'disabled' },
-  { id: 'industrial_equipment', title: 'Industrial Equipment', description: 'Asset certificates for tools, machines, and equipment.', icon: Factory, aliases: ['industrial equipment', 'industrial', 'machinery', 'equipment'], fallbackWarranty: 'required' },
-  { id: 'agriculture_products', title: 'Agriculture Products', description: 'Origin and quality certificates for agricultural goods.', icon: Tractor, aliases: ['agriculture products', 'agriculture', 'agri goods'], fallbackWarranty: 'disabled' },
-  { id: 'luxury_products', title: 'Luxury Products', description: 'Anti-counterfeit certificates for premium goods.', icon: Gem, aliases: ['luxury products', 'luxury', 'premium goods'], fallbackWarranty: 'disabled' },
-  { id: 'others', title: 'Others', description: 'Create a custom product certificate batch.', icon: Grid2X2, aliases: ['others', 'other', 'custom'], fallbackWarranty: 'optional' },
 ];
 
 const PRODUCT_SERVICE_OPTIONS = [
@@ -977,6 +969,7 @@ export const CreateBatch = () => {
   const flowBatchType = location.state?.batchType || null;
   const flowSubMode = location.state?.subMode || null;
   const {
+    batchEntityType, setBatchEntityType,
     selectedIndustry,
     setSelectedIndustry,
     selectedVerifications,
@@ -1050,6 +1043,7 @@ export const CreateBatch = () => {
   }, [hasVerificationFlow, batchType, subMode, flowSubMode]);
 
   const startHumanFlow = () => {
+    setBatchEntityType('human');
     setSelectedIndustry(null);
     setSelectedVerifications([]);
     setSelectedTemplate(null);
@@ -1291,7 +1285,7 @@ export const CreateBatch = () => {
                   </p>
                 </div>
                 <div className="flex gap-2 flex-wrap">
-                  <Button variant="ghost" size="sm" onClick={() => navigate('/org/industry')}>Change Industry</Button>
+                  <Button variant="ghost" size="sm" onClick={() => { setBatchEntityType(batchType || 'human'); navigate('/org/industry'); }}>Change Industry</Button>
                   <Button variant="ghost" size="sm" onClick={() => navigate('/org/verifications')}>Change Checks</Button>
                 </div>
               </div>

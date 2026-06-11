@@ -108,7 +108,8 @@ verificationApi.interceptors.request.use(
     const isPublicUpload =
       config.url?.includes('/verification/upload/photo') ||
       config.url?.includes('/verification/upload/document') ||
-      config.url?.includes('/verification/categories');
+      config.url?.includes('/verification/categories') ||
+      config.url?.includes('/verification/manual/upload/');
 
     if (token && !isPublicUpload) {
       config.headers.Authorization = `Bearer ${token}`;
@@ -124,7 +125,8 @@ verificationApi.interceptors.request.use(
 verificationApi.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401) {
+    const isPublicRoute = error.config?.url?.includes('/verification/manual/upload/');
+    if (error.response?.status === 401 && !isPublicRoute) {
       clearAuthStorage();
       if (window.location.pathname !== '/login') window.location.replace('/login');
     }
@@ -388,6 +390,41 @@ export const verificationAPI = {
 
   getBatches: () => verificationApi.get('/verification/batches'),
   getBatchDetails: (batchId) => verificationApi.get(`/verification/batches/${batchId}`),
+
+  getVerificationTypes: (filters = {}) => {
+    const params = new URLSearchParams();
+    if (filters.category) params.append('category', filters.category);
+    if (filters.industry_type) {
+      // API expects a JSON-encoded array string: ["Healthcare","IT"]
+      const arr = Array.isArray(filters.industry_type)
+        ? filters.industry_type
+        : [filters.industry_type];
+      if (arr.length > 0) params.append('industry_type', JSON.stringify(arr));
+    }
+    const query = params.toString();
+    return verificationApi.get(`/verification/verification-types${query ? `?${query}` : ''}`);
+  },
+
+  getVerificationType: (id) => verificationApi.get(`/verification/verification-types/${id}`),
+
+  createVerificationType: (payload) => verificationApi.post('/verification/verification-types', payload),
+
+  deleteVerificationType: (id) => verificationApi.delete(`/verification/verification-types/${id}`),
+
+  // Manual verification request — returns { request_id, token, expires_at, verifier_email }
+  requestManualVerification: (payload) =>
+    verificationApi.post('/verification/verification/manual/request', payload),
+
+  // Verifier uploads report files against the token
+  uploadManualReport: (token, files) => {
+    const formData = new FormData();
+    files.forEach((file) => formData.append('files', file));
+    return verificationApi.post(`/verification/manual/upload/${token}`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
+
+  patchVerificationType: (id, payload) => verificationApi.patch(`/verification/verification-types/${id}`, payload),
 
   createTemplate: (payload) => verificationApi.post('/verification/templates', payload),
   getTemplate: (templateId) => verificationApi.get(`/verification/templates/${templateId}`),

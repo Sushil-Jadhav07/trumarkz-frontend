@@ -18,7 +18,6 @@ export const Footer = () => {
             <ul className="space-y-2 text-sm text-gray-400 font-inter">
               <li><a href="#/org/dashboard" className="hover:text-white transition-colors">Dashboard</a></li>
               <li><a href="#/marketplace" className="hover:text-white transition-colors">Registry</a></li>
-              <li><a href="#/credential/template" className="hover:text-white transition-colors">Credentials</a></li>
               <li><a href="#/account/wallet" className="hover:text-white transition-colors">Wallet</a></li>
             </ul>
           </div>

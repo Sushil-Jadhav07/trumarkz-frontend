@@ -53,16 +53,21 @@ export const mockTransactions = [
   { id: 'TXN002', type: 'Recharge', description: 'Wallet Top-up', amount: 5000, date: '01-Apr-2024' }
 ];
 
-export const industries = [
-  { id: 'transport', name: 'Transport & Logistics', icon: '🚚' },
-  { id: 'healthcare', name: 'Healthcare', icon: '🏥' },
-  { id: 'education', name: 'Education', icon: '🎓' },
-  { id: 'manufacturing', name: 'Manufacturing', icon: '🏭' },
-  { id: 'security', name: 'Security Services', icon: '🔒' },
-  { id: 'agriculture', name: 'Agriculture', icon: '🌾' },
-  { id: 'products', name: 'Products / Services', icon: '📦' },
-  { id: 'others', name: 'Others', icon: '⚙️' }
+export const humanIndustries = [
+  { id: 'healthcare',     name: 'Healthcare',     icon: '🏥' },
+  { id: 'transportation', name: 'Transportation',  icon: '🚌' },
+  { id: 'logistics',      name: 'Logistics',       icon: '📦' },
+  { id: 'it',             name: 'IT',              icon: '💻' },
+  { id: 'real_estate',    name: 'Real Estate',     icon: '🏠' },
 ];
+
+export const productIndustries = [
+  { id: 'electronics',       name: 'Electronics',         icon: '🔌' },
+  { id: 'beauty_cosmetics',  name: 'Beauty & Cosmetics',  icon: '✨' },
+];
+
+// Legacy alias — kept for any existing references
+export const industries = humanIndustries;
 
 export const verificationTypes = [
   { id: 'police', name: 'Police', price: 200, type: 'manual', turnaround: '3-5 days' },

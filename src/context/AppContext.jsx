@@ -15,6 +15,7 @@ const readStoredState = () => {
 export const AppProvider = ({ children }) => {
   const persistedState = readStoredState();
 
+  const [batchEntityType, setBatchEntityType]   = useState(persistedState.batchEntityType ?? 'human');
   const [selectedIndustry, setSelectedIndustry] = useState(persistedState.selectedIndustry ?? null);
   const [selectedVerifications, setSelectedVerifications] = useState(persistedState.selectedVerifications ?? []);
   const [selectedPermission, setSelectedPermission] = useState(persistedState.selectedPermission ?? 'private');
@@ -38,6 +39,7 @@ export const AppProvider = ({ children }) => {
       localStorage.setItem(
         STORAGE_KEY,
         JSON.stringify({
+          batchEntityType,
           selectedIndustry,
           selectedVerifications,
           selectedPermission,
@@ -47,7 +49,7 @@ export const AppProvider = ({ children }) => {
     } catch {
       // Ignore persistence failures.
     }
-  }, [selectedIndustry, selectedVerifications, selectedPermission, selectedHumanTemplate]);
+  }, [batchEntityType, selectedIndustry, selectedVerifications, selectedPermission, selectedHumanTemplate]);
 
   const markNotificationRead = (id) => {
     setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
@@ -59,6 +61,7 @@ export const AppProvider = ({ children }) => {
 
   return (
     <AppContext.Provider value={{
+      batchEntityType, setBatchEntityType,
       selectedIndustry, setSelectedIndustry,
       selectedVerifications, setSelectedVerifications,
       selectedPermission, setSelectedPermission,

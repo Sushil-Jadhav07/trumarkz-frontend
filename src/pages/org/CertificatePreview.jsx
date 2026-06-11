@@ -15,7 +15,7 @@ import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { StepWizard } from '@/components/ui/StepWizard';
 import { useApp } from '@/context/AppContext';
-import { HUMAN_VERIFICATION_STEPS, HUMAN_VERIFICATION_STEP_META } from '@/data/humanVerificationFlow';
+import { HUMAN_VERIFICATION_STEPS, HUMAN_VERIFICATION_STEP_META, HUMAN_VERIFICATION_STEP_ROUTES } from '@/data/humanVerificationFlow';
 import { verificationTypes } from '@/data/mockData';
 import { verificationAPI, getApiError } from '@/services/api';
 import { getIndustryTypeList } from '@/utils/verificationFlow';
@@ -118,6 +118,7 @@ export const CertificatePreview = () => {
           <StepWizard
             steps={HUMAN_VERIFICATION_STEPS}
             currentStep={HUMAN_VERIFICATION_STEP_META.batch.currentStep}
+            stepRoutes={HUMAN_VERIFICATION_STEP_ROUTES}
           />
 
           <section className="mt-4">
@@ -179,6 +180,7 @@ export const CertificatePreview = () => {
         <StepWizard
           steps={HUMAN_VERIFICATION_STEPS}
           currentStep={HUMAN_VERIFICATION_STEP_META.preview.currentStep}
+          stepRoutes={HUMAN_VERIFICATION_STEP_ROUTES}
         />
 
         <section className="mt-4">

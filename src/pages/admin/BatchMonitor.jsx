@@ -17,9 +17,10 @@ import toast from 'react-hot-toast';
 
 // ── Verifier directory (shared with Verifiers.jsx) ───────────────────────────
 export const VERIFIER_DIRECTORY = [
-  { id: 'VRF-001', name: 'TrustCheck Verification Services', email: 'ops@trustcheck.example', status: 'active' },
-  { id: 'VRF-002', name: 'SureProof Agencies',               email: 'verify@sureproof.example', status: 'active' },
-  { id: 'VRF-003', name: 'Manual Audit Partner',             email: 'audit@manualpartner.example', status: 'paused' },
+  { id: 'VRF-001', name: 'TrustCheck Verification Services', email: 'ops@trustcheck.example',        status: 'active' },
+  { id: 'VRF-002', name: 'SureProof Agencies',               email: 'verify@sureproof.example',      status: 'active' },
+  { id: 'VRF-003', name: 'Manual Audit Partner',             email: 'audit@manualpartner.example',   status: 'paused' },
+  { id: 'VRF-004', name: 'Test Verifier',                    email: 'timepasspurpose7@gmail.com',    status: 'active' },
 ];
 
 const STATUS_OPTIONS = [
@@ -112,10 +113,16 @@ const SelectVerifierModal = ({ isOpen, onClose, onConfirm, batchName, sending })
   const [body, setBody] = useState('');
   const activeVerifiers = VERIFIER_DIRECTORY.filter((v) => v.status === 'active');
 
+  const buildUploadLink = (name) =>
+    `http://localhost:5173/upload?batch=${encodeURIComponent(name || '')}`;
+
+  const buildBody = (name, uploadUrl) =>
+    `Hi Team,\n\nPlease process the verification batch: ${name}.\n\nUpload the verified report using this secure link:\n${uploadUrl}\n\n(The link will include a one-time token once the request is submitted.)\n\nKindly upload all relevant documents and add a description of the verification performed.\n\nRegards,\nTruMarkZ Admin`;
+
   useEffect(() => {
     setSubject(`Verification Batch Handoff: ${batchName}`);
-    const defaultUrl = `http://localhost:5173/upload?batch=${encodeURIComponent(batchName || "")}`;
-    setBody(`Hi Team,\n\nPlease process the verification batch: ${batchName}.\n\nPlease upload the verified details/documents using this link:\n${defaultUrl}\n\nKindly review all records and share the verified output.\n\nRegards,\nTruMarkZ Admin`);
+    setBody(buildBody(batchName, buildUploadLink(batchName)));
+    setSelected(null);
   }, [batchName]);
 
   return (
@@ -180,7 +187,7 @@ const SelectVerifierModal = ({ isOpen, onClose, onConfirm, batchName, sending })
             disabled={!selected || sending || !subject.trim() || !body.trim()}
             onClick={() => onConfirm(selected, { subject: subject.trim(), body: body.trim() })}
           >
-            {sending ? 'Sending�' : 'Send Mail'}
+            {sending ? 'Sending�' : 'Send Mail'}
           </Button>
         </div>
       </div>
@@ -224,12 +231,12 @@ const UploadVerifiedModal = ({ isOpen, onClose, onConfirm, batchName, uploading 
           {file ? (
             <div className="text-center">
               <p className="text-sm font-semibold text-brand-dark font-inter">{file.name}</p>
-              <p className="text-xs text-gray-400 font-inter mt-1">{(file.size / 1024).toFixed(1)} KB � Click to change</p>
+              <p className="text-xs text-gray-400 font-inter mt-1">{(file.size / 1024).toFixed(1)} KB � Click to change</p>
             </div>
           ) : (
             <div className="text-center">
               <p className="text-sm font-medium text-gray-600 font-inter">Drop file here or click to browse</p>
-              <p className="text-xs text-gray-400 font-inter mt-1">PDF, Excel, CSV, Word � max 50MB</p>
+              <p className="text-xs text-gray-400 font-inter mt-1">PDF, Excel, CSV, Word � max 50MB</p>
             </div>
           )}
         </div>
@@ -381,15 +388,19 @@ export const BatchMonitor = () => {
       verifiedDocumentUrl: stored.verifiedDocumentUrl || null,
       verifiedReportUrl: stored.verifiedReportUrl || null,
       editNotes: edited.notes || '',
+      uploadLink: stored.uploadLink || null,
+      verifierToken: stored.verifierToken || null,
     };
   });
 
   const visibleBatches = statusFilter ? batches.filter((b) => b.status === statusFilter) : batches;
   const selectedBatch = batches.find((b) => b.id === selectedBatchId) || null;
-  const total    = batches.reduce((s, b) => s + b.total,    0);
-  const pending  = batches.reduce((s, b) => s + b.pending,  0);
-  const verified = batches.reduce((s, b) => s + b.verified, 0);
-  const failed   = batches.reduce((s, b) => s + b.failed,   0);
+
+  // Prefer the API-reported aggregates; fall back to computing from batch rows
+  const total    = data?.total    ?? batches.reduce((s, b) => s + b.total,    0);
+  const pending  = data?.pending  ?? batches.reduce((s, b) => s + b.pending,  0);
+  const verified = data?.verified ?? batches.reduce((s, b) => s + b.verified, 0);
+  const failed   = data?.failed   ?? batches.reduce((s, b) => s + b.failed,   0);
 
   const statCards = [
     { label: 'Total Records', value: total,    icon: Users,        accent: 'bg-brand-blue', surface: 'bg-blue-50',   text: 'text-brand-blue' },
@@ -416,17 +427,39 @@ export const BatchMonitor = () => {
     const batch = verifierModalBatch;
     setMailSending(true);
     try {
-      updateBatchWorkflow(batch.id, { status: 'send_to_verifier', mailTemplate: template });
-      toast.success(`Mail sent to ${verifier.name} for ${batch.name}`);
-      setVerifierModalOpen(false);
-      setVerifierModalBatch(null);
+      const { data: reqData } = await verificationAPI.requestManualVerification({
+        batch_id: batch.id,
+        verification_type_name: 'Manual Verification',
+        verifier_email: verifier.email_address || verifier.email,
+      });
+
+      const token = reqData.token;
+      const uploadLink = `http://localhost:5173/upload?batch=${encodeURIComponent(batch.name)}&token=${token}`;
+
+      updateBatchWorkflow(batch.id, {
+        status: 'send_to_verifier',
+        mailTemplate: template,
+        verifierToken: token,
+        uploadLink,
+        verifierEmail: verifier.email_address || verifier.email,
+        requestId: reqData.request_id,
+      });
+
+      toast.success(`Request sent to ${verifier.name}`);
+      toast(`Upload link ready — share with verifier`, { icon: '🔗', duration: 6000 });
     } catch (err) {
-      updateBatchWorkflow(batch.id, { status: 'send_to_verifier', mailTemplate: template });
-      toast.success(`Mail sent to ${verifier.name} for ${batch.name}`);
-      setVerifierModalOpen(false);
-      setVerifierModalBatch(null);
+      // Fallback: update status locally without a real token
+      const fallbackLink = `http://localhost:5173/upload?batch=${encodeURIComponent(batch.name)}`;
+      updateBatchWorkflow(batch.id, {
+        status: 'send_to_verifier',
+        mailTemplate: template,
+        uploadLink: fallbackLink,
+      });
+      toast.error(getApiError(err, 'Could not generate upload token — fallback link used'));
     } finally {
       setMailSending(false);
+      setVerifierModalOpen(false);
+      setVerifierModalBatch(null);
     }
   };
 
@@ -853,6 +886,21 @@ export const BatchMonitor = () => {
                       <span className="text-gray-500">Organization share</span>
                       <Badge status={selectedBatch.sharedWithOrganization ? 'success' : 'default'}>{selectedBatch.sharedWithOrganization ? 'Shared' : 'Not sent'}</Badge>
                     </div>
+                    {selectedBatch.uploadLink && (
+                      <div className="pt-2 border-t border-gray-100">
+                        <p className="text-xs text-gray-500 font-inter mb-1.5">Verifier upload link</p>
+                        <div className="flex items-center gap-2 rounded-lg bg-blue-50 border border-blue-100 px-3 py-2">
+                          <p className="text-[11px] text-brand-blue font-mono flex-1 truncate">{selectedBatch.uploadLink}</p>
+                          <button
+                            type="button"
+                            onClick={() => { navigator.clipboard.writeText(selectedBatch.uploadLink); toast.success('Link copied'); }}
+                            className="text-[10px] font-semibold font-inter text-brand-blue hover:text-blue-800 shrink-0"
+                          >
+                            Copy
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
