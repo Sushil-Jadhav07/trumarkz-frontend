@@ -977,6 +977,10 @@ export const CreateBatch = () => {
     selectedPermission,
     setSelectedTemplate,
     setSelectedFields,
+    setSelectedProductSector,
+    setSelectedProductVerifications,
+    setSelectedProductService,
+    setProductBatchData,
   } = useApp();
 
   const arrivedFromVerificationFlow = location.state?.fromVerificationFlow === true;
@@ -1009,11 +1013,9 @@ export const CreateBatch = () => {
   // Results from single-add actions
   const [singleResults, setSingleResults] = useState([]);
 
-  // Categories (for product flow)
+  // Categories (for product flow — kept for legacy inline product panels)
   const [categories, setCategories] = useState([]);
   const [categoriesLoading, setCategoriesLoading] = useState(false);
-  const [selectedProductSector, setSelectedProductSector] = useState(null);
-  const [selectedProductService, setSelectedProductService] = useState(null);
 
   // Load categories when product type is selected
   useEffect(() => {
@@ -1052,6 +1054,10 @@ export const CreateBatch = () => {
   };
 
   const startProductFlow = () => {
+    setSelectedProductSector(null);
+    setSelectedProductVerifications([]);
+    setSelectedProductService(null);
+    setProductBatchData(null);
     navigate('/org/product/sector');
   };
 

@@ -51,6 +51,7 @@ import BatchStatus from '@/pages/org/BatchStatus';
 import RecordDetail from '@/pages/org/RecordDetail';
 import PermissionSettings from '@/pages/org/PermissionSettings';
 import SelectProductSector from '@/pages/org/SelectProductSector';
+import SelectProductVerifications from '@/pages/org/SelectProductVerifications';
 import SelectProductService from '@/pages/org/SelectProductService';
 import ProductTemplate from '@/pages/org/ProductTemplate';
 import ProductCostBreakdown from '@/pages/org/ProductCostBreakdown';
@@ -169,6 +170,7 @@ const AnimatedRoutes = () => {
 
           {/* ── Product verification flow ── */}
           <Route path="/org/product/sector" element={<SelectProductSector />} />
+          <Route path="/org/product/verifications" element={<SelectProductVerifications />} />
           <Route path="/org/product/service" element={<SelectProductService />} />
           <Route path="/org/product/template" element={<ProductTemplate />} />
           <Route path="/org/product/costing" element={<ProductCostBreakdown />} />

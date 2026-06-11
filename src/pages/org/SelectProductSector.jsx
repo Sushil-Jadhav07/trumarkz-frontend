@@ -1,12 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
-import { Leaf, Package, Plug } from 'lucide-react';
-import toast from 'react-hot-toast';
-import { AuthLayout } from '@/components/layout/AuthLayout';
-import { PageHeader } from '@/components/shared/PageHeader';
-import { Card } from '@/components/ui/Card';
-import { StepWizard } from '@/components/ui/StepWizard';
 import { useApp } from '@/context/AppContext';
 import {
   PRODUCT_VERIFICATION_STEPS,
@@ -14,34 +8,38 @@ import {
   PRODUCT_VERIFICATION_STEP_ROUTES,
   PRODUCT_SECTOR_DEFS,
 } from '@/data/productVerificationFlow';
-import { verificationAPI, getApiError } from '@/services/api';
+import { AuthLayout } from '@/components/layout/AuthLayout';
+import { PageHeader } from '@/components/shared/PageHeader';
+import { StepWizard } from '@/components/ui/StepWizard';
+import { verificationAPI } from '@/services/api';
+import { Cpu, Leaf, ArrowRight } from 'lucide-react';
+import toast from 'react-hot-toast';
+
+const SECTOR_ICONS = { electronics_appliances: Cpu, beauty_cosmetics: Leaf };
 
 const normalizeName = (v = '') =>
   v.toLowerCase().replace(/&/g, 'and').replace(/[^a-z0-9]+/g, ' ').trim();
 
-const findCategoryForSector = (sector, categories = []) => {
+const matchCategory = (sector, categories = []) => {
   const aliases = [sector.title, ...sector.aliases].map(normalizeName);
   return (
-    categories.find((cat) => {
-      const name = normalizeName(cat.category_name);
+    categories.find((c) => {
+      const name = normalizeName(c.category_name);
       return aliases.some((a) => name.includes(a) || a.includes(name));
     }) || null
   );
 };
 
-const SECTOR_ICONS = { electronics_appliances: Plug, beauty_cosmetics: Leaf };
-
-const cardMotion = (i = 0) => ({
-  initial: { opacity: 0, y: 18 },
-  animate: { opacity: 1, y: 0 },
-  transition: { delay: i * 0.07, duration: 0.26, ease: 'easeOut' },
-  whileHover: { y: -3 },
-  whileTap: { scale: 0.98 },
-});
-
 export const SelectProductSector = () => {
   const navigate = useNavigate();
-  const { setSelectedProductSector, setSelectedProductService, setProductBatchData } = useApp();
+  const {
+    setBatchEntityType,
+    setSelectedProductSector,
+    setSelectedProductVerifications,
+    setSelectedProductService,
+    setProductBatchData,
+  } = useApp();
+
   const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -49,12 +47,12 @@ export const SelectProductSector = () => {
     verificationAPI
       .getCategories()
       .then(({ data }) => setCategories(Array.isArray(data) ? data : []))
-      .catch((err) => toast.error(getApiError(err, 'Failed to load product categories')))
+      .catch(() => toast.error('Failed to load product sectors'))
       .finally(() => setLoading(false));
   }, []);
 
   const sectors = PRODUCT_SECTOR_DEFS.map((def) => {
-    const category = findCategoryForSector(def, categories);
+    const category = matchCategory(def, categories);
     return {
       ...def,
       category,
@@ -65,14 +63,16 @@ export const SelectProductSector = () => {
   });
 
   const handleSelect = (sector) => {
-    setSelectedProductSector(sector);
+    setBatchEntityType('product');
+    setSelectedProductVerifications([]);
     setSelectedProductService(null);
     setProductBatchData(null);
-    navigate('/org/product/service');
+    setSelectedProductSector(sector);
+    navigate('/org/product/verifications');
   };
 
   return (
-    <AuthLayout title="Select Sector">
+    <AuthLayout title="Select Product Sector">
       <div className="w-full mx-auto lg:max-w-none">
         <StepWizard
           steps={PRODUCT_VERIFICATION_STEPS}
@@ -80,34 +80,32 @@ export const SelectProductSector = () => {
           stepRoutes={PRODUCT_VERIFICATION_STEP_ROUTES}
         />
 
-        <motion.div
-          initial={{ opacity: 0, y: 14 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.28, ease: 'easeOut' }}
-        >
-          <PageHeader
-            title="Select Product Sector"
-            subtitle="Choose the industry sector for this product verification batch."
-          />
-        </motion.div>
+        <PageHeader
+          title="Select Product Sector"
+          subtitle="Choose the sector category for this product verification batch."
+        />
 
         {loading ? (
-          <Card className="p-10 mt-2">
-            <div className="flex items-center justify-center gap-3 text-gray-400">
-              <div className="w-5 h-5 border-2 border-brand-blue/40 border-t-brand-blue rounded-full animate-spin" />
-              <span className="text-sm font-inter">Loading sectors…</span>
-            </div>
-          </Card>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-2">
+            {[0, 1].map((i) => (
+              <div key={i} className="h-48 rounded-2xl bg-slate-100 animate-pulse" />
+            ))}
+          </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 mt-2">
-            {sectors.map((sector, i) => {
-              const Icon = SECTOR_ICONS[sector.id] || Package;
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-2">
+            {sectors.map((sector, index) => {
+              const Icon = SECTOR_ICONS[sector.id] || Cpu;
               return (
                 <motion.button
                   key={sector.id}
-                  {...cardMotion(i)}
+                  type="button"
+                  initial={{ opacity: 0, y: 16 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: index * 0.08 }}
+                  whileHover={{ y: -3 }}
+                  whileTap={{ scale: 0.98 }}
                   onClick={() => handleSelect(sector)}
-                  className="relative overflow-hidden rounded-2xl border border-gray-100 bg-white p-6 shadow-sm text-left transition-all duration-300 hover:-translate-y-0.5 hover:border-brand-blue hover:shadow-lg hover:shadow-blue-100/60 focus:outline-none focus:ring-4 focus:ring-brand-blue/15 group min-h-[220px]"
+                  className="relative overflow-hidden rounded-2xl border border-slate-200 bg-white p-6 text-left shadow-sm transition-all hover:border-brand-blue hover:shadow-lg hover:shadow-blue-100/60 group min-h-[210px] focus:outline-none focus:ring-4 focus:ring-brand-blue/15"
                 >
                   <span className="absolute inset-y-5 left-0 w-1.5 rounded-r-full bg-brand-blue opacity-90 transition-all duration-300 group-hover:inset-y-4" />
 
@@ -116,22 +114,15 @@ export const SelectProductSector = () => {
                   </div>
 
                   <h3 className="font-sora font-bold text-xl text-brand-dark mt-5 mb-2">
-                    {sector.categoryName}
+                    {sector.title}
                   </h3>
-                  <p className="text-sm text-gray-500 font-inter leading-relaxed">
+                  <p className="text-sm text-slate-500 font-inter leading-relaxed">
                     {sector.description}
                   </p>
 
-                  {sector.warrantySupport === 'required' && (
-                    <span className="inline-flex items-center gap-1.5 mt-4 px-3 py-1.5 rounded-full bg-blue-50 text-xs font-semibold text-brand-blue font-inter">
-                      Warranty supported
-                    </span>
-                  )}
-                  {sector.warrantySupport === 'disabled' && (
-                    <span className="inline-flex items-center gap-1.5 mt-4 px-3 py-1.5 rounded-full bg-gray-50 text-xs font-semibold text-gray-400 font-inter">
-                      Authenticity only
-                    </span>
-                  )}
+                  <div className="flex items-center gap-1 mt-4 text-brand-blue text-sm font-inter font-medium">
+                    Select <ArrowRight size={14} />
+                  </div>
                 </motion.button>
               );
             })}

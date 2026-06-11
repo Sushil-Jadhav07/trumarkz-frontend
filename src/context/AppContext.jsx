@@ -29,6 +29,7 @@ export const AppProvider = ({ children }) => {
 
   // Product verification flow state
   const [selectedProductSector, setSelectedProductSector] = useState(persistedState.selectedProductSector ?? null);
+  const [selectedProductVerifications, setSelectedProductVerifications] = useState(persistedState.selectedProductVerifications ?? []);
   const [selectedProductService, setSelectedProductService] = useState(persistedState.selectedProductService ?? null);
   const [selectedProductTemplate, setSelectedProductTemplate] = useState(persistedState.selectedProductTemplate ?? 'product-classic');
   const [productBatchData, setProductBatchData] = useState(null);
@@ -51,6 +52,7 @@ export const AppProvider = ({ children }) => {
           selectedPermission,
           selectedHumanTemplate,
           selectedProductSector,
+          selectedProductVerifications,
           selectedProductService,
           selectedProductTemplate,
         })
@@ -58,7 +60,7 @@ export const AppProvider = ({ children }) => {
     } catch {
       // Ignore persistence failures.
     }
-  }, [batchEntityType, selectedIndustry, selectedVerifications, selectedPermission, selectedHumanTemplate, selectedProductSector, selectedProductService, selectedProductTemplate]);
+  }, [batchEntityType, selectedIndustry, selectedVerifications, selectedPermission, selectedHumanTemplate, selectedProductSector, selectedProductVerifications, selectedProductService, selectedProductTemplate]);
 
   const markNotificationRead = (id) => {
     setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
@@ -83,6 +85,7 @@ export const AppProvider = ({ children }) => {
       cartDocuments, setCartDocuments,
       notifications, markNotificationRead, markAllRead,
       selectedProductSector, setSelectedProductSector,
+      selectedProductVerifications, setSelectedProductVerifications,
       selectedProductService, setSelectedProductService,
       selectedProductTemplate, setSelectedProductTemplate,
       productBatchData, setProductBatchData,
