@@ -1052,10 +1052,7 @@ export const CreateBatch = () => {
   };
 
   const startProductFlow = () => {
-    setBatchType('product');
-    setSubMode(null);
-    setSelectedProductSector(null);
-    setSelectedProductService(null);
+    navigate('/org/product/sector');
   };
 
   const resetProductStep = () => {

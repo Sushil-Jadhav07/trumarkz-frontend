@@ -416,12 +416,11 @@ export const verificationAPI = {
     verificationApi.post('/verification/verification/manual/request', payload),
 
   // Verifier uploads report files against the token
+  // Let Axios auto-set Content-Type with correct multipart boundary
   uploadManualReport: (token, files) => {
     const formData = new FormData();
-    files.forEach((file) => formData.append('files', file));
-    return verificationApi.post(`/verification/manual/upload/${token}`, formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-    });
+    Array.from(files || []).forEach((file) => formData.append('files', file));
+    return verificationApi.post(`/verification/manual/upload/${token}`, formData);
   },
 
   patchVerificationType: (id, payload) => verificationApi.patch(`/verification/verification-types/${id}`, payload),

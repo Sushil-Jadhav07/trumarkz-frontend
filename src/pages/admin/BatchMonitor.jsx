@@ -23,6 +23,8 @@ export const VERIFIER_DIRECTORY = [
   { id: 'VRF-004', name: 'Test Verifier',                    email: 'timepasspurpose7@gmail.com',    status: 'active' },
 ];
 
+const MANUAL_UPLOAD_LINK_PLACEHOLDER = '__TRUMARKZ_UPLOAD_LINK__';
+
 const STATUS_OPTIONS = [
   { value: '',                     label: 'All' },
   { value: 'pending',              label: 'Pending' },
@@ -113,15 +115,15 @@ const SelectVerifierModal = ({ isOpen, onClose, onConfirm, batchName, sending })
   const [body, setBody] = useState('');
   const activeVerifiers = VERIFIER_DIRECTORY.filter((v) => v.status === 'active');
 
-  const buildUploadLink = (name) =>
-    `http://localhost:5173/upload?batch=${encodeURIComponent(name || '')}`;
+  const LINK_PLACEHOLDER = MANUAL_UPLOAD_LINK_PLACEHOLDER;
+  const LINK_PREVIEW = `${window.location.origin}/upload?batch=${encodeURIComponent(batchName || '')}&token={generated-on-send}`;
 
   const buildBody = (name, uploadUrl) =>
-    `Hi Team,\n\nPlease process the verification batch: ${name}.\n\nUpload the verified report using this secure link:\n${uploadUrl}\n\n(The link will include a one-time token once the request is submitted.)\n\nKindly upload all relevant documents and add a description of the verification performed.\n\nRegards,\nTruMarkZ Admin`;
+    `Hi Team,\n\nPlease process the verification batch: ${name}.\n\nUpload the verified report using this secure one-time link:\n${uploadUrl}\n\nKindly upload all relevant verification documents using the one-time link above.\n\nRegards,\nTruMarkZ Admin`;
 
   useEffect(() => {
     setSubject(`Verification Batch Handoff: ${batchName}`);
-    setBody(buildBody(batchName, buildUploadLink(batchName)));
+    setBody(buildBody(batchName, LINK_PREVIEW));
     setSelected(null);
   }, [batchName]);
 
@@ -165,7 +167,7 @@ const SelectVerifierModal = ({ isOpen, onClose, onConfirm, batchName, sending })
           <div className="space-y-3">
             <div className="rounded-xl border border-gray-200 p-3 bg-gray-50">
               <p className="text-[11px] uppercase tracking-wider text-gray-500 font-semibold font-inter">Template Tips</p>
-              <p className="text-xs text-gray-500 font-inter mt-1">Keep the upload URL in the body. Verifier will use it to submit details.</p>
+              <p className="text-xs text-gray-500 font-inter mt-1">Keep the upload URL in the body. A real one-time token link will be inserted when you send the request.</p>
             </div>
             <div>
               <label className="block text-xs text-gray-500 font-inter mb-1">Subject</label>
@@ -425,41 +427,52 @@ export const BatchMonitor = () => {
 
   const handleConfirmMailVerifier = async (verifier, template) => {
     const batch = verifierModalBatch;
+    const verifierEmail = verifier.email_address || verifier.email;
+    if (!batch || !verifierEmail) {
+      toast.error('Missing batch or verifier email.');
+      return;
+    }
     setMailSending(true);
     try {
       const { data: reqData } = await verificationAPI.requestManualVerification({
-        batch_id: batch.id,
-        verification_type_name: 'Manual Verification',
-        verifier_email: verifier.email_address || verifier.email,
+        batch_id:                 batch.id,
+        verification_type_name:   'Manual Verification',
+        verifier_email:           verifierEmail,
       });
 
-      const token = reqData.token;
-      const uploadLink = `http://localhost:5173/upload?batch=${encodeURIComponent(batch.name)}&token=${token}`;
+      const token = reqData?.token;
+      const requestId = reqData?.request_id;
+      const expiresAt = reqData?.expires_at;
+      const responseEmail = reqData?.verifier_email || verifierEmail;
+
+      if (!token || !requestId) {
+        throw new Error('Manual verification response did not include the required token or request ID.');
+      }
+
+      const uploadLink = `${window.location.origin}/upload?batch=${encodeURIComponent(batch.name)}&token=${encodeURIComponent(token)}`;
+
+      const finalBody = template.body
+        .replaceAll(MANUAL_UPLOAD_LINK_PLACEHOLDER, uploadLink)
+        .replace(/https?:\/\/[^\s]*\/upload\?[^\s\n]*/g, uploadLink)
+        .replace(/\{generated-on-send\}/g, token);
 
       updateBatchWorkflow(batch.id, {
-        status: 'send_to_verifier',
-        mailTemplate: template,
+        status:        'send_to_verifier',
+        mailTemplate:  { ...template, body: finalBody },
         verifierToken: token,
         uploadLink,
-        verifierEmail: verifier.email_address || verifier.email,
-        requestId: reqData.request_id,
+        verifierEmail: responseEmail,
+        requestId,
+        expiresAt,
       });
 
-      toast.success(`Request sent to ${verifier.name}`);
-      toast(`Upload link ready — share with verifier`, { icon: '🔗', duration: 6000 });
-    } catch (err) {
-      // Fallback: update status locally without a real token
-      const fallbackLink = `http://localhost:5173/upload?batch=${encodeURIComponent(batch.name)}`;
-      updateBatchWorkflow(batch.id, {
-        status: 'send_to_verifier',
-        mailTemplate: template,
-        uploadLink: fallbackLink,
-      });
-      toast.error(getApiError(err, 'Could not generate upload token — fallback link used'));
-    } finally {
-      setMailSending(false);
+      toast.success(`Manual verification request sent to ${verifier.name}`);
       setVerifierModalOpen(false);
       setVerifierModalBatch(null);
+    } catch (err) {
+      toast.error(getApiError(err, 'Could not generate upload token. The request was not marked as sent.'));
+    } finally {
+      setMailSending(false);
     }
   };
 
@@ -1082,8 +1095,3 @@ export const BatchMonitor = () => {
 };
 
 export default BatchMonitor;
-
-
-
-
-

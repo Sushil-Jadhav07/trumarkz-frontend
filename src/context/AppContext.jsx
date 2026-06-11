@@ -26,6 +26,12 @@ export const AppProvider = ({ children }) => {
   const [credentialData, setCredentialData] = useState(null);
   const [currentRecord, setCurrentRecord] = useState(null);
   const [cartDocuments, setCartDocuments] = useState([]);
+
+  // Product verification flow state
+  const [selectedProductSector, setSelectedProductSector] = useState(persistedState.selectedProductSector ?? null);
+  const [selectedProductService, setSelectedProductService] = useState(persistedState.selectedProductService ?? null);
+  const [selectedProductTemplate, setSelectedProductTemplate] = useState(persistedState.selectedProductTemplate ?? 'product-classic');
+  const [productBatchData, setProductBatchData] = useState(null);
   const [notifications, setNotifications] = useState([
     { id: 1, title: 'Batch Driver Verification completed', time: '2 min ago', read: false, icon: 'check' },
     { id: 2, title: 'New report generated', time: '1 hour ago', read: false, icon: 'file' },
@@ -44,12 +50,15 @@ export const AppProvider = ({ children }) => {
           selectedVerifications,
           selectedPermission,
           selectedHumanTemplate,
+          selectedProductSector,
+          selectedProductService,
+          selectedProductTemplate,
         })
       );
     } catch {
       // Ignore persistence failures.
     }
-  }, [batchEntityType, selectedIndustry, selectedVerifications, selectedPermission, selectedHumanTemplate]);
+  }, [batchEntityType, selectedIndustry, selectedVerifications, selectedPermission, selectedHumanTemplate, selectedProductSector, selectedProductService, selectedProductTemplate]);
 
   const markNotificationRead = (id) => {
     setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
@@ -72,7 +81,11 @@ export const AppProvider = ({ children }) => {
       credentialData, setCredentialData,
       currentRecord, setCurrentRecord,
       cartDocuments, setCartDocuments,
-      notifications, markNotificationRead, markAllRead
+      notifications, markNotificationRead, markAllRead,
+      selectedProductSector, setSelectedProductSector,
+      selectedProductService, setSelectedProductService,
+      selectedProductTemplate, setSelectedProductTemplate,
+      productBatchData, setProductBatchData,
     }}>
       {children}
     </AppContext.Provider>

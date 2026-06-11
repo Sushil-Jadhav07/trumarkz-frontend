@@ -50,6 +50,11 @@ import CreateBatch from '@/pages/org/CreateBatch';
 import BatchStatus from '@/pages/org/BatchStatus';
 import RecordDetail from '@/pages/org/RecordDetail';
 import PermissionSettings from '@/pages/org/PermissionSettings';
+import SelectProductSector from '@/pages/org/SelectProductSector';
+import SelectProductService from '@/pages/org/SelectProductService';
+import ProductTemplate from '@/pages/org/ProductTemplate';
+import ProductCostBreakdown from '@/pages/org/ProductCostBreakdown';
+import ProductCertificatePreview from '@/pages/org/ProductCertificatePreview';
 import QRScanner from '@/pages/qr/QRScanner';
 import VerificationResult from '@/pages/qr/VerificationResult';
 import ReportsList from '@/pages/qr/ReportsList';
@@ -161,6 +166,13 @@ const AnimatedRoutes = () => {
           <Route path="/org/create-batch" element={<CreateBatch />} />
           <Route path="/org/batch-status" element={<BatchStatus />} />
           <Route path="/org/record/:id" element={<RecordDetail />} />
+
+          {/* ── Product verification flow ── */}
+          <Route path="/org/product/sector" element={<SelectProductSector />} />
+          <Route path="/org/product/service" element={<SelectProductService />} />
+          <Route path="/org/product/template" element={<ProductTemplate />} />
+          <Route path="/org/product/costing" element={<ProductCostBreakdown />} />
+          <Route path="/org/product/certificate-preview" element={<ProductCertificatePreview />} />
 
           {/* ── QR routes ── */}
           <Route path="/qr/scan" element={<QRScanner />} />

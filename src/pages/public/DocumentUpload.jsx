@@ -15,15 +15,15 @@ const formatBytes = (bytes) => {
 
 export const DocumentUpload = () => {
   const [searchParams] = useSearchParams();
-  const token     = searchParams.get('token');
+  const token = searchParams.get('token');
   const batchName = searchParams.get('batch') || 'Verification Batch';
   const fileInputRef = useRef(null);
 
-  const [files,       setFiles]       = useState([]);
-  const [description, setDescription] = useState('');
-  const [submitting,  setSubmitting]  = useState(false);
-  const [submitted,   setSubmitted]   = useState(false);
-  const [dragOver,    setDragOver]    = useState(false);
+  const [files, setFiles] = useState([]);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+  const [successMessage, setSuccessMessage] = useState('Report submitted successfully for');
 
   if (submitted) {
     return (
@@ -38,7 +38,7 @@ export const DocumentUpload = () => {
           </div>
           <h2 className="font-sora font-bold text-xl text-brand-dark mb-2">Report Submitted</h2>
           <p className="text-sm text-gray-500 font-inter">
-            Verification report for <span className="font-semibold text-brand-dark">{batchName}</span> has been submitted. The admin will review it shortly.
+            {successMessage} <span className="font-semibold text-brand-dark">{batchName}</span>. The admin will review it shortly.
           </p>
         </motion.div>
       </div>
@@ -63,7 +63,10 @@ export const DocumentUpload = () => {
     if (files.length === 0) { toast.error('Attach at least one file'); return; }
     setSubmitting(true);
     try {
-      await verificationAPI.uploadManualReport(token, files);
+      const { data } = await verificationAPI.uploadManualReport(token, files);
+      if (typeof data === 'string' && data.trim()) {
+        setSuccessMessage(data.trim());
+      }
       setSubmitted(true);
     } catch (err) {
       toast.error(getApiError(err, 'Submission failed. Please try again.'));
@@ -160,20 +163,13 @@ export const DocumentUpload = () => {
             </div>
           </div>
 
-          {/* ── Right: Description + Submit ──────────────────────────── */}
+          {/* ── Right: Submit ────────────────────────────────────────── */}
           <div className="space-y-4 lg:sticky lg:top-6">
             <div className="rounded-2xl bg-white border border-gray-100 shadow-sm p-5 space-y-4">
               <div>
-                <p className="text-sm font-semibold text-brand-dark font-inter">Description</p>
-                <p className="text-xs text-gray-400 font-inter mt-0.5">Summarise your findings for the admin.</p>
+                <p className="text-sm font-semibold text-brand-dark font-inter">Upload summary</p>
+                <p className="text-xs text-gray-400 font-inter mt-0.5">This endpoint accepts the token in the URL path and the selected files in multipart form data.</p>
               </div>
-              <textarea
-                rows={6}
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder="e.g. Verified 10 records. All documents checked. 2 flagged for discrepancy..."
-                className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-xs font-inter resize-none outline-none focus:border-brand-blue focus:ring-4 focus:ring-brand-blue/10 transition-all text-gray-700 placeholder:text-gray-300"
-              />
 
               {/* Summary row */}
               <div className="rounded-xl bg-gray-50 border border-gray-100 px-3 py-2.5 space-y-1.5">
@@ -186,6 +182,10 @@ export const DocumentUpload = () => {
                   <span className={`font-semibold ${token ? 'text-green-600' : 'text-orange-500'}`}>
                     {token ? 'Valid' : 'Missing'}
                   </span>
+                </div>
+                <div className="flex items-center justify-between text-xs font-inter">
+                  <span className="text-gray-400">Request body</span>
+                  <span className="font-semibold text-brand-dark">`files[]` only</span>
                 </div>
               </div>
 
@@ -202,7 +202,7 @@ export const DocumentUpload = () => {
               </button>
 
               <p className="text-[10px] text-gray-300 font-inter text-center leading-4">
-                Stored securely on TruMarkZ Cloud. One-time use link.
+                Stored securely on TruMarkZ Cloud using a one-time tokenized link.
               </p>
             </div>
           </div>
