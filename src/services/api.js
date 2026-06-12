@@ -415,8 +415,12 @@ export const verificationAPI = {
   requestManualVerification: (payload) =>
     verificationApi.post('/verification/verification/manual/request', payload),
 
+  // Check whether a manual upload token is still valid / already used
+  checkManualUploadToken: (token) =>
+    verificationApi.get(`/verification/manual/upload/${token}`),
+
   // Verifier uploads report files against the token
-  // Let Axios auto-set Content-Type with correct multipart boundary
+  // Let Axios no-set Content-Type with correct multipart boundary
   uploadManualReport: (token, files) => {
     const formData = new FormData();
     Array.from(files || []).forEach((file) => formData.append('files', file));

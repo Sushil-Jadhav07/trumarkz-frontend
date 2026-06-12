@@ -1,16 +1,23 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { verificationAPI, getApiError } from '@/services/api';
 import { Logo } from '@/components/ui/Logo';
 import {
-  CheckCircle, FileText, RefreshCw, ShieldCheck, Trash2, Upload,
+  AlertTriangle, CheckCircle, FileText, RefreshCw, ShieldCheck, Trash2, Upload,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 const formatBytes = (bytes) => {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+};
+
+const isUsedOrExpiredError = (err) => {
+  const status = err?.response?.status;
+  if (status === 409 || status === 410) return true;
+  const msg = (err?.response?.data?.detail || err?.response?.data?.message || err?.message || '').toLowerCase();
+  return msg.includes('already used') || msg.includes('already been used') || msg.includes('expired') || msg.includes('invalid token') || msg.includes('token not found');
 };
 
 export const DocumentUpload = () => {
@@ -24,6 +31,52 @@ export const DocumentUpload = () => {
   const [submitted, setSubmitted] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [successMessage, setSuccessMessage] = useState('Report submitted successfully for');
+  // null = checking, 'valid' = ok, 'used' = already submitted, 'expired' = expired/invalid
+  const [tokenStatus, setTokenStatus] = useState(token ? null : 'valid');
+
+  useEffect(() => {
+    if (!token) return;
+    verificationAPI.checkManualUploadToken(token)
+      .then(() => setTokenStatus('valid'))
+      .catch((err) => {
+        if (isUsedOrExpiredError(err)) {
+          setTokenStatus('used');
+        } else {
+          // GET not supported by backend (404/405) — show the form and let submit catch it
+          setTokenStatus('valid');
+        }
+      });
+  }, [token]);
+
+  if (tokenStatus === null) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <RefreshCw size={22} className="animate-spin text-brand-blue" />
+      </div>
+    );
+  }
+
+  if (tokenStatus === 'used') {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 p-6">
+        <motion.div
+          initial={{ opacity: 0, scale: 0.95 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="text-center max-w-sm rounded-2xl bg-white p-10 shadow-sm border border-orange-100"
+        >
+          <div className="w-16 h-16 rounded-full bg-orange-100 flex items-center justify-center mx-auto mb-4">
+            <AlertTriangle size={32} className="text-orange-500" />
+          </div>
+          <h2 className="font-sora font-bold text-xl text-brand-dark mb-2">Link Already Used</h2>
+          <p className="text-sm text-gray-500 font-inter leading-relaxed">
+            This upload link has already been used to submit a report for{' '}
+            <span className="font-semibold text-brand-dark">{batchName}</span>.
+            Each link is one-time use only. Please contact the admin if you need to re-submit.
+          </p>
+        </motion.div>
+      </div>
+    );
+  }
 
   if (submitted) {
     return (
@@ -69,7 +122,11 @@ export const DocumentUpload = () => {
       }
       setSubmitted(true);
     } catch (err) {
-      toast.error(getApiError(err, 'Submission failed. Please try again.'));
+      if (isUsedOrExpiredError(err)) {
+        setTokenStatus('used');
+      } else {
+        toast.error(getApiError(err, 'Submission failed. Please try again.'));
+      }
     } finally {
       setSubmitting(false);
     }

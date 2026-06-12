@@ -113,10 +113,14 @@ const SelectVerifierModal = ({ isOpen, onClose, onConfirm, batchName, sending })
   const [activeTab, setActiveTab] = useState('verifier');
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
-  const activeVerifiers = VERIFIER_DIRECTORY.filter((v) => v.status === 'active');
+  const [manualTypes, setManualTypes] = useState([]);
+  const [typesLoading, setTypesLoading] = useState(false);
+  const [editedEmail, setEditedEmail] = useState('');
+  const [editingEmail, setEditingEmail] = useState(false);
 
   const LINK_PLACEHOLDER = MANUAL_UPLOAD_LINK_PLACEHOLDER;
-  const LINK_PREVIEW = `${window.location.origin}/upload?batch=${encodeURIComponent(batchName || '')}&token={generated-on-send}`;
+  const frontendBase = import.meta.env.VITE_FRONTEND_URL || window.location.origin;
+  const LINK_PREVIEW = `${frontendBase}/upload?batch=${encodeURIComponent(batchName || '')}&token={generated-on-send}`;
 
   const buildBody = (name, uploadUrl) =>
     `Hi Team,\n\nPlease process the verification batch: ${name}.\n\nUpload the verified report using this secure one-time link:\n${uploadUrl}\n\nKindly upload all relevant verification documents using the one-time link above.\n\nRegards,\nTruMarkZ Admin`;
@@ -126,6 +130,20 @@ const SelectVerifierModal = ({ isOpen, onClose, onConfirm, batchName, sending })
     setBody(buildBody(batchName, LINK_PREVIEW));
     setSelected(null);
   }, [batchName]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    setTypesLoading(true);
+    verificationAPI.getVerificationTypes({})
+      .then(({ data }) => {
+        const list = Array.isArray(data)
+          ? data
+          : (data?.verification_types || data?.types || data?.items || []);
+        setManualTypes(list.filter((t) => t.label === 'manual' && t.email_address));
+      })
+      .catch(() => setManualTypes([]))
+      .finally(() => setTypesLoading(false));
+  }, [isOpen]);
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Select Third-Party Verifier" size="xl">
@@ -145,23 +163,59 @@ const SelectVerifierModal = ({ isOpen, onClose, onConfirm, batchName, sending })
         </div>
 
         {activeTab === 'verifier' ? (
-          <div className="space-y-2 max-h-[360px] overflow-y-auto pr-1">
-            {activeVerifiers.map((v) => (
-              <button
-                key={v.id}
-                onClick={() => setSelected(v)}
-                className={`w-full flex items-center gap-4 p-4 rounded-2xl border transition-all text-left ${selected?.id === v.id ? 'border-brand-blue bg-blue-50 shadow-sm' : 'border-gray-200 hover:border-brand-blue/40 hover:bg-gray-50'}`}
-              >
-                <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${selected?.id === v.id ? 'bg-brand-blue text-white' : 'bg-brand-blue/10 text-brand-blue'}`}>
-                  <Mail size={16} />
-                </div>
-                <div className="min-w-0">
-                  <p className="text-sm font-semibold text-brand-dark font-inter truncate">{v.name}</p>
-                  <p className="text-xs text-gray-500 font-inter truncate">{v.email}</p>
-                </div>
-                {selected?.id === v.id && <CheckCircle size={16} className="text-brand-blue shrink-0 ml-auto" />}
-              </button>
-            ))}
+          <div className="space-y-3">
+            <div className="space-y-2 max-h-[260px] overflow-y-auto pr-1">
+              {typesLoading ? (
+                <p className="text-sm text-gray-400 font-inter text-center py-6">Loading verifiers…</p>
+              ) : manualTypes.length === 0 ? (
+                <p className="text-sm text-gray-400 font-inter text-center py-6">No manual verification types found.</p>
+              ) : manualTypes.map((v) => (
+                <button
+                  key={v.id}
+                  onClick={() => { setSelected(v); setEditedEmail(v.email_address || ''); setEditingEmail(false); }}
+                  className={`w-full flex items-center gap-4 p-4 rounded-2xl border transition-all text-left ${selected?.id === v.id ? 'border-brand-blue bg-blue-50 shadow-sm' : 'border-gray-200 hover:border-brand-blue/40 hover:bg-gray-50'}`}
+                >
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${selected?.id === v.id ? 'bg-brand-blue text-white' : 'bg-brand-blue/10 text-brand-blue'}`}>
+                    <Mail size={16} />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-brand-dark font-inter truncate">{v.name}</p>
+                    <p className="text-xs text-gray-500 font-inter truncate">{v.email_address}</p>
+                  </div>
+                  {selected?.id === v.id && <CheckCircle size={16} className="text-brand-blue shrink-0 ml-auto" />}
+                </button>
+              ))}
+            </div>
+
+            {selected && (
+              <div className="rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 space-y-1">
+                <p className="text-[11px] uppercase tracking-wider text-gray-500 font-semibold font-inter">Recipient Email</p>
+                {editingEmail ? (
+                  <div className="flex items-center gap-2 mt-1">
+                    <input
+                      autoFocus
+                      type="email"
+                      value={editedEmail}
+                      onChange={(e) => setEditedEmail(e.target.value)}
+                      onBlur={() => setEditingEmail(false)}
+                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === 'Escape') setEditingEmail(false); }}
+                      className="flex-1 rounded-lg border border-brand-blue/40 bg-white px-3 py-1.5 text-sm font-inter focus:outline-none focus:ring-2 focus:ring-brand-blue/30"
+                    />
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2 mt-1">
+                    <p className="flex-1 text-sm text-brand-dark font-inter truncate">{editedEmail}</p>
+                    <button
+                      type="button"
+                      onClick={() => setEditingEmail(true)}
+                      className="shrink-0 p-1 rounded-lg hover:bg-gray-200 text-gray-400 hover:text-brand-blue transition-colors"
+                    >
+                      <Pencil size={13} />
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         ) : (
           <div className="space-y-3">
@@ -186,8 +240,8 @@ const SelectVerifierModal = ({ isOpen, onClose, onConfirm, batchName, sending })
             variant="primary"
             icon={Mail}
             className="flex-1"
-            disabled={!selected || sending || !subject.trim() || !body.trim()}
-            onClick={() => onConfirm(selected, { subject: subject.trim(), body: body.trim() })}
+            disabled={!selected || !editedEmail.trim() || sending || !subject.trim() || !body.trim()}
+            onClick={() => onConfirm({ ...selected, email_address: editedEmail.trim() }, { subject: subject.trim(), body: body.trim() })}
           >
             {sending ? 'Sending�' : 'Send Mail'}
           </Button>
@@ -434,10 +488,13 @@ export const BatchMonitor = () => {
     }
     setMailSending(true);
     try {
+      const frontendOrigin = import.meta.env.VITE_FRONTEND_URL || window.location.origin;
+
       const { data: reqData } = await verificationAPI.requestManualVerification({
         batch_id:                 batch.id,
-        verification_type_name:   'Manual Verification',
+        verification_type_name:   verifier.name,
         verifier_email:           verifierEmail,
+        frontend_url:             frontendOrigin,
       });
 
       const token = reqData?.token;
@@ -449,7 +506,7 @@ export const BatchMonitor = () => {
         throw new Error('Manual verification response did not include the required token or request ID.');
       }
 
-      const uploadLink = `${window.location.origin}/upload?batch=${encodeURIComponent(batch.name)}&token=${encodeURIComponent(token)}`;
+      const uploadLink = `${frontendOrigin}/upload?batch=${encodeURIComponent(batch.name)}&token=${encodeURIComponent(token)}`;
 
       const finalBody = template.body
         .replaceAll(MANUAL_UPLOAD_LINK_PLACEHOLDER, uploadLink)
