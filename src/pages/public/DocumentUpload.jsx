@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { verificationAPI, getApiError } from '@/services/api';
@@ -32,29 +32,16 @@ export const DocumentUpload = () => {
   const [dragOver, setDragOver] = useState(false);
   const [successMessage, setSuccessMessage] = useState('Report submitted successfully for');
   // null = checking, 'valid' = ok, 'used' = already submitted, 'expired' = expired/invalid
-  const [tokenStatus, setTokenStatus] = useState(token ? null : 'valid');
+  const [tokenStatus, setTokenStatus] = useState('valid');
 
   useEffect(() => {
     if (!token) return;
     verificationAPI.checkManualUploadToken(token)
       .then(() => setTokenStatus('valid'))
       .catch((err) => {
-        if (isUsedOrExpiredError(err)) {
-          setTokenStatus('used');
-        } else {
-          // GET not supported by backend (404/405) — show the form and let submit catch it
-          setTokenStatus('valid');
-        }
+        if (isUsedOrExpiredError(err)) setTokenStatus('used');
       });
   }, [token]);
-
-  if (tokenStatus === null) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <RefreshCw size={22} className="animate-spin text-brand-blue" />
-      </div>
-    );
-  }
 
   if (tokenStatus === 'used') {
     return (

@@ -22,8 +22,7 @@ export const Badge = ({ status, children, className }) => {
     warning: Clock,
     failed: X,
     error: X,
-    'in-progress': Loader2,
-    info: Loader2
+    'in-progress': Loader2
   };
 
   const Icon = icons[status] || null;
@@ -31,7 +30,7 @@ export const Badge = ({ status, children, className }) => {
 
   return (
     <span className={clsx('inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium font-inter', variant, className)}>
-      {Icon && <Icon size={12} className={status === 'in-progress' || status === 'info' ? 'animate-spin' : ''} />}
+      {Icon && <Icon size={12} className={status === 'in-progress' ? 'animate-spin' : ''} />}
       {children || status}
     </span>
   );
