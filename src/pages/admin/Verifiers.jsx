@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { AuthLayout } from '@/components/layout/AuthLayout';
 import { PageHeader } from '@/components/shared/PageHeader';
@@ -6,7 +6,7 @@ import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
 import {
-  Clock, DollarSign, Filter, Link, Mail, MoreVertical,
+  Check, ChevronDown, Clock, DollarSign, Filter, Link, Mail, MoreVertical,
   Pencil, Plus, RefreshCw, ShieldCheck, Trash2, X, Zap,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -35,6 +35,50 @@ const EMPTY_FORM = {
 const inputCls  = 'w-full rounded-xl border border-gray-200 px-4 py-2.5 text-sm font-inter focus:outline-none focus:ring-2 focus:ring-brand-blue/30 bg-white';
 const labelCls  = 'block text-sm font-medium text-brand-dark font-inter mb-1.5';
 
+const CustomSelect = ({ value, onChange, options }) => {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  const selected = options.find((o) => o.value === value);
+
+  useEffect(() => {
+    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        onClick={() => setOpen((p) => !p)}
+        className="w-full rounded-xl border border-gray-200 px-4 py-2.5 text-sm font-inter focus:outline-none focus:ring-2 focus:ring-brand-blue/30 bg-white flex items-center justify-between gap-2"
+      >
+        <span className="text-brand-dark">{selected?.label}</span>
+        <ChevronDown size={14} className={`text-gray-400 shrink-0 transition-transform duration-200 ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && (
+        <div className="absolute top-full left-0 right-0 mt-1 z-30 rounded-xl border border-gray-200 bg-white shadow-lg overflow-hidden">
+          {options.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              onClick={() => { onChange(option.value); setOpen(false); }}
+              className={`w-full flex items-center justify-between px-4 py-2.5 text-sm font-inter transition-colors ${
+                value === option.value
+                  ? 'bg-blue-50 text-brand-blue font-medium'
+                  : 'text-brand-dark hover:bg-gray-50'
+              }`}
+            >
+              <span>{option.label}</span>
+              {value === option.value && <Check size={13} className="text-brand-blue" />}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
 export const Verifiers = () => {
   const [allTypes,       setAllTypes]       = useState([]);
   const [loading,        setLoading]        = useState(true);
@@ -45,12 +89,16 @@ export const Verifiers = () => {
   const [modalOpen,      setModalOpen]      = useState(false);
   const [form,           setForm]           = useState(EMPTY_FORM);
   const [submitting,     setSubmitting]     = useState(false);
-  const [deletingId,     setDeletingId]     = useState(null);
-  const [actionMenuId,   setActionMenuId]   = useState(null);
-  const [editModalOpen,  setEditModalOpen]  = useState(false);
-  const [editTarget,     setEditTarget]     = useState(null);
-  const [editForm,       setEditForm]       = useState(EMPTY_FORM);
-  const [saving,         setSaving]         = useState(false);
+  const [deletingId,       setDeletingId]       = useState(null);
+  const [deleteConfirmItem, setDeleteConfirmItem] = useState(null);
+  const [actionMenuId,     setActionMenuId]     = useState(null);
+  const [editModalOpen,    setEditModalOpen]    = useState(false);
+  const [editTarget,       setEditTarget]       = useState(null);
+  const [editForm,         setEditForm]         = useState(EMPTY_FORM);
+  const [saving,           setSaving]           = useState(false);
+  const [industryInput,    setIndustryInput]    = useState('');
+  const [editIndustryInput, setEditIndustryInput] = useState('');
+  const [menuPos,          setMenuPos]          = useState(null);
 
   const fetchTypes = useCallback(async (showRefresh = false) => {
     if (showRefresh) setRefreshing(true);
@@ -76,6 +124,22 @@ export const Verifiers = () => {
 
   useEffect(() => { fetchTypes(); }, [fetchTypes]);
 
+  useEffect(() => {
+    if (!actionMenuId) return;
+    const close = () => { setActionMenuId(null); setMenuPos(null); };
+    const onMouseDown = (e) => {
+      if (!e.target.closest('[data-action-menu]') && !e.target.closest('[data-action-btn]')) close();
+    };
+    window.addEventListener('scroll', close, true);
+    window.addEventListener('resize', close);
+    document.addEventListener('mousedown', onMouseDown);
+    return () => {
+      window.removeEventListener('scroll', close, true);
+      window.removeEventListener('resize', close);
+      document.removeEventListener('mousedown', onMouseDown);
+    };
+  }, [actionMenuId]);
+
   // Client-side filters applied on top of the category-filtered API results
   const types = allTypes.filter((t) => {
     if (labelFilter && t.label !== labelFilter) return false;
@@ -93,7 +157,37 @@ export const Verifiers = () => {
 
   const updateForm  = (field, value) => setForm((prev) => ({ ...prev, [field]: value }));
   const resetForm   = () => setForm(EMPTY_FORM);
-  const handleClose = () => { setModalOpen(false); resetForm(); };
+  const handleClose = () => { setModalOpen(false); resetForm(); setIndustryInput(''); };
+
+  // ── Tag helpers: create form ──────────────────────────────────────────────
+  const formTags = form.industry_type
+    ? form.industry_type.split(',').map((s) => s.trim()).filter(Boolean)
+    : [];
+  const addFormTag = (val) => {
+    const tag = val.trim();
+    if (!tag) return;
+    if (!formTags.includes(tag)) updateForm('industry_type', [...formTags, tag].join(', '));
+    setIndustryInput('');
+  };
+  const removeFormTag = (tag) =>
+    updateForm('industry_type', formTags.filter((t) => t !== tag).join(', '));
+
+  // ── Tag helpers: edit form ────────────────────────────────────────────────
+  const editTags = editForm.industry_type
+    ? editForm.industry_type.split(',').map((s) => s.trim()).filter(Boolean)
+    : [];
+  const addEditTag = (val) => {
+    const tag = val.trim();
+    if (!tag) return;
+    if (!editTags.includes(tag))
+      setEditForm((p) => ({ ...p, industry_type: [...editTags, tag].join(', ') }));
+    setEditIndustryInput('');
+  };
+  const removeEditTag = (tag) =>
+    setEditForm((p) => ({
+      ...p,
+      industry_type: editTags.filter((t) => t !== tag).join(', '),
+    }));
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -134,13 +228,14 @@ export const Verifiers = () => {
     }
   };
 
-  const handleDelete = async (item) => {
-    if (!window.confirm(`Delete "${item.name}"? This cannot be undone.`)) return;
-    setDeletingId(item.id);
+  const handleDelete = async () => {
+    if (!deleteConfirmItem) return;
+    setDeletingId(deleteConfirmItem.id);
     try {
-      await verificationAPI.deleteVerificationType(item.id);
-      setAllTypes((prev) => prev.filter((t) => t.id !== item.id));
-      toast.success(`"${item.name}" deleted`);
+      await verificationAPI.deleteVerificationType(deleteConfirmItem.id);
+      setAllTypes((prev) => prev.filter((t) => t.id !== deleteConfirmItem.id));
+      toast.success(`"${deleteConfirmItem.name}" deleted`);
+      setDeleteConfirmItem(null);
     } catch (err) {
       toast.error(getApiError(err, 'Failed to delete'));
     } finally {
@@ -160,6 +255,7 @@ export const Verifiers = () => {
       timeline:      item.timeline      || '',
       industry_type: (item.industry_type || []).join(', '),
     });
+    setEditIndustryInput('');
     setEditModalOpen(true);
     setActionMenuId(null);
   };
@@ -436,36 +532,24 @@ export const Verifiers = () => {
 
                       {/* Actions — 3-dot menu */}
                       <td className="px-5 py-4 text-center">
-                        <div className="relative inline-flex justify-center">
+                        <div className="inline-flex justify-center">
                           <button
                             type="button"
-                            onClick={() => setActionMenuId((cur) => (cur === item.id ? null : item.id))}
+                            data-action-btn="true"
+                            onClick={(e) => {
+                              if (actionMenuId === item.id) {
+                                setActionMenuId(null);
+                                setMenuPos(null);
+                              } else {
+                                const rect = e.currentTarget.getBoundingClientRect();
+                                setMenuPos({ top: rect.bottom + 4, right: window.innerWidth - rect.right });
+                                setActionMenuId(item.id);
+                              }
+                            }}
                             className="p-2 rounded-lg border border-gray-200 text-gray-500 hover:text-brand-dark hover:bg-gray-50 shadow-sm"
                           >
                             <MoreVertical size={14} />
                           </button>
-
-                          {actionMenuId === item.id && (
-                            <div className="absolute right-0 top-9 z-20 w-36 rounded-xl border border-gray-200 bg-white shadow-md p-1">
-                              <button
-                                type="button"
-                                onClick={() => openEdit(item)}
-                                className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-inter text-gray-700 hover:bg-gray-50"
-                              >
-                                <Pencil size={13} />
-                                Edit
-                              </button>
-                              <button
-                                type="button"
-                                disabled={deletingId === item.id}
-                                onClick={() => { setActionMenuId(null); handleDelete(item); }}
-                                className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-inter text-red-600 hover:bg-red-50 disabled:opacity-50"
-                              >
-                                {deletingId === item.id ? <RefreshCw size={13} className="animate-spin" /> : <Trash2 size={13} />}
-                                {deletingId === item.id ? 'Deleting…' : 'Delete'}
-                              </button>
-                            </div>
-                          )}
                         </div>
                       </td>
                     </motion.tr>
@@ -475,6 +559,40 @@ export const Verifiers = () => {
             </div>
           </Card>
         </motion.div>
+      )}
+
+      {/* ── Fixed action dropdown (escapes overflow-x-auto) ──────────────── */}
+      {actionMenuId && menuPos && (
+        <div
+          data-action-menu="true"
+          style={{ position: 'fixed', top: menuPos.top, right: menuPos.right, zIndex: 9999 }}
+          className="w-36 rounded-xl border border-gray-200 bg-white shadow-lg p-1"
+        >
+          {(() => {
+            const item = types.find((t) => t.id === actionMenuId);
+            if (!item) return null;
+            return (
+              <>
+                <button
+                  type="button"
+                  onClick={() => { setMenuPos(null); openEdit(item); }}
+                  className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-inter text-gray-700 hover:bg-gray-50"
+                >
+                  <Pencil size={13} />
+                  Edit
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setActionMenuId(null); setMenuPos(null); setDeleteConfirmItem(item); }}
+                  className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-inter text-red-600 hover:bg-red-50"
+                >
+                  <Trash2 size={13} />
+                  Delete
+                </button>
+              </>
+            );
+          })()}
+        </div>
       )}
 
       {/* ── Add Verification Type Modal ─────────────────────────────────────── */}
@@ -494,14 +612,14 @@ export const Verifiers = () => {
             </div>
             <div>
               <label className={labelCls}>Label *</label>
-              <select
+              <CustomSelect
                 value={form.label}
-                onChange={(e) => updateForm('label', e.target.value)}
-                className={inputCls}
-              >
-                <option value="manual">Manual</option>
-                <option value="automatic">Automatic</option>
-              </select>
+                onChange={(val) => updateForm('label', val)}
+                options={[
+                  { value: 'manual', label: 'Manual' },
+                  { value: 'automatic', label: 'Automatic' },
+                ]}
+              />
               <p className="text-xs text-gray-400 font-inter mt-1">
                 {form.label === 'manual'
                   ? 'Manual — human verifier contacted via email.'
@@ -514,14 +632,14 @@ export const Verifiers = () => {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className={labelCls}>Category *</label>
-              <select
+              <CustomSelect
                 value={form.category}
-                onChange={(e) => updateForm('category', e.target.value)}
-                className={inputCls}
-              >
-                <option value="human">Human</option>
-                <option value="product">Product</option>
-              </select>
+                onChange={(val) => updateForm('category', val)}
+                options={[
+                  { value: 'human', label: 'Human' },
+                  { value: 'product', label: 'Product' },
+                ]}
+              />
             </div>
 
             {form.label === 'manual' ? (
@@ -586,13 +704,28 @@ export const Verifiers = () => {
           {/* Industry Types */}
           <div>
             <label className={labelCls}>Industry Types</label>
-            <input
-              value={form.industry_type}
-              onChange={(e) => updateForm('industry_type', e.target.value)}
-              className={inputCls}
-              placeholder="IT, Finance, Healthcare"
-            />
-            <p className="text-xs text-gray-400 font-inter mt-1">Separate multiple industries with commas.</p>
+            <div className="rounded-xl border border-gray-200 px-3 py-2 min-h-[44px] flex flex-wrap gap-1.5 items-center focus-within:ring-2 focus-within:ring-brand-blue/30 bg-white">
+              {formTags.map((tag) => (
+                <span key={tag} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-blue-50 text-xs text-brand-blue border border-blue-100 font-inter">
+                  {tag}
+                  <button type="button" onClick={() => removeFormTag(tag)} className="hover:text-red-500 transition-colors">
+                    <X size={10} />
+                  </button>
+                </span>
+              ))}
+              <input
+                value={industryInput}
+                onChange={(e) => setIndustryInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); addFormTag(industryInput); }
+                  if (e.key === 'Backspace' && !industryInput && formTags.length) removeFormTag(formTags[formTags.length - 1]);
+                }}
+                onBlur={() => { if (industryInput.trim()) addFormTag(industryInput); }}
+                placeholder={formTags.length ? '' : 'Type and press Enter to add...'}
+                className="flex-1 min-w-[160px] text-sm font-inter outline-none bg-transparent py-0.5"
+              />
+            </div>
+            <p className="text-xs text-gray-400 font-inter mt-1">Press Enter or comma to add. Backspace removes the last tag.</p>
           </div>
 
           {/* Actions */}
@@ -623,14 +756,14 @@ export const Verifiers = () => {
             </div>
             <div>
               <label className={labelCls}>Label *</label>
-              <select
+              <CustomSelect
                 value={editForm.label}
-                onChange={(e) => setEditForm((p) => ({ ...p, label: e.target.value }))}
-                className={inputCls}
-              >
-                <option value="manual">Manual</option>
-                <option value="automatic">Automatic</option>
-              </select>
+                onChange={(val) => setEditForm((p) => ({ ...p, label: val }))}
+                options={[
+                  { value: 'manual', label: 'Manual' },
+                  { value: 'automatic', label: 'Automatic' },
+                ]}
+              />
               <p className="text-xs text-gray-400 font-inter mt-1">
                 {editForm.label === 'manual'
                   ? 'Manual — human verifier contacted via email.'
@@ -642,14 +775,14 @@ export const Verifiers = () => {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className={labelCls}>Category *</label>
-              <select
+              <CustomSelect
                 value={editForm.category}
-                onChange={(e) => setEditForm((p) => ({ ...p, category: e.target.value }))}
-                className={inputCls}
-              >
-                <option value="human">Human</option>
-                <option value="product">Product</option>
-              </select>
+                onChange={(val) => setEditForm((p) => ({ ...p, category: val }))}
+                options={[
+                  { value: 'human', label: 'Human' },
+                  { value: 'product', label: 'Product' },
+                ]}
+              />
             </div>
 
             {editForm.label === 'manual' ? (
@@ -712,13 +845,28 @@ export const Verifiers = () => {
 
           <div>
             <label className={labelCls}>Industry Types</label>
-            <input
-              value={editForm.industry_type}
-              onChange={(e) => setEditForm((p) => ({ ...p, industry_type: e.target.value }))}
-              className={inputCls}
-              placeholder="IT, Finance, Healthcare"
-            />
-            <p className="text-xs text-gray-400 font-inter mt-1">Separate multiple industries with commas.</p>
+            <div className="rounded-xl border border-gray-200 px-3 py-2 min-h-[44px] flex flex-wrap gap-1.5 items-center focus-within:ring-2 focus-within:ring-brand-blue/30 bg-white">
+              {editTags.map((tag) => (
+                <span key={tag} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-blue-50 text-xs text-brand-blue border border-blue-100 font-inter">
+                  {tag}
+                  <button type="button" onClick={() => removeEditTag(tag)} className="hover:text-red-500 transition-colors">
+                    <X size={10} />
+                  </button>
+                </span>
+              ))}
+              <input
+                value={editIndustryInput}
+                onChange={(e) => setEditIndustryInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); addEditTag(editIndustryInput); }
+                  if (e.key === 'Backspace' && !editIndustryInput && editTags.length) removeEditTag(editTags[editTags.length - 1]);
+                }}
+                onBlur={() => { if (editIndustryInput.trim()) addEditTag(editIndustryInput); }}
+                placeholder={editTags.length ? '' : 'Type and press Enter to add...'}
+                className="flex-1 min-w-[160px] text-sm font-inter outline-none bg-transparent py-0.5"
+              />
+            </div>
+            <p className="text-xs text-gray-400 font-inter mt-1">Press Enter or comma to add. Backspace removes the last tag.</p>
           </div>
 
           <div className="flex flex-col sm:flex-row justify-end gap-2 pt-2">
@@ -730,6 +878,46 @@ export const Verifiers = () => {
             </Button>
           </div>
         </form>
+      </Modal>
+      {/* ── Delete Confirmation Modal ─────────────────────────────────────── */}
+      <Modal
+        isOpen={!!deleteConfirmItem}
+        onClose={() => setDeleteConfirmItem(null)}
+        title="Delete Verification Type"
+        size="sm"
+      >
+        <div className="space-y-4">
+          <div className="flex items-start gap-3 p-4 rounded-xl bg-red-50 border border-red-100">
+            <Trash2 size={18} className="text-red-500 shrink-0 mt-0.5" />
+            <div>
+              <p className="text-sm font-semibold text-red-700 font-inter">
+                Delete &quot;{deleteConfirmItem?.name}&quot;?
+              </p>
+              <p className="text-xs text-red-500 font-inter mt-1">
+                This action cannot be undone. Any features currently using this verification type may be affected.
+              </p>
+            </div>
+          </div>
+          <div className="flex justify-end gap-2 pt-1">
+            <Button
+              variant="ghost"
+              type="button"
+              onClick={() => setDeleteConfirmItem(null)}
+              disabled={!!deletingId}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="danger"
+              type="button"
+              icon={deletingId ? RefreshCw : Trash2}
+              disabled={!!deletingId}
+              onClick={handleDelete}
+            >
+              {deletingId ? 'Deleting...' : 'Yes, Delete'}
+            </Button>
+          </div>
+        </div>
       </Modal>
     </AuthLayout>
   );
