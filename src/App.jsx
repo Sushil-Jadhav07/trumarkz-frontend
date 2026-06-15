@@ -83,12 +83,12 @@ import AdminDashboard from '@/pages/admin/AdminDashboard';
 import OrgApprovals from '@/pages/admin/OrgApprovals';
 import BatchMonitor from '@/pages/admin/BatchMonitor';
 import Verifiers from '@/pages/admin/Verifiers';
-import PricingConfig from '@/pages/admin/PricingConfig';
 import Disputes from '@/pages/admin/Disputes';
 import PlatformHealth from '@/pages/admin/PlatformHealth';
 import SDCVerification from '@/pages/admin/SDCVerification';
 import PromoteSuperAdmin from '@/pages/admin/PromoteSuperAdmin';
 import CreateSuperAdmin from '@/pages/admin/CreateSuperAdmin';
+import UsersGrouped from '@/pages/admin/UsersGrouped';
 
 const ProtectedRoute = ({ children }) => {
   const { isAuthenticated, loading } = useAuth();
@@ -213,11 +213,11 @@ const AnimatedRoutes = () => {
           <Route path="/admin/batch-monitor" element={<ProtectedRoute><AdminRoute><BatchMonitor /></AdminRoute></ProtectedRoute>} />
           <Route path="/admin/verifiers" element={<ProtectedRoute><AdminRoute><Verifiers /></AdminRoute></ProtectedRoute>} />
           <Route path="/admin/sdc-verification" element={<ProtectedRoute><AdminRoute><SDCVerification /></AdminRoute></ProtectedRoute>} />
-          <Route path="/admin/pricing" element={<ProtectedRoute><AdminRoute><PricingConfig /></AdminRoute></ProtectedRoute>} />
           <Route path="/admin/disputes" element={<ProtectedRoute><AdminRoute><Disputes /></AdminRoute></ProtectedRoute>} />
           <Route path="/admin/platform-health" element={<ProtectedRoute><AdminRoute><PlatformHealth /></AdminRoute></ProtectedRoute>} />
           <Route path="/admin/promote-super-admin" element={<ProtectedRoute><AdminRoute><PromoteSuperAdmin /></AdminRoute></ProtectedRoute>} />
           <Route path="/admin/create-super-admin" element={<ProtectedRoute><AdminRoute><CreateSuperAdmin /></AdminRoute></ProtectedRoute>} />
+          <Route path="/admin/users" element={<ProtectedRoute><AdminRoute><UsersGrouped /></AdminRoute></ProtectedRoute>} />
         </Routes>
       </div>
     </AnimatePresence>
