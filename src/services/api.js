@@ -204,6 +204,13 @@ export const authAPI = {
     }),
 
   getUsersGrouped: () => api.get('/auth/users/grouped'),
+  getAllUsers: (params = {}) => {
+    const p = {};
+    if (params.user_type) p.user_type = params.user_type;
+    if (params.limit != null) p.limit = params.limit;
+    if (params.offset != null) p.offset = params.offset;
+    return api.get('/auth/users', { params: p });
+  },
   promoteSuperAdmin: (email) => api.post('/auth/promote-super-admin', { email }),
   createSuperAdmin: (payload) => api.post('/auth/create-super-admin', payload),
   getOrganizationIndustryType: (orgId) => api.get(`/auth/organization/${orgId}/industry-type`),
@@ -214,6 +221,7 @@ export const orgAPI = {};
 
 export const adminAPI = {
   getUsersGrouped: authAPI.getUsersGrouped,
+  getAllUsers: authAPI.getAllUsers,
   promoteSuperAdmin: authAPI.promoteSuperAdmin,
   createSuperAdmin: (payload) =>
     authAPI.createSuperAdmin(

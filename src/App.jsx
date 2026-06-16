@@ -88,7 +88,7 @@ import PlatformHealth from '@/pages/admin/PlatformHealth';
 import SDCVerification from '@/pages/admin/SDCVerification';
 import PromoteSuperAdmin from '@/pages/admin/PromoteSuperAdmin';
 import CreateSuperAdmin from '@/pages/admin/CreateSuperAdmin';
-import UsersGrouped from '@/pages/admin/UsersGrouped';
+import AllUsersList from '@/pages/admin/AllUsersList';
 
 const ProtectedRoute = ({ children }) => {
   const { isAuthenticated, loading } = useAuth();
@@ -217,7 +217,7 @@ const AnimatedRoutes = () => {
           <Route path="/admin/platform-health" element={<ProtectedRoute><AdminRoute><PlatformHealth /></AdminRoute></ProtectedRoute>} />
           <Route path="/admin/promote-super-admin" element={<ProtectedRoute><AdminRoute><PromoteSuperAdmin /></AdminRoute></ProtectedRoute>} />
           <Route path="/admin/create-super-admin" element={<ProtectedRoute><AdminRoute><CreateSuperAdmin /></AdminRoute></ProtectedRoute>} />
-          <Route path="/admin/users" element={<ProtectedRoute><AdminRoute><UsersGrouped /></AdminRoute></ProtectedRoute>} />
+          <Route path="/admin/user-list" element={<ProtectedRoute><AdminRoute><AllUsersList /></AdminRoute></ProtectedRoute>} />
         </Routes>
       </div>
     </AnimatePresence>

@@ -4,9 +4,9 @@ import { Logo } from '@/components/ui/Logo';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, Layers, Award, Store, BarChart2,
-  Wallet, HelpCircle, User, Users, LogOut, ChevronLeft, ChevronRight,
+  Wallet, HelpCircle, User, LogOut, ChevronLeft, ChevronRight,
   GitBranch, Share2, CheckSquare, Building2,
-  AlertTriangle, Activity, ShieldCheck, UserCog
+  AlertTriangle, Activity, ShieldCheck, UserCog, UserSearch
 } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -52,7 +52,7 @@ export const Sidebar = ({ collapsed, onToggle, mobileOpen = false, onMobileClose
         { path: '/admin/org-approvals', label: 'Org Approvals', icon: CheckSquare },
         { path: '/admin/batch-monitor', label: 'Batch Monitor', icon: Layers },
         { path: '/admin/sdc-verification', label: 'SDC Verification', icon: ShieldCheck },
-        { path: '/admin/users', label: 'Users', icon: Users },
+{ path: '/admin/user-list', label: 'User List', icon: UserSearch },
         { path: '/admin/promote-super-admin', label: 'Promote Admin', icon: UserCog },
         { path: '/admin/verifiers', label: 'Verifiers', icon: Building2 },
         { path: '/admin/disputes', label: 'Disputes', icon: AlertTriangle },
