@@ -211,6 +211,9 @@ export const authAPI = {
     if (params.offset != null) p.offset = params.offset;
     return api.get('/auth/users', { params: p });
   },
+  createUser: (payload) => api.post('/auth/users', cleanObject(payload)),
+  updateUser: (userId, payload) => api.patch(`/auth/users/${userId}`, payload),
+  deactivateUser: (userId) => api.delete(`/auth/users/${userId}`),
   promoteSuperAdmin: (email) => api.post('/auth/promote-super-admin', { email }),
   createSuperAdmin: (payload) => api.post('/auth/create-super-admin', payload),
   getOrganizationIndustryType: (orgId) => api.get(`/auth/organization/${orgId}/industry-type`),
@@ -222,6 +225,9 @@ export const orgAPI = {};
 export const adminAPI = {
   getUsersGrouped: authAPI.getUsersGrouped,
   getAllUsers: authAPI.getAllUsers,
+  createUser: authAPI.createUser,
+  updateUser: authAPI.updateUser,
+  deactivateUser: authAPI.deactivateUser,
   promoteSuperAdmin: authAPI.promoteSuperAdmin,
   createSuperAdmin: (payload) =>
     authAPI.createSuperAdmin(

@@ -34,6 +34,7 @@ const GoogleIcon = () => (
 
 // ── Forgot Password Modal ─────────────────────────────────────────────────────
 const ForgotPasswordModal = ({ onClose, forgotPassword }) => {
+  const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [sent, setSent] = useState(false);
@@ -44,8 +45,17 @@ const ForgotPasswordModal = ({ onClose, forgotPassword }) => {
     setSubmitting(true);
     const result = await forgotPassword(email.trim());
     setSubmitting(false);
-    if (result.success) setSent(true);
-    else toast.error(result.error || 'Something went wrong. Please try again.');
+    if (result.success) {
+      sessionStorage.setItem('trumarkz_reset_email', email.trim());
+      setSent(true);
+    } else {
+      toast.error(result.error || 'Something went wrong. Please try again.');
+    }
+  };
+
+  const handleEnterOtp = () => {
+    onClose();
+    navigate('/reset-password');
   };
 
   return (
@@ -81,11 +91,11 @@ const ForgotPasswordModal = ({ onClose, forgotPassword }) => {
               exit={{ opacity: 0, y: -8 }}
               transition={spring.smooth}
             >
-              <div className="w-11 h-11 bg-brand-blue/10 rounded-xl flex items-center justify-center mb-4">
+              <div className="w-11 h-11 bg-brand-blue/10 rounded-xl flex items-center justify-center mb-4 mx-auto">
                 <Lock size={20} className="text-brand-blue" />
               </div>
-              <h3 className="font-sora font-bold text-xl text-brand-dark mb-1">Forgot Password?</h3>
-              <p className="text-sm text-gray-500 font-inter mb-6 leading-relaxed">No worries. Enter your registered email and we'll send you a reset OTP.</p>
+              <h3 className="font-sora font-bold text-xl text-brand-dark mb-1 text-center">Forgot Password?</h3>
+              <p className="text-sm text-gray-500 font-inter mb-6 leading-relaxed text-center">No worries. Enter your registered email and we'll send you a reset OTP.</p>
               <form onSubmit={handleSubmit} className="space-y-4">
                 <Input label="Email Address" placeholder="Enter your email" name="email" autoComplete="email" value={email} onChange={e => setEmail(e.target.value)} icon={Mail} />
                 <motion.div whileHover={{ scale: 1.01 }} whileTap={{ scale: 0.98 }} transition={spring.snappy}>
@@ -112,12 +122,26 @@ const ForgotPasswordModal = ({ onClose, forgotPassword }) => {
                 <CheckCircle size={28} className="text-green-500" />
               </motion.div>
               <h3 className="font-sora font-bold text-xl text-brand-dark mb-2">Check Your Email</h3>
-              <p className="text-sm text-gray-500 font-inter mb-6 leading-relaxed">
-                If an account exists for <span className="font-semibold text-brand-dark">{email}</span>, a reset OTP has been sent. It expires in 30 minutes.
+              <p className="text-sm text-gray-500 font-inter mb-5 leading-relaxed">
+                If an account exists for <span className="font-semibold text-brand-dark">{email}</span>, a reset OTP has been sent. It expires in 10 minutes.
               </p>
-              <motion.div whileHover={{ scale: 1.01 }} whileTap={{ scale: 0.98 }} transition={spring.snappy}>
-                <Button variant="outline" size="md" className="w-full" onClick={onClose}>Back to Sign In</Button>
-              </motion.div>
+              <div className="space-y-3">
+                <motion.div whileHover={{ scale: 1.01 }} whileTap={{ scale: 0.98 }} transition={spring.snappy}>
+                  <Button variant="primary" size="md" className="w-full" onClick={handleEnterOtp}>
+                    Enter OTP &amp; Reset Password
+                  </Button>
+                </motion.div>
+                <motion.button
+                  type="button"
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.97 }}
+                  transition={spring.micro}
+                  onClick={onClose}
+                  className="w-full text-sm text-gray-500 font-inter hover:text-brand-dark transition-colors"
+                >
+                  Back to Sign In
+                </motion.button>
+              </div>
             </motion.div>
           )}
         </AnimatePresence>
