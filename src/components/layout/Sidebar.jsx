@@ -6,7 +6,8 @@ import {
   LayoutDashboard, Layers, Award, Store, BarChart2,
   Wallet, HelpCircle, User, LogOut, ChevronLeft, ChevronRight,
   GitBranch, Share2, CheckSquare, Building2,
-  AlertTriangle, Activity, ShieldCheck, UserCog, UserSearch
+  AlertTriangle, Activity, ShieldCheck, UserCog, UserSearch,
+  Mail, Package,
 } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -27,6 +28,7 @@ export const Sidebar = ({ collapsed, onToggle, mobileOpen = false, onMobileClose
       return [
         { path: '/org/dashboard', label: 'Dashboard', icon: LayoutDashboard },
         { path: '/org/batch-status', label: 'Batches', icon: Layers },
+        { path: '/org/product/warranty', label: 'Warranty', icon: Package },
         { path: '/marketplace', label: 'Registry', icon: Store },
         { path: '/qr/reports', label: 'Reports', icon: BarChart2 },
         { path: '/account/wallet', label: 'Wallet', icon: Wallet },
@@ -52,7 +54,9 @@ export const Sidebar = ({ collapsed, onToggle, mobileOpen = false, onMobileClose
         { path: '/admin/org-approvals', label: 'Org Approvals', icon: CheckSquare },
         { path: '/admin/batch-monitor', label: 'Batch Monitor', icon: Layers },
         { path: '/admin/sdc-verification', label: 'SDC Verification', icon: ShieldCheck },
-{ path: '/admin/user-list', label: 'User List', icon: UserSearch },
+        { path: '/admin/user-list', label: 'User List', icon: UserSearch },
+        { path: '/admin/email-drafts', label: 'Email Drafts', icon: Mail },
+        { path: '/admin/product-warranty', label: 'Warranty Review', icon: Package },
         { path: '/admin/promote-super-admin', label: 'Promote Admin', icon: UserCog },
         { path: '/admin/verifiers', label: 'Verifiers', icon: Building2 },
         { path: '/admin/disputes', label: 'Disputes', icon: AlertTriangle },

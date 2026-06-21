@@ -89,6 +89,10 @@ import SDCVerification from '@/pages/admin/SDCVerification';
 import PromoteSuperAdmin from '@/pages/admin/PromoteSuperAdmin';
 import CreateSuperAdmin from '@/pages/admin/CreateSuperAdmin';
 import AllUsersList from '@/pages/admin/AllUsersList';
+import EmailDrafts from '@/pages/admin/EmailDrafts';
+import ProductWarrantyAdmin from '@/pages/admin/ProductWarrantyAdmin';
+import SendManualVerification from '@/pages/org/SendManualVerification';
+import ProductWarrantyUpload from '@/pages/org/ProductWarrantyUpload';
 
 const ProtectedRoute = ({ children }) => {
   const { isAuthenticated, loading } = useAuth();
@@ -175,6 +179,8 @@ const AnimatedRoutes = () => {
           <Route path="/org/product/template" element={<ProductTemplate />} />
           <Route path="/org/product/costing" element={<ProductCostBreakdown />} />
           <Route path="/org/product/certificate-preview" element={<ProductCertificatePreview />} />
+          <Route path="/org/product/warranty" element={<ProtectedRoute><ProductWarrantyUpload /></ProtectedRoute>} />
+          <Route path="/org/send-manual-verification" element={<ProtectedRoute><SendManualVerification /></ProtectedRoute>} />
 
           {/* ── QR routes ── */}
           <Route path="/qr/scan" element={<QRScanner />} />
@@ -218,6 +224,8 @@ const AnimatedRoutes = () => {
           <Route path="/admin/promote-super-admin" element={<ProtectedRoute><AdminRoute><PromoteSuperAdmin /></AdminRoute></ProtectedRoute>} />
           <Route path="/admin/create-super-admin" element={<ProtectedRoute><AdminRoute><CreateSuperAdmin /></AdminRoute></ProtectedRoute>} />
           <Route path="/admin/user-list" element={<ProtectedRoute><AdminRoute><AllUsersList /></AdminRoute></ProtectedRoute>} />
+          <Route path="/admin/email-drafts" element={<ProtectedRoute><AdminRoute><EmailDrafts /></AdminRoute></ProtectedRoute>} />
+          <Route path="/admin/product-warranty" element={<ProtectedRoute><AdminRoute><ProductWarrantyAdmin /></AdminRoute></ProtectedRoute>} />
         </Routes>
       </div>
     </AnimatePresence>

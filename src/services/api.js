@@ -449,6 +449,70 @@ export const verificationAPI = {
     verificationApi.put(`/verification/templates/${templateId}`, payload),
   getTemplateHistory: (templateId) =>
     verificationApi.get(`/verification/templates/${templateId}/history`),
+
+  // ── Third-party verifiers ──────────────────────────────────────────────────
+  getThirdPartyVerifiers: (batchId) =>
+    verificationApi.get(`/verification/batches/${batchId}/third-party-verifiers`),
+
+  // ── Bulk manual verification emails ───────────────────────────────────────
+  sendBulkManualVerification: (payload) =>
+    verificationApi.post('/verification/manual/send-bulk', payload),
+
+  // ── Resend manual verification link ───────────────────────────────────────
+  resendManualVerification: (requestId) =>
+    verificationApi.post(`/verification/manual/resend/${requestId}`),
+
+  // ── Email Drafts ──────────────────────────────────────────────────────────
+  createEmailDraft: (payload) =>
+    verificationApi.post('/verification/email-drafts', cleanObject({
+      verification_type: payload.verification_type,
+      subject: payload.subject,
+      body: payload.body,
+      extra_fields: payload.extra_fields || {},
+    })),
+
+  getEmailDraftsByType: (verificationType) =>
+    verificationApi.get(`/verification/email-drafts/${encodeURIComponent(verificationType)}`),
+
+  updateEmailDraft: (draftId, payload) =>
+    verificationApi.put(`/verification/email-drafts/${draftId}`, cleanObject({
+      subject: payload.subject,
+      body: payload.body,
+      extra_fields: payload.extra_fields || {},
+    })),
+
+  deleteEmailDraft: (draftId) =>
+    verificationApi.delete(`/verification/email-drafts/${draftId}`),
+
+  // ── Run automatic verification ────────────────────────────────────────────
+  runAutoVerification: (verificationTypeName, userId) =>
+    verificationApi.post(`/verification/verification/automatic/${verificationTypeName}/${userId}`),
+
+  // ── Product Warranty ──────────────────────────────────────────────────────
+  downloadWarrantyTemplate: () =>
+    verificationApi.get('/verification/products/warranty-template', { responseType: 'blob' }),
+
+  uploadWarrantyExcel: (file, batchName, description = '', onProgress) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('batch_name', batchName);
+    if (description) formData.append('description', description);
+    return verificationApi.post('/verification/products/warranty-upload', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      onUploadProgress: onProgress
+        ? (event) => onProgress(Math.round((event.loaded * 100) / (event.total || 1)))
+        : undefined,
+    });
+  },
+
+  getWarrantyStatus: (batchId) =>
+    verificationApi.get(`/verification/products/warranty/${batchId}`),
+
+  approveRejectWarranty: (productId, status, reason = '') => {
+    const payload = { status };
+    if (reason) payload.reason = reason;
+    return verificationApi.patch(`/verification/products/warranty/${productId}/status`, payload);
+  },
 };
 
 export const healthCheck = () => api.get('/health');
