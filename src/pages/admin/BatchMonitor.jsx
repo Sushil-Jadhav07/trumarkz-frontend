@@ -10,7 +10,7 @@ import { Modal } from '@/components/ui/Modal';
 import { Input } from '@/components/ui/Input';
 import { verificationAPI, getApiError, triggerBlobDownload } from '@/services/api';
 import {
-  CheckCircle, Clock, Download, Eye, FileText, Filter, IdCard,
+  ArrowRight, CheckCircle, ChevronLeft, Clock, Download, Eye, FileText, Filter, IdCard,
   Mail, MoreVertical, Package, Pencil, QrCode, RefreshCw, Send, Upload, User, Users, XCircle,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -146,151 +146,223 @@ const groupByBatch = (records) => {
   return Object.values(batches).sort((a, b) => b.pending - a.pending || b.total - a.total);
 };
 
-// ── Select-Verifier sub-modal ─────────────────────────────────────────────────
-const SelectVerifierModal = ({ isOpen, onClose, onConfirm, batchName, sending }) => {
-  const [selected, setSelected] = useState(null);
-  const [activeTab, setActiveTab] = useState('verifier');
-  const [subject, setSubject] = useState('');
-  const [body, setBody] = useState('');
-  const [manualTypes, setManualTypes] = useState([]);
-  const [typesLoading, setTypesLoading] = useState(false);
-  const [editedEmail, setEditedEmail] = useState('');
-  const [editingEmail, setEditingEmail] = useState(false);
+// ── Select-Verifier sub-modal (multi-step wizard) ────────────────────────────
+const SelectVerifierModal = ({ isOpen, onClose, onBulkSent, batch }) => {
+  const [groups, setGroups] = useState([]);
+  const [loadingVerifiers, setLoadingVerifiers] = useState(false);
+  const [stepIndex, setStepIndex] = useState(0);
+  const [stepData, setStepData] = useState({});
+  const [activeTab, setActiveTab] = useState('email');
+  const [drafts, setDrafts] = useState([]);
+  const [loadingDrafts, setLoadingDrafts] = useState(false);
+  const [sending, setSending] = useState(false);
 
-  const LINK_PLACEHOLDER = MANUAL_UPLOAD_LINK_PLACEHOLDER;
-  const frontendBase = import.meta.env.VITE_FRONTEND_URL || window.location.origin;
-  const LINK_PREVIEW = `${frontendBase}/upload?batch=${encodeURIComponent(batchName || '')}&token={generated-on-send}`;
-
-  const buildBody = (name, uploadUrl) =>
-    `Hi Team,\n\nPlease process the verification batch: ${name}.\n\nUpload the verified report using this secure one-time link:\n${uploadUrl}\n\nKindly upload all relevant verification documents using the one-time link above.\n\nRegards,\nTruMarkZ Admin`;
-
+  const defaultSubject = (label) => `Verification Request: ${label}`;
+  const defaultBody = (label) =>
+    `Hi Team,\n\nPlease process the verification for: ${label}.\n\nUpload your verified report using the secure one-time link provided at the bottom of this email.\n\nKindly complete the verification and upload the documents.\n\nRegards,\nTruMarkZ Admin`;
 
   useEffect(() => {
-    setSubject(`Verification Batch Handoff: ${batchName}`);
-    setBody(buildBody(batchName, LINK_PREVIEW));
-    setSelected(null);
-  }, [batchName]);
-
-  useEffect(() => {
-    if (!isOpen) return;
-    setTypesLoading(true);
-    verificationAPI.getVerificationTypes({})
+    if (!isOpen || !batch?.id) return;
+    setStepIndex(0);
+    setStepData({});
+    setActiveTab('email');
+    setDrafts([]);
+    setLoadingVerifiers(true);
+    verificationAPI.getThirdPartyVerifiers(batch.id)
       .then(({ data }) => {
-        const list = Array.isArray(data)
-          ? data
-          : (data?.verification_types || data?.types || data?.items || []);
-        setManualTypes(list.filter((t) => t.label === 'manual' && t.email_address));
+        const raw = data?.third_party_verifiers || [];
+        const map = {};
+        raw.forEach((v) => {
+          if (!map[v.verification_name]) {
+            map[v.verification_name] = { verification_name: v.verification_name, label: v.label, emails: [] };
+          }
+          if (v.email_address && !map[v.verification_name].emails.includes(v.email_address)) {
+            map[v.verification_name].emails.push(v.email_address);
+          }
+        });
+        setGroups(Object.values(map));
       })
-      .catch(() => setManualTypes([]))
-      .finally(() => setTypesLoading(false));
-  }, [isOpen]);
+      .catch(() => toast.error('Failed to load verifiers'))
+      .finally(() => setLoadingVerifiers(false));
+  }, [isOpen, batch?.id]);
+
+  const currentGroup = groups[stepIndex] || null;
+  const isLastStep = stepIndex === groups.length - 1;
+
+  const currentData = stepData[currentGroup?.verification_name] || {
+    selectedEmail: currentGroup?.emails?.[0] || '',
+    subject: defaultSubject(currentGroup?.label || ''),
+    body: defaultBody(currentGroup?.label || ''),
+    saveAsDraft: false,
+  };
+
+  const updateStep = (patch) => {
+    if (!currentGroup) return;
+    setStepData((prev) => ({
+      ...prev,
+      [currentGroup.verification_name]: { ...currentData, ...patch },
+    }));
+  };
+
+  useEffect(() => {
+    if (!isOpen || !currentGroup) return;
+    setLoadingDrafts(true);
+    setDrafts([]);
+    verificationAPI.getEmailDraftsByType(currentGroup.verification_name)
+      .then(({ data }) => setDrafts(Array.isArray(data) ? data : []))
+      .catch(() => setDrafts([]))
+      .finally(() => setLoadingDrafts(false));
+  }, [isOpen, stepIndex]);
+
+  const handleNext = () => {
+    if (currentGroup && !stepData[currentGroup.verification_name]) {
+      setStepData((prev) => ({ ...prev, [currentGroup.verification_name]: currentData }));
+    }
+    if (isLastStep) {
+      handleSendAll();
+    } else {
+      setStepIndex((p) => p + 1);
+      setActiveTab('email');
+    }
+  };
+
+  const handleSendAll = async () => {
+    const allData = { ...stepData, ...(currentGroup ? { [currentGroup.verification_name]: currentData } : {}) };
+    setSending(true);
+    try {
+      const verifiersPayload = groups.map((g) => {
+        const d = allData[g.verification_name] || { selectedEmail: g.emails[0] || '', subject: defaultSubject(g.label), body: defaultBody(g.label) };
+        return { verification_type_name: g.verification_name, verifier_email: d.selectedEmail, email_subject: d.subject, email_body: d.body };
+      });
+      const { data: result } = await verificationAPI.sendBulkManualVerification({ batch_id: batch.id, verifiers: verifiersPayload });
+      await Promise.allSettled(
+        groups.filter((g) => allData[g.verification_name]?.saveAsDraft).map((g) => {
+          const d = allData[g.verification_name];
+          return verificationAPI.createEmailDraft({ verification_type: g.verification_name, subject: d.subject, body: d.body });
+        })
+      );
+      toast.success(`Sent to ${result.total_sent ?? verifiersPayload.length} verifier(s)`);
+      onBulkSent?.(result);
+      onClose();
+    } catch (err) {
+      toast.error(getApiError(err, 'Failed to send verification emails'));
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const canProceed = !!(currentData.selectedEmail && currentData.subject.trim() && currentData.body.trim());
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Select Third-Party Verifier" size="xl">
-      <div className="space-y-5">
+    <Modal isOpen={isOpen} onClose={onClose} title="Send to Third-Party Verifiers" size="xl">
+      <div className="space-y-4">
         <div className="rounded-2xl border border-blue-100 bg-gradient-to-r from-blue-50 to-indigo-50 px-4 py-3">
           <p className="text-xs uppercase tracking-wider text-blue-600 font-semibold font-inter">Batch Handoff</p>
-          <p className="text-sm text-brand-dark font-semibold font-inter mt-1">{batchName}</p>
+          <p className="text-sm text-brand-dark font-semibold font-inter mt-1">{batch?.name}</p>
         </div>
 
-        <div className="flex gap-1 bg-gray-100 p-1 rounded-xl w-full">
-          <button type="button" onClick={() => setActiveTab('verifier')} className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium font-inter transition-all ${activeTab === 'verifier' ? 'bg-white text-brand-dark shadow-sm' : 'text-gray-500 hover:text-brand-dark'}`}>
-            Select Verifier
-          </button>
-          <button type="button" onClick={() => setActiveTab('template')} className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium font-inter transition-all ${activeTab === 'template' ? 'bg-white text-brand-dark shadow-sm' : 'text-gray-500 hover:text-brand-dark'}`}>
-            Mail Template
-          </button>
-        </div>
+        {loadingVerifiers ? (
+          <div className="flex flex-col items-center justify-center py-10 gap-3">
+            <RefreshCw size={22} className="animate-spin text-brand-blue" />
+            <p className="text-sm text-gray-400 font-inter">Loading verifiers...</p>
+          </div>
+        ) : groups.length === 0 ? (
+          <div className="text-center py-10">
+            <p className="text-sm text-gray-400 font-inter">No manual verification types assigned to this batch.</p>
+          </div>
+        ) : (
+          <>
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs text-gray-400 font-inter uppercase tracking-wider">Step {stepIndex + 1} of {groups.length}</p>
+                <p className="font-sora font-semibold text-brand-dark mt-0.5">{currentGroup?.label}</p>
+              </div>
+              <div className="flex gap-1.5 items-center">
+                {groups.map((g, i) => (
+                  <div key={g.verification_name} className={`rounded-full transition-all ${i === stepIndex ? 'w-5 h-2 bg-brand-blue' : i < stepIndex ? 'w-2 h-2 bg-blue-300' : 'w-2 h-2 bg-gray-200'}`} />
+                ))}
+              </div>
+            </div>
 
-        {activeTab === 'verifier' ? (
-          <div className="space-y-3">
-            <div className="space-y-2 max-h-[260px] overflow-y-auto pr-1">
-              {typesLoading ? (
-                <p className="text-sm text-gray-400 font-inter text-center py-6">Loading verifiers…</p>
-              ) : manualTypes.length === 0 ? (
-                <p className="text-sm text-gray-400 font-inter text-center py-6">No manual verification types found.</p>
-              ) : manualTypes.map((v) => (
-                <button
-                  key={v.id}
-                  onClick={() => { setSelected(v); setEditedEmail(v.email_address || ''); setEditingEmail(false); }}
-                  className={`w-full flex items-center gap-4 p-4 rounded-2xl border transition-all text-left ${selected?.id === v.id ? 'border-brand-blue bg-blue-50 shadow-sm' : 'border-gray-200 hover:border-brand-blue/40 hover:bg-gray-50'}`}
-                >
-                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${selected?.id === v.id ? 'bg-brand-blue text-white' : 'bg-brand-blue/10 text-brand-blue'}`}>
-                    <Mail size={16} />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold text-brand-dark font-inter truncate">{v.name}</p>
-                    <p className="text-xs text-gray-500 font-inter truncate">{v.email_address}</p>
-                  </div>
-                  {selected?.id === v.id && <CheckCircle size={16} className="text-brand-blue shrink-0 ml-auto" />}
+            <div className="flex gap-1 bg-gray-100 p-1 rounded-xl">
+              {['email', 'template'].map((tab) => (
+                <button key={tab} type="button" onClick={() => setActiveTab(tab)}
+                  className={`flex-1 py-2 rounded-lg text-sm font-medium font-inter transition-all ${activeTab === tab ? 'bg-white text-brand-dark shadow-sm' : 'text-gray-500 hover:text-brand-dark'}`}>
+                  {tab === 'email' ? 'Select Verifier' : 'Mail Template'}
                 </button>
               ))}
             </div>
 
-            {selected && (
-              <div className="rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 space-y-1">
-                <p className="text-[11px] uppercase tracking-wider text-gray-500 font-semibold font-inter">Recipient Email</p>
-                {editingEmail ? (
-                  <div className="flex items-center gap-2 mt-1">
-                    <input
-                      autoFocus
-                      type="email"
-                      value={editedEmail}
-                      onChange={(e) => setEditedEmail(e.target.value)}
-                      onBlur={() => setEditingEmail(false)}
-                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === 'Escape') setEditingEmail(false); }}
-                      className="flex-1 rounded-lg border border-brand-blue/40 bg-white px-3 py-1.5 text-sm font-inter focus:outline-none focus:ring-2 focus:ring-brand-blue/30"
-                    />
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-2 mt-1">
-                    <p className="flex-1 text-sm text-brand-dark font-inter truncate">{editedEmail}</p>
-                    <button
-                      type="button"
-                      onClick={() => setEditingEmail(true)}
-                      className="shrink-0 p-1 rounded-lg hover:bg-gray-200 text-gray-400 hover:text-brand-blue transition-colors"
-                    >
-                      <Pencil size={13} />
+            {activeTab === 'email' ? (
+              <div className="space-y-3">
+                <p className="text-xs text-gray-500 font-inter">Select the email address to send this verification request to:</p>
+                <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1">
+                  {currentGroup?.emails.map((email) => (
+                    <button key={email} type="button" onClick={() => updateStep({ selectedEmail: email })}
+                      className={`w-full flex items-center gap-4 p-4 rounded-2xl border transition-all text-left ${currentData.selectedEmail === email ? 'border-brand-blue bg-blue-50 shadow-sm' : 'border-gray-200 hover:border-brand-blue/40 hover:bg-gray-50'}`}>
+                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${currentData.selectedEmail === email ? 'bg-brand-blue text-white' : 'bg-brand-blue/10 text-brand-blue'}`}>
+                        <Mail size={16} />
+                      </div>
+                      <p className="flex-1 text-sm font-medium text-brand-dark font-inter truncate">{email}</p>
+                      {currentData.selectedEmail === email && <CheckCircle size={16} className="text-brand-blue shrink-0" />}
                     </button>
+                  ))}
+                </div>
+                <label className="flex items-center gap-2.5 cursor-pointer select-none group">
+                  <input type="checkbox" checked={currentData.saveAsDraft} onChange={(e) => updateStep({ saveAsDraft: e.target.checked })}
+                    className="w-4 h-4 rounded border-gray-300 accent-brand-blue cursor-pointer" />
+                  <span className="text-sm font-inter text-gray-600 group-hover:text-brand-dark">Save this template as a draft</span>
+                </label>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {(loadingDrafts || drafts.length > 0) && (
+                  <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
+                    <p className="text-xs font-semibold text-gray-500 font-inter uppercase tracking-wider mb-2">Load from saved drafts</p>
+                    {loadingDrafts ? (
+                      <p className="text-xs text-gray-400 font-inter">Loading drafts...</p>
+                    ) : (
+                      <div className="flex flex-wrap gap-2">
+                        {drafts.map((d) => (
+                          <button key={d.id} type="button" onClick={() => { updateStep({ subject: d.subject, body: d.body }); toast.success('Draft applied'); }}
+                            className="px-3 py-1.5 rounded-lg border border-blue-100 bg-white text-xs font-medium text-brand-blue hover:bg-blue-50 font-inter transition-colors">
+                            {d.subject || 'Draft'}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )}
+                <div>
+                  <label className="block text-xs text-gray-500 font-inter mb-1">Subject</label>
+                  <input value={currentData.subject} onChange={(e) => updateStep({ subject: e.target.value })}
+                    className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm font-inter focus:outline-none focus:ring-2 focus:ring-brand-blue/30" />
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-500 font-inter mb-1">Body</label>
+                  <textarea rows={8} value={currentData.body} onChange={(e) => updateStep({ body: e.target.value })}
+                    className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm font-inter resize-none focus:outline-none focus:ring-2 focus:ring-brand-blue/30" />
+                </div>
               </div>
             )}
-          </div>
-        ) : (
-          <div className="space-y-3">
-            <div className="rounded-xl border border-gray-200 p-3 bg-gray-50">
-              <p className="text-[11px] uppercase tracking-wider text-gray-500 font-semibold font-inter">Template Tips</p>
-              <p className="text-xs text-gray-500 font-inter mt-1">Keep the upload URL in the body. A real one-time token link will be inserted when you send the request.</p>
-            </div>
-            <div>
-              <label className="block text-xs text-gray-500 font-inter mb-1">Subject</label>
-              <input value={subject} onChange={(e) => setSubject(e.target.value)} className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm font-inter focus:outline-none focus:ring-2 focus:ring-brand-blue" />
-            </div>
-            <div>
-              <label className="block text-xs text-gray-500 font-inter mb-1">Body</label>
-              <textarea rows={10} value={body} onChange={(e) => setBody(e.target.value)} className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm font-inter resize-none focus:outline-none focus:ring-2 focus:ring-brand-blue" />
-            </div>
-          </div>
-        )}
 
-        <div className="flex gap-2 pt-1">
-          <Button variant="ghost" onClick={onClose} className="flex-1">Cancel</Button>
-          <Button
-            variant="primary"
-            icon={Mail}
-            className="flex-1"
-            disabled={!selected || !editedEmail.trim() || sending || !subject.trim() || !body.trim()}
-            onClick={() => onConfirm({ ...selected, email_address: editedEmail.trim() }, { subject: subject.trim(), body: body.trim() })}
-          >
-            {sending ? 'Sending�' : 'Send Mail'}
-          </Button>
-        </div>
+            <div className="flex gap-2 pt-1">
+              <Button variant="ghost" onClick={onClose} className="flex-1" disabled={sending}>Cancel</Button>
+              {stepIndex > 0 && (
+                <Button variant="outline" icon={ChevronLeft} disabled={sending} onClick={() => { setStepIndex((p) => p - 1); setActiveTab('email'); }}>Back</Button>
+              )}
+              <Button variant="primary" icon={sending ? RefreshCw : isLastStep ? Send : ArrowRight} className="flex-1" disabled={!canProceed || sending} onClick={handleNext}>
+                {sending ? 'Sending...' : isLastStep ? 'Send All' : 'Next'}
+              </Button>
+            </div>
+          </>
+        )}
       </div>
     </Modal>
   );
-};
 
+
+};
 // -- Upload-Verified sub-modal ------------------------------------------------
 const UploadVerifiedModal = ({ isOpen, onClose, onConfirm, batchName, uploading }) => {
   const fileRef = useRef(null);
@@ -425,7 +497,7 @@ export const BatchMonitor = () => {
   const [workflowByBatch, setWorkflowByBatch] = useState(() => getStoredWorkflow());
 
   // Action loading states
-  const [mailSending, setMailSending] = useState(false);
+  const [resending, setResending] = useState(null); // request token being resent
   const [uploading, setUploading] = useState(false);
   const [generatingAssets, setGeneratingAssets] = useState(false);
   const [sendingToOrg, setSendingToOrg] = useState(false);
@@ -485,7 +557,12 @@ export const BatchMonitor = () => {
       verifiedReportUrl: stored.verifiedReportUrl || null,
       editNotes: edited.notes || '',
       uploadLink: stored.uploadLink || null,
-      verifierToken: stored.verifierToken || null,
+      sentRequests: stored.sentRequests || (stored.requestId ? [{
+        verification_type_name: 'Manual Verification',
+        verifier_email: stored.verifierEmail || '',
+        request_id: stored.requestId,
+        status: 'sent',
+      }] : []),
     };
   });
 
@@ -519,59 +596,24 @@ export const BatchMonitor = () => {
     setVerifierModalOpen(true);
   };
 
-  const handleConfirmMailVerifier = async (verifier, template) => {
-    const batch = verifierModalBatch;
-    const verifierEmail = verifier.email_address || verifier.email;
-    if (!batch || !verifierEmail) {
-      toast.error('Missing batch or verifier email.');
-      return;
-    }
-    setMailSending(true);
+  const handleBulkSent = (batch, result) => {
+    const sentRequests = result?.results || [];
+    updateBatchWorkflow(batch.id, {
+      status: 'send_to_verifier',
+      sentRequests,
+      uploadLink: sentRequests[0]?.upload_link || null,
+    });
+  };
+
+  const handleResend = async (requestId, verifierEmail) => {
+    setResending(requestId);
     try {
-      const frontendOrigin = import.meta.env.VITE_FRONTEND_URL || window.location.origin;
-
-      const { data: reqData } = await verificationAPI.requestManualVerification({
-        batch_id:                 batch.id,
-        verification_type_name:   verifier.name,
-        verifier_email:           verifierEmail,
-        frontend_url:             frontendOrigin,
-        email_subject:            template.subject,
-        email_html:               buildHtmlBody(batch.name, MANUAL_UPLOAD_LINK_PLACEHOLDER),
-      });
-
-      const token = reqData?.token;
-      const requestId = reqData?.request_id;
-      const expiresAt = reqData?.expires_at;
-      const responseEmail = reqData?.verifier_email || verifierEmail;
-
-      if (!token || !requestId) {
-        throw new Error('Manual verification response did not include the required token or request ID.');
-      }
-
-      const uploadLink = `${frontendOrigin}/upload?batch=${encodeURIComponent(batch.name)}&token=${encodeURIComponent(token)}`;
-
-      const finalBody = template.body
-        .replaceAll(MANUAL_UPLOAD_LINK_PLACEHOLDER, uploadLink)
-        .replace(/https?:\/\/[^\s"'<]*\/upload\?[^\s"'<]*/g, uploadLink)
-        .replace(/\{generated-on-send\}/g, token);
-
-      updateBatchWorkflow(batch.id, {
-        status:        'send_to_verifier',
-        mailTemplate:  { ...template, body: finalBody },
-        verifierToken: token,
-        uploadLink,
-        verifierEmail: responseEmail,
-        requestId,
-        expiresAt,
-      });
-
-      toast.success(`Manual verification request sent to ${verifier.name}`);
-      setVerifierModalOpen(false);
-      setVerifierModalBatch(null);
+      await verificationAPI.resendManualVerification(requestId);
+      toast.success(`Verification link resent to ${verifierEmail}`);
     } catch (err) {
-      toast.error(getApiError(err, 'Could not generate upload token. The request was not marked as sent.'));
+      toast.error(getApiError(err, 'Failed to resend verification link'));
     } finally {
-      setMailSending(false);
+      setResending(null);
     }
   };
 
@@ -1051,11 +1093,11 @@ export const BatchMonitor = () => {
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-1 gap-2">
 
-                  {/* Mail verifier — only when pending */}
-                  {selectedBatch.status === 'pending' && (
+                  {/* Mail verifier — pending or resend from send_to_verifier */}
+                  {(selectedBatch.status === 'pending' || selectedBatch.status === 'send_to_verifier') && (
                     <Button variant="outline" size="sm" icon={Mail} className="justify-start"
                       onClick={() => openMailVerifierModal(selectedBatch)}>
-                      Mail to Third-Party Verifier
+                      {selectedBatch.status === 'send_to_verifier' ? 'Send More Verifiers' : 'Mail to Third-Party Verifier'}
                     </Button>
                   )}
                   <Button variant="outline" size="sm" icon={Pencil} className="justify-start" onClick={() => openEditBatchModal(selectedBatch)}>
@@ -1091,6 +1133,51 @@ export const BatchMonitor = () => {
                 </div>
               </div>
             </div>
+
+            {/* ── Resend panel — shown when batch is send_to_verifier ── */}
+            {selectedBatch.status === 'send_to_verifier' && selectedBatch.sentRequests?.length > 0 && (
+              <div className="rounded-2xl border border-blue-100 bg-white p-5">
+                <div className="mb-4">
+                  <p className="font-sora font-semibold text-brand-dark">Manual Verifications Sent</p>
+                  <p className="text-xs text-gray-400 font-inter mt-1">Resend the link if a verifier didn't receive it.</p>
+                </div>
+                <div className="space-y-3">
+                  {selectedBatch.sentRequests.map((req) => (
+                    <div
+                      key={req.request_id || req.verification_type_name}
+                      className={`flex items-center justify-between gap-3 rounded-xl border px-4 py-3 ${
+                        req.status === 'failed' ? 'border-red-100 bg-red-50' : 'border-blue-100 bg-blue-50/40'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${req.status === 'failed' ? 'bg-red-100 text-red-500' : 'bg-brand-blue/10 text-brand-blue'}`}>
+                          <Mail size={14} />
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold text-brand-dark font-inter truncate">{req.verification_type_name}</p>
+                          <p className="text-xs text-gray-500 font-inter truncate">{req.verifier_email}</p>
+                          {req.error && <p className="text-xs text-red-500 font-inter mt-0.5">{req.error}</p>}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <Badge status={req.status === 'failed' ? 'error' : 'success'}>{req.status || 'sent'}</Badge>
+                        {req.request_id && (
+                          <button
+                            type="button"
+                            disabled={resending === req.request_id}
+                            onClick={() => handleResend(req.request_id, req.verifier_email)}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-blue-200 bg-white text-xs font-semibold font-inter text-brand-blue hover:bg-blue-50 disabled:opacity-50 transition-colors"
+                          >
+                            <RefreshCw size={12} className={resending === req.request_id ? 'animate-spin' : ''} />
+                            {resending === req.request_id ? 'Resending...' : 'Resend'}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Records table */}
             <div className="rounded-2xl border border-gray-100 bg-white overflow-hidden">
@@ -1164,9 +1251,8 @@ export const BatchMonitor = () => {
       <SelectVerifierModal
         isOpen={verifierModalOpen}
         onClose={() => { setVerifierModalOpen(false); setVerifierModalBatch(null); }}
-        onConfirm={handleConfirmMailVerifier}
-        batchName={verifierModalBatch?.name || ''}
-        sending={mailSending}
+        onBulkSent={(result) => { handleBulkSent(verifierModalBatch, result); setVerifierModalOpen(false); setVerifierModalBatch(null); }}
+        batch={verifierModalBatch}
       />
 
       {/* ── Upload Verified Sub-Modal ────────────────────────────────────── */}
