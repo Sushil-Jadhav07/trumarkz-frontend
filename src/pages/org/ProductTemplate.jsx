@@ -8,7 +8,7 @@ import { Card } from '@/components/ui/Card';
 import { Modal } from '@/components/ui/Modal';
 import { StepWizard } from '@/components/ui/StepWizard';
 import { FileUpload } from '@/components/ui/FileUpload';
-import { ArrowRight, Download, Plus, RefreshCw, Upload, X } from 'lucide-react';
+import { ArrowRight, Download, Plus, Upload, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useApp } from '@/context/AppContext';
 import {
@@ -18,7 +18,7 @@ import {
   WARRANTY_SERVICE_HEADERS,
   VERIFICATION_SERVICE_HEADERS,
 } from '@/data/productVerificationFlow';
-import { verificationAPI, triggerBlobDownload, getApiError } from '@/services/api';
+import { verificationAPI, triggerBlobDownload } from '@/services/api';
 
 const sanitizeKey = (v) =>
   String(v || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
@@ -30,7 +30,9 @@ const downloadLocalFallback = (headers, fileName = 'product-template') => {
   const buildExample = (h) => {
     const k = h.toLowerCase();
     if (k.includes('product')) return 'Example Product';
+    if (k === 'category') return 'Electronics';
     if (k.includes('serial')) return 'SN-001';
+    if (k.includes('purchase_date')) return '2026-05-16';
     if (k.includes('warranty_start')) return '2026-05-16';
     if (k.includes('warranty_end')) return '2027-05-16';
     if (k.includes('invoice')) return 'INV-001';
@@ -65,7 +67,8 @@ export const ProductTemplate = () => {
   const [fieldInput, setFieldInput] = useState('');
   const [modalOpen, setModalOpen] = useState(false);
   const [downloading, setDownloading] = useState(false);
-  const [excelFile, setExcelFile] = useState(null);
+const [excelFile, setExcelFile] = useState(null);
+  const isWarranty = selectedProductService?.id === 'warranty';
   const [batchNameValue, setBatchNameValue] = useState(() => {
     const d = new Date();
     const sector = selectedProductSector?.title || 'Product';
@@ -99,21 +102,20 @@ export const ProductTemplate = () => {
   const handleRemoveField = (key) => setCustomFields((prev) => prev.filter((f) => f !== key));
 
   const handleDownload = async () => {
-    if (!selectedProductSector?.categoryId) {
-      toast.error('Sector category not found — please go back and re-select');
-      return;
-    }
     setDownloading(true);
     try {
-      const normalised = templateHeaders.map((h) =>
-        h.trim().toLowerCase().replace(/\s+/g, '_')
-      );
-      const { data } = await verificationAPI.generateProductTemplate(
-        selectedProductSector.categoryId,
-        normalised
-      );
-      triggerBlobDownload(data, `${batchNameValue || 'product-template'}.xlsx`);
-      toast.success('Template downloaded');
+      if (isWarranty) {
+        const { data } = await verificationAPI.downloadWarrantyTemplate();
+        triggerBlobDownload(data, `${batchNameValue || 'warranty-template'}.xlsx`);
+        toast.success('Template downloaded');
+      } else {
+        const normalised = templateHeaders.map((h) =>
+          h.trim().toLowerCase().replace(/\s+/g, '_')
+        );
+        const { data } = await verificationAPI.generateProductTemplate(normalised);
+        triggerBlobDownload(data, `${batchNameValue || 'product-template'}.xlsx`);
+        toast.success('Template downloaded');
+      }
     } catch {
       downloadLocalFallback(templateHeaders, batchNameValue || 'product-template');
       toast.success('Template downloaded (local fallback)');
@@ -129,6 +131,16 @@ export const ProductTemplate = () => {
       const workbook = XLSX.read(arrayBuffer, { type: 'array' });
       const worksheet = workbook.Sheets[workbook.SheetNames[0]];
       const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+      const uploadedHeaders = (rows[0] || []).map((h) => sanitizeKey(h)).filter(Boolean);
+
+      if (!isWarranty) {
+        const missingHeaders = VERIFICATION_SERVICE_HEADERS.filter((h) => !uploadedHeaders.includes(h));
+        if (missingHeaders.length > 0) {
+          toast.error(`Missing required columns: ${missingHeaders.join(', ')}`);
+          return;
+        }
+      }
+
       const recordCount = rows
         .slice(1)
         .filter((row) => Array.isArray(row) && row.some((cell) => String(cell ?? '').trim() !== ''))
@@ -222,7 +234,13 @@ export const ProductTemplate = () => {
               </div>
             </div>
 
-            <Button variant="primary" size="lg" className="w-full" onClick={handleContinue} icon={ArrowRight}>
+            <Button
+              variant="primary"
+              size="lg"
+              className="w-full"
+              onClick={handleContinue}
+              icon={ArrowRight}
+            >
               Continue
             </Button>
           </Card>

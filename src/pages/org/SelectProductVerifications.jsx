@@ -75,7 +75,7 @@ export const SelectProductVerifications = () => {
       toast.error('Select at least one verification check');
       return;
     }
-    navigate('/org/product/service');
+    navigate('/org/product/template');
   };
 
   return (

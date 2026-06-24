@@ -656,7 +656,6 @@ const ProductBulkPanel = ({ categories, onResult, selectedCategory, selectedServ
   const fileInputRef = useRef(null);
   const [batchName, setBatchName] = useState('');
   const [description, setDescription] = useState('');
-  const [categoryId, setCategoryId] = useState(selectedCategory?.categoryId || '');
   const [numberOfUnits, setNumberOfUnits] = useState('');
   const [visibility, setVisibility] = useState(selectedPermission || 'private');
   const [templateLoading, setTemplateLoading] = useState(false);
@@ -671,10 +670,6 @@ const ProductBulkPanel = ({ categories, onResult, selectedCategory, selectedServ
   const [uploadResult, setUploadResult] = useState(null);
   const [showPreview, setShowPreview] = useState(false);
   const navigate = useNavigate();
-
-  useEffect(() => {
-    if (selectedCategory?.categoryId) setCategoryId(selectedCategory.categoryId);
-  }, [selectedCategory]);
 
   useEffect(() => {
     setTemplateHeaders(
@@ -699,14 +694,13 @@ const ProductBulkPanel = ({ categories, onResult, selectedCategory, selectedServ
 
   const handleSubmit = async () => {
     if (!batchName.trim()) { toast.error('Please enter a batch name'); return; }
-    if (!categoryId) { toast.error('Please select a category'); return; }
     if (!selectedFile) { toast.error('Please select an Excel file'); return; }
     setLoading(true); setUploadProgress(0);
     try {
       const { data } = await verificationAPI.bulkUploadProducts(
         selectedFile,
         batchName.trim(),
-        categoryId,
+        selectedCategory?.title || '',
         description.trim(),
         {
           verificationTypes: getProductVerificationTypes(selectedService),

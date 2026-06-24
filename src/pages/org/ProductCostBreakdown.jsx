@@ -38,32 +38,62 @@ export const ProductCostBreakdown = () => {
     }
   }, [productBatchData, navigate]);
 
-  const sectorName = selectedProductSector?.categoryName || selectedProductSector?.title || '';
+  const sectorKey = [
+    selectedProductSector?.categoryName,
+    selectedProductSector?.title,
+  ]
+    .filter(Boolean)
+    .join(',');
 
   const fetchTypes = useCallback(async () => {
     setTypesLoading(true);
     try {
+      const names = sectorKey ? sectorKey.split(',').filter(Boolean) : [];
+      const readList = (data) =>
+        Array.isArray(data)
+          ? data
+          : data?.verification_types || data?.types || data?.items || [];
+
       const { data } = await verificationAPI.getVerificationTypes({
         category: 'product',
-        industry_type: sectorName ? [sectorName] : undefined,
+        industry_type: names.length > 0 ? names : undefined,
       });
-      const list = Array.isArray(data)
-        ? data
-        : data?.verification_types || data?.types || data?.items || [];
+      let list = readList(data);
+
+      // Fallback to a broader query when the sector alias filter returns no rows,
+      // otherwise costing loses the selected checks even though step 2 stored them.
+      if (list.length === 0 && names.length > 0) {
+        const { data: fallbackData } = await verificationAPI.getVerificationTypes({
+          category: 'product',
+        });
+        list = readList(fallbackData);
+      }
+
       setAllTypes(list);
     } catch (err) {
       toast.error(getApiError(err, 'Failed to load verification type details'));
     } finally {
       setTypesLoading(false);
     }
-  }, [sectorName]);
+  }, [sectorKey]);
 
   useEffect(() => { fetchTypes(); }, [fetchTypes]);
 
-  const selectedChecks = useMemo(
-    () => selectedProductVerifications.map((id) => allTypes.find((t) => t.id === id)).filter(Boolean),
-    [selectedProductVerifications, allTypes]
-  );
+  const selectedChecks = useMemo(() => {
+    const typeMap = new Map(
+      allTypes.flatMap((type) => {
+        const keys = [type?.id, type?.uuid, type?.slug]
+          .filter(Boolean)
+          .map((value) => [String(value), type]);
+        return keys;
+      })
+    );
+
+    return selectedProductVerifications
+      .map((item) => (typeof item === 'object' ? item?.id || item?.uuid || item?.slug : item))
+      .map((id) => typeMap.get(String(id)))
+      .filter(Boolean);
+  }, [selectedProductVerifications, allTypes]);
 
   const recordCount = productBatchData?.recordCount || 0;
   const totalCost = selectedChecks.reduce((sum, item) => sum + ((item.price || 0) * recordCount), 0);

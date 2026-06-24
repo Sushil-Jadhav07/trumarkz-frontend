@@ -12,7 +12,7 @@ import { verificationAPI, getApiError } from '@/services/api';
 import {
   ChevronLeft, ChevronRight, CheckCircle, Clock, Download,
   Eye, FileText, Filter, Package, QrCode, RefreshCw, Upload,
-  User, XCircle, Mail, Play,
+  User, XCircle, Play,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -507,14 +507,6 @@ export const BatchStatus = () => {
                         </td>
                         <td className="p-4 text-right">
                           <div className="flex items-center justify-end gap-2">
-                            <button
-                              onClick={() => navigate(`/org/send-manual-verification?batch_id=${batch.id}`)}
-                              className="inline-flex items-center gap-1 rounded-lg bg-blue-50 px-2.5 py-1.5 text-xs font-medium text-brand-blue transition-colors hover:bg-blue-100"
-                              title="Send manual verification emails"
-                            >
-                              <Mail size={12} />
-                              Manual Email
-                            </button>
                             <button
                               onClick={() => { setSelectedId(batch.id); setSelectedName(batch.name); }}
                               className="inline-flex items-center gap-1 rounded-lg bg-blue-50 px-2.5 py-1.5 text-xs font-medium text-brand-blue transition-colors hover:bg-blue-100"

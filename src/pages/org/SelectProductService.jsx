@@ -33,12 +33,13 @@ export const SelectProductService = () => {
     }
   }, [selectedProductSector, navigate]);
 
-  // Beauty & Cosmetics doesn't support warranty
-  const warrantyDisabled = selectedProductSector?.warrantySupport === 'disabled';
+  const warrantySupport = selectedProductSector?.warrantySupport;
 
-  const availableServices = PRODUCT_SERVICE_OPTIONS.filter(
-    (s) => !(s.id === 'warranty' && warrantyDisabled)
-  );
+  const availableServices = PRODUCT_SERVICE_OPTIONS.filter((s) => {
+    if (s.id === 'verification') return true; // always show
+    if (s.id === 'warranty') return warrantySupport === 'required' || warrantySupport === 'optional';
+    return true;
+  });
 
   const handleSelect = (service) => {
     setSelectedProductService(service);
@@ -51,7 +52,7 @@ export const SelectProductService = () => {
       return;
     }
     toast.success(`${selectedProductService.title} selected`);
-    navigate('/org/product/template');
+    navigate('/org/product/verifications');
   };
 
   return (
@@ -117,10 +118,16 @@ export const SelectProductService = () => {
           })}
         </div>
 
-        {warrantyDisabled && (
+        {warrantySupport === 'disabled' && (
           <p className="mt-3 font-inter text-xs text-slate-400">
             Warranty certificates are not available for the{' '}
-            <span className="font-semibold">{selectedProductSector?.title}</span> sector.
+            <span className="font-semibold">{selectedProductSector?.title}</span> industry type.
+          </p>
+        )}
+        {warrantySupport === 'required' && (
+          <p className="mt-3 font-inter text-xs text-slate-400">
+            Warranty is required for the{' '}
+            <span className="font-semibold">{selectedProductSector?.title}</span> industry type.
           </p>
         )}
 

@@ -242,6 +242,7 @@ export const adminAPI = {
 
 export const verificationAPI = {
   getCategories: () => verificationApi.get('/verification/categories'),
+  getIndustryTypes: () => verificationApi.get('/verification/industry-types'),
 
   uploadSingleHuman: (data) =>
     verificationApi.post(
@@ -306,7 +307,7 @@ export const verificationAPI = {
   bulkUploadProducts: (
     file,
     batchName,
-    categoryId,
+    industryType,
     description = '',
     maybeOptions,
     maybeProgress
@@ -317,7 +318,7 @@ export const verificationAPI = {
     formData.append('file', file);
     formData.append('batch_name', batchName);
     appendFormValue(formData, 'description', description);
-    appendFormValue(formData, 'category_id', categoryId || options.categoryId || options.category_id);
+    appendFormValue(formData, 'industry_type', industryType || options.industryType || options.industry_type);
     appendFormValue(
       formData,
       'credential_visibility',
@@ -349,9 +350,8 @@ export const verificationAPI = {
     });
   },
 
-  generateProductTemplate: (categoryId, headers) => {
+  generateProductTemplate: (headers) => {
     const formData = new FormData();
-    appendFormValue(formData, 'category_id', categoryId);
     appendFormValue(formData, 'headers', Array.isArray(headers) ? headers.join(',') : headers);
 
     return verificationApi.post('/verification/products/template', formData, {

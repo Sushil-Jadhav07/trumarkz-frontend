@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   ArrowRight, BadgeCheck, CheckCircle, Eye, FileBadge2,
-  Package, ShieldCheck, Mail, RefreshCw,
+  Package, ShieldCheck, RefreshCw,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { AuthLayout } from '@/components/layout/AuthLayout';
@@ -18,7 +18,6 @@ import {
   PRODUCT_CERTIFICATE_TEMPLATES,
 } from '@/data/productVerificationFlow';
 import { verificationAPI, getApiError } from '@/services/api';
-import { getProductVerificationTypes } from '@/utils/verificationFlow';
 
 const formatCurrency = (v) => `₹${Number(v).toLocaleString('en-IN')}`;
 
@@ -84,21 +83,15 @@ export const ProductCertificatePreview = () => {
     }
 
     // Product verification: standard bulk upload
-    if (!selectedProductSector?.categoryId) {
-      toast.error('Sector category not found — go back and re-select sector');
-      navigate('/org/product/sector');
-      return;
-    }
-
     setSubmitting(true);
     try {
       const { data } = await verificationAPI.bulkUploadProducts(
         productBatchData.file,
         productBatchData.batchName.trim(),
-        selectedProductSector.categoryId,
+        selectedProductSector.title,
         productBatchData.description || '',
         {
-          verificationTypes: getProductVerificationTypes(selectedProductService),
+          verificationTypes: selectedProductVerifications,
           credentialVisibility,
           templateId: activeTemplate,
         }
@@ -251,16 +244,6 @@ export const ProductCertificatePreview = () => {
                 <span className="rounded-full bg-white px-3 py-1.5 text-sm font-medium text-slate-700">{recordCount} Products</span>
               </div>
               <div className="flex flex-wrap gap-3">
-                {batchId && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    icon={Mail}
-                    onClick={() => navigate(`/org/send-manual-verification?batch_id=${batchId}`)}
-                  >
-                    Send Manual Verification Emails
-                  </Button>
-                )}
                 <Button variant="primary" size="lg" onClick={() => navigate('/org/batch-status')} icon={ArrowRight}>
                   View Batch Status
                 </Button>
@@ -284,204 +267,124 @@ export const ProductCertificatePreview = () => {
 
         <section className="mt-4">
           <PageHeader
-            title={isWarranty ? 'Confirm Warranty Submission' : 'Choose Product Certificate'}
-            subtitle={
-              isWarranty
-                ? 'Review your warranty batch details before submitting for admin review.'
-                : 'Pick the certificate design for this product batch.'
-            }
+            title="Choose Product Certificate"
+            subtitle="Pick the certificate design for this product batch."
           />
         </section>
 
-        {isWarranty ? (
-          // Warranty confirmation view (no template picker needed)
-          <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
-            <Card className="border border-amber-100 p-5 bg-amber-50/20">
-              <div className="flex items-start gap-3 mb-5">
-                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-amber-100 text-amber-600">
-                  <ShieldCheck size={18} />
-                </div>
-                <div>
-                  <p className="text-sm font-semibold text-slate-950">Warranty Review Process</p>
-                  <p className="mt-1 text-sm leading-6 text-slate-500">
-                    Each product will be created with <span className="font-medium">warranty_status = pending</span>.
-                    A super admin will approve or reject each claim individually. You will be able to
-                    track status in the Warranty section after submission.
-                  </p>
-                </div>
-              </div>
-
-              <div className="grid gap-3 sm:grid-cols-2">
-                {[
-                  { label: 'Sector',      value: sectorName },
-                  { label: 'Service',     value: 'Warranty' },
-                  { label: 'Products',    value: recordCount },
-                  { label: 'Visibility',  value: 'Private' },
-                ].map((item) => (
-                  <div key={item.label} className="rounded-2xl border border-amber-100 bg-white px-4 py-4">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-amber-500/70">{item.label}</p>
-                    <p className="mt-2 font-sora font-semibold text-slate-950">{item.value}</p>
-                  </div>
-                ))}
-              </div>
-            </Card>
-
-            <Card className="h-fit border border-amber-100 p-5 xl:sticky xl:top-24">
-              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Batch summary</p>
-              <h3 className="mt-2 font-sora text-lg font-semibold text-slate-950">
-                {productBatchData?.batchName || 'Warranty Batch'}
-              </h3>
-              <div className="mt-4 rounded-2xl bg-amber-50 px-4 py-4 space-y-2">
-                {[
-                  { label: 'Sector',   value: sectorName },
-                  { label: 'Service',  value: 'Warranty' },
-                  { label: 'Products', value: recordCount },
-                ].map((item) => (
-                  <div key={item.label} className="flex items-center justify-between gap-3 text-sm">
-                    <span className="text-slate-500">{item.label}</span>
-                    <span className="font-medium text-slate-950">{item.value}</span>
-                  </div>
-                ))}
-              </div>
-              <div className="mt-5">
-                <Button
-                  variant="primary"
-                  size="lg"
-                  className="w-full"
-                  onClick={handleCreateBatch}
-                  icon={submitting ? RefreshCw : ArrowRight}
-                  disabled={submitting}
-                >
-                  {submitting ? 'Submitting…' : 'Submit Warranty Batch'}
-                </Button>
-              </div>
-            </Card>
-          </div>
-        ) : (
-          // Standard verification template picker
-          <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
-            {/* Certificate template grid */}
-            <div className="space-y-5">
-              <div className="grid gap-4 lg:grid-cols-3">
-                {PRODUCT_CERTIFICATE_TEMPLATES.map((template) => {
-                  const isSelected = activeTemplate === template.id;
-                  return (
-                    <button
-                      key={template.id}
-                      type="button"
-                      onClick={() => setSelectedProductTemplate(template.id)}
-                      className={`overflow-hidden rounded-3xl border p-3 text-left transition-all ${
-                        isSelected
-                          ? 'border-brand-blue bg-blue-50/40 shadow-[0_18px_42px_-36px_rgba(37,99,235,0.42)]'
-                          : 'border-slate-200 bg-white hover:border-blue-200'
-                      }`}
-                    >
-                      <div className="overflow-hidden rounded-2xl border border-slate-100 bg-white">
-                        <img
-                          src={template.image}
-                          alt={template.name}
-                          className="h-[340px] w-full object-cover object-top"
-                          onError={(e) => {
-                            e.target.style.display = 'none';
-                            e.target.parentElement.style.background = '#f1f5f9';
-                            e.target.parentElement.style.height = '340px';
-                            e.target.parentElement.style.display = 'flex';
-                            e.target.parentElement.style.alignItems = 'center';
-                            e.target.parentElement.style.justifyContent = 'center';
-                            e.target.parentElement.innerHTML = `<span style="font-size:12px;color:#94a3b8;font-family:Inter,sans-serif">${template.name}</span>`;
-                          }}
-                        />
+        <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
+          {/* Certificate template grid */}
+          <div className="space-y-5">
+            <div className="grid gap-4 lg:grid-cols-3">
+              {PRODUCT_CERTIFICATE_TEMPLATES.map((template) => {
+                const isSelected = activeTemplate === template.id;
+                return (
+                  <button
+                    key={template.id}
+                    type="button"
+                    onClick={() => setSelectedProductTemplate(template.id)}
+                    className={`overflow-hidden rounded-3xl border p-3 text-left transition-all ${
+                      isSelected
+                        ? 'border-brand-blue bg-blue-50/40 shadow-[0_18px_42px_-36px_rgba(37,99,235,0.42)]'
+                        : 'border-slate-200 bg-white hover:border-blue-200'
+                    }`}
+                  >
+                    <div className="overflow-hidden rounded-2xl border border-slate-100 bg-white">
+                      <img
+                        src={template.image}
+                        alt={template.name}
+                        className="h-[340px] w-full object-cover object-top"
+                      />
+                    </div>
+                    <div className="mt-3 flex items-center justify-between gap-3 px-1">
+                      <div>
+                        <p className="text-sm font-semibold text-slate-950">{template.name}</p>
+                        <p className="mt-1 text-xs text-slate-500">Product certificate</p>
                       </div>
-                      <div className="mt-3 flex items-center justify-between gap-3 px-1">
-                        <div>
-                          <p className="text-sm font-semibold text-slate-950">{template.name}</p>
-                          <p className="mt-1 text-xs text-slate-500">Product verification certificate</p>
-                        </div>
-                        <div className={`flex h-8 w-8 items-center justify-center rounded-full border ${isSelected ? 'border-brand-blue bg-brand-blue text-white' : 'border-slate-200 text-transparent'}`}>
-                          <CheckCircle size={16} />
-                        </div>
+                      <div className={`flex h-8 w-8 items-center justify-center rounded-full border ${isSelected ? 'border-brand-blue bg-brand-blue text-white' : 'border-slate-200 text-transparent'}`}>
+                        <CheckCircle size={16} />
                       </div>
-                    </button>
-                  );
-                })}
-              </div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
 
-              {/* Info cards */}
-              <div className="grid gap-4 md:grid-cols-3">
-                <Card className="border border-blue-100 p-4 shadow-none">
-                  <div className="flex items-center gap-2 text-slate-500">
-                    <FileBadge2 size={16} className="text-brand-blue" />
-                    <span className="text-xs font-semibold uppercase tracking-[0.14em]">Sector</span>
-                  </div>
-                  <p className="mt-3 text-base font-semibold text-slate-950">{sectorName}</p>
-                </Card>
-                <Card className="border border-blue-100 p-4 shadow-none">
-                  <div className="flex items-center gap-2 text-slate-500">
-                    <Eye size={16} className="text-brand-blue" />
-                    <span className="text-xs font-semibold uppercase tracking-[0.14em]">Visibility</span>
-                  </div>
-                  <p className="mt-3 text-base font-semibold text-slate-950 capitalize">{credentialVisibility}</p>
-                </Card>
-                <Card className="border border-blue-100 p-4 shadow-none">
-                  <div className="flex items-center gap-2 text-slate-500">
-                    <Package size={16} className="text-brand-blue" />
-                    <span className="text-xs font-semibold uppercase tracking-[0.14em]">Service</span>
-                  </div>
-                  <p className="mt-3 text-base font-semibold text-slate-950">{serviceName}</p>
-                </Card>
-              </div>
-
+            {/* Info cards */}
+            <div className="grid gap-4 md:grid-cols-3">
               <Card className="border border-blue-100 p-4 shadow-none">
-                <div className="flex items-start gap-3">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-50 text-brand-blue">
-                    <BadgeCheck size={18} />
-                  </div>
-                  <div>
-                    <p className="text-sm font-semibold text-slate-950">Security standard</p>
-                    <p className="mt-1 text-sm leading-6 text-slate-500">
-                      The final certificate uses the selected design while preserving verification data, visibility rule, and batch checks.
-                    </p>
-                  </div>
+                <div className="flex items-center gap-2 text-slate-500">
+                  <FileBadge2 size={16} className="text-brand-blue" />
+                  <span className="text-xs font-semibold uppercase tracking-[0.14em]">Sector</span>
                 </div>
+                <p className="mt-3 text-base font-semibold text-slate-950">{sectorName}</p>
+              </Card>
+              <Card className="border border-blue-100 p-4 shadow-none">
+                <div className="flex items-center gap-2 text-slate-500">
+                  <Eye size={16} className="text-brand-blue" />
+                  <span className="text-xs font-semibold uppercase tracking-[0.14em]">Visibility</span>
+                </div>
+                <p className="mt-3 text-base font-semibold text-slate-950 capitalize">{credentialVisibility}</p>
+              </Card>
+              <Card className="border border-blue-100 p-4 shadow-none">
+                <div className="flex items-center gap-2 text-slate-500">
+                  <Package size={16} className="text-brand-blue" />
+                  <span className="text-xs font-semibold uppercase tracking-[0.14em]">Service</span>
+                </div>
+                <p className="mt-3 text-base font-semibold text-slate-950">{serviceName}</p>
               </Card>
             </div>
 
-            {/* Sticky summary sidebar */}
-            <Card className="h-fit border border-blue-100 p-5 shadow-[0_16px_40px_-36px_rgba(37,99,235,0.28)] xl:sticky xl:top-24">
-              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Batch summary</p>
-              <h3 className="mt-2 font-sora text-lg font-semibold text-slate-950">
-                {productBatchData?.batchName || 'Product Verification Batch'}
-              </h3>
-
-              <div className="mt-4 rounded-2xl bg-blue-50 px-4 py-4 space-y-2">
-                {[
-                  { label: 'Sector',     value: sectorName },
-                  { label: 'Service',    value: serviceName },
-                  { label: 'Products',   value: recordCount },
-                  { label: 'Visibility', value: credentialVisibility },
-                ].map((item) => (
-                  <div key={item.label} className="flex items-center justify-between gap-3 text-sm">
-                    <span className="text-slate-500">{item.label}</span>
-                    <span className="font-medium text-slate-950 capitalize">{item.value}</span>
-                  </div>
-                ))}
-              </div>
-
-              <div className="mt-5">
-                <Button
-                  variant="primary"
-                  size="lg"
-                  className="w-full"
-                  onClick={handleCreateBatch}
-                  icon={submitting ? RefreshCw : ArrowRight}
-                  disabled={submitting}
-                >
-                  {submitting ? 'Creating Batch…' : 'Create Batch'}
-                </Button>
+            <Card className="border border-blue-100 p-4 shadow-none">
+              <div className="flex items-start gap-3">
+                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-50 text-brand-blue">
+                  <BadgeCheck size={18} />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-slate-950">Security standard</p>
+                  <p className="mt-1 text-sm leading-6 text-slate-500">
+                    The final certificate uses the selected design while preserving verification data, visibility rule, and batch checks.
+                  </p>
+                </div>
               </div>
             </Card>
           </div>
-        )}
+
+          {/* Sticky summary sidebar */}
+          <Card className="h-fit border border-blue-100 p-5 shadow-[0_16px_40px_-36px_rgba(37,99,235,0.28)] xl:sticky xl:top-24">
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Batch summary</p>
+            <h3 className="mt-2 font-sora text-lg font-semibold text-slate-950">
+              {productBatchData?.batchName || 'Product Batch'}
+            </h3>
+
+            <div className="mt-4 rounded-2xl bg-blue-50 px-4 py-4 space-y-2">
+              {[
+                { label: 'Sector',     value: sectorName },
+                { label: 'Service',    value: serviceName },
+                { label: 'Products',   value: recordCount },
+                { label: 'Visibility', value: credentialVisibility },
+              ].map((item) => (
+                <div key={item.label} className="flex items-center justify-between gap-3 text-sm">
+                  <span className="text-slate-500">{item.label}</span>
+                  <span className="font-medium text-slate-950 capitalize">{item.value}</span>
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-5">
+              <Button
+                variant="primary"
+                size="lg"
+                className="w-full"
+                onClick={handleCreateBatch}
+                icon={submitting ? RefreshCw : ArrowRight}
+                disabled={submitting}
+              >
+                {submitting ? 'Submitting…' : isWarranty ? 'Submit Warranty Batch' : 'Create Batch'}
+              </Button>
+            </div>
+          </Card>
+        </div>
       </div>
     </AuthLayout>
   );

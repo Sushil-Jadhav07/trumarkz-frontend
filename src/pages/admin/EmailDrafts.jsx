@@ -239,7 +239,7 @@ const DraftCard = ({ draft, index, onEdit, onDelete }) => (
     initial={{ opacity: 0, y: 10 }}
     animate={{ opacity: 1, y: 0 }}
     transition={{ delay: index * 0.05 }}
-    className="relative rounded-2xl border border-blue-100 bg-white p-5 shadow-[0_8px_24px_-16px_rgba(37,99,235,0.18)] hover:shadow-[0_16px_32px_-20px_rgba(37,99,235,0.25)] transition-shadow"
+    className="relative rounded-2xl border border-blue-100 bg-white p-5 shadow-[0_8px_24px_-16px_rgba(37,99,235,0.18)] hover:shadow-[0_16px_32px_-20px_rgba(37,99,235,0.25)] transition-shadow overflow-hidden"
   >
     <div className="absolute inset-x-0 top-0 h-[3px] bg-brand-blue/60 rounded-t-2xl" />
     <div className="flex items-start justify-between gap-3">

@@ -113,6 +113,15 @@ export const SelectIndustry = () => {
               ? `${selectedIndustries.length} selected • ${selectedNames}`
               : `Choose one or more industries for your ${isProduct ? 'product' : 'human'} verification batch`
           }
+          action={
+            <button
+              type="button"
+              onClick={() => navigate('/org/create-batch')}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors font-inter"
+            >
+              ← Back
+            </button>
+          }
         />
 
         <div className="grid grid-cols-2 gap-3 md:grid-cols-3 ">

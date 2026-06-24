@@ -28,7 +28,6 @@ export const Sidebar = ({ collapsed, onToggle, mobileOpen = false, onMobileClose
       return [
         { path: '/org/dashboard', label: 'Dashboard', icon: LayoutDashboard },
         { path: '/org/batch-status', label: 'Batches', icon: Layers },
-        { path: '/org/product/warranty', label: 'Warranty', icon: Package },
         { path: '/marketplace', label: 'Registry', icon: Store },
         { path: '/qr/reports', label: 'Reports', icon: BarChart2 },
         { path: '/account/wallet', label: 'Wallet', icon: Wallet },

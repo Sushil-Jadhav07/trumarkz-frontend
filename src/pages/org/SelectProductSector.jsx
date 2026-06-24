@@ -6,29 +6,46 @@ import {
   PRODUCT_VERIFICATION_STEPS,
   PRODUCT_VERIFICATION_STEP_META,
   PRODUCT_VERIFICATION_STEP_ROUTES,
-  PRODUCT_SECTOR_DEFS,
 } from '@/data/productVerificationFlow';
 import { AuthLayout } from '@/components/layout/AuthLayout';
 import { PageHeader } from '@/components/shared/PageHeader';
 import { StepWizard } from '@/components/ui/StepWizard';
 import { verificationAPI } from '@/services/api';
-import { Cpu, Leaf, ArrowRight } from 'lucide-react';
+import {
+  Cpu, Leaf, ArrowRight, ShoppingBag, Car, Shield,
+  Activity, Factory, Sprout, Gem, Package,
+} from 'lucide-react';
 import toast from 'react-hot-toast';
 
-const SECTOR_ICONS = { electronics_appliances: Cpu, beauty_cosmetics: Leaf };
-
-const normalizeName = (v = '') =>
-  v.toLowerCase().replace(/&/g, 'and').replace(/[^a-z0-9]+/g, ' ').trim();
-
-const matchCategory = (sector, categories = []) => {
-  const aliases = [sector.title, ...sector.aliases].map(normalizeName);
-  return (
-    categories.find((c) => {
-      const name = normalizeName(c.category_name);
-      return aliases.some((a) => name.includes(a) || a.includes(name));
-    }) || null
-  );
+const ICON_MAP = {
+  'consumer_goods':         ShoppingBag,
+  'beauty_cosmetics':       Leaf,
+  'electronics_appliances': Cpu,
+  'ev_automotive':          Car,
+  'insurance_policies':     Shield,
+  'healthcare_products':    Activity,
+  'industrial_equipment':   Factory,
+  'agriculture_products':   Sprout,
+  'luxury_products':        Gem,
+  'others':                 Package,
 };
+
+const DESC_MAP = {
+  'Consumer Goods':          'General consumer product authenticity and quality certificates.',
+  'Beauty & Cosmetics':      'Authenticity certificates with lab reports and batch proofs.',
+  'Electronics & Appliances':'Warranty and serial-based certificates for devices and appliances.',
+  'EV & Automotive':         'Vehicle identification and warranty certificates.',
+  'Insurance Policies':      'Policy authenticity and compliance verification.',
+  'Healthcare Products':     'Product safety, compliance, and batch certification.',
+  'Industrial Equipment':    'Equipment authenticity and warranty certificates.',
+  'Agriculture Products':    'Origin, quality, and batch-level product certificates.',
+  'Luxury Products':         'Anti-counterfeit and provenance certificates for luxury items.',
+  'Others':                  'Custom product verification and certification.',
+};
+
+const toId = (name = '') =>
+  name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+
 
 export const SelectProductSector = () => {
   const navigate = useNavigate();
@@ -40,27 +57,33 @@ export const SelectProductSector = () => {
     setProductBatchData,
   } = useApp();
 
-  const [categories, setCategories] = useState([]);
+  const [sectors, setSectors] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    verificationAPI
-      .getCategories()
-      .then(({ data }) => setCategories(Array.isArray(data) ? data : []))
-      .catch(() => toast.error('Failed to load product sectors'))
+    verificationAPI.getIndustryTypes()
+      .then(({ data }) => {
+        const industryTypes = Array.isArray(data) ? data : [];
+
+        if (industryTypes.length === 0) {
+          toast.error('Failed to load industry types');
+          return;
+        }
+
+        setSectors(industryTypes.map((item) => ({
+          id: toId(item.name),
+          title: item.name,
+          description: DESC_MAP[item.name] || `${item.name} product verification and certificates.`,
+          aliases: [],
+          fallbackWarranty: item.warranty_support,
+          categoryId: '',
+          categoryName: item.name,
+          warrantySupport: item.warranty_support,
+        })));
+      })
+      .catch(() => toast.error('Failed to load industry types'))
       .finally(() => setLoading(false));
   }, []);
-
-  const sectors = PRODUCT_SECTOR_DEFS.map((def) => {
-    const category = matchCategory(def, categories);
-    return {
-      ...def,
-      category,
-      categoryId: category?.id || '',
-      categoryName: category?.category_name || def.title,
-      warrantySupport: category?.warranty_support || def.fallbackWarranty,
-    };
-  });
 
   const handleSelect = (sector) => {
     setBatchEntityType('product');
@@ -68,11 +91,11 @@ export const SelectProductSector = () => {
     setSelectedProductService(null);
     setProductBatchData(null);
     setSelectedProductSector(sector);
-    navigate('/org/product/verifications');
+    navigate('/org/product/service');
   };
 
   return (
-    <AuthLayout title="Select Product Sector">
+    <AuthLayout title="Select Product Industry Type">
       <div className="w-full mx-auto lg:max-w-none">
         <StepWizard
           steps={PRODUCT_VERIFICATION_STEPS}
@@ -81,27 +104,36 @@ export const SelectProductSector = () => {
         />
 
         <PageHeader
-          title="Select Product Sector"
-          subtitle="Choose the sector category for this product verification batch."
+          title="Select Product Industry Type"
+          subtitle="Choose the industry type for this product verification batch."
+          action={
+            <button
+              type="button"
+              onClick={() => navigate('/org/create-batch')}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors font-inter"
+            >
+              ← Back
+            </button>
+          }
         />
 
         {loading ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-2">
-            {[0, 1].map((i) => (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mt-2">
+            {[0, 1, 2, 3].map((i) => (
               <div key={i} className="h-48 rounded-2xl bg-slate-100 animate-pulse" />
             ))}
           </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mt-2">
             {sectors.map((sector, index) => {
-              const Icon = SECTOR_ICONS[sector.id] || Cpu;
+              const Icon = ICON_MAP[sector.id] || Package;
               return (
                 <motion.button
                   key={sector.id}
                   type="button"
                   initial={{ opacity: 0, y: 16 }}
                   animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: index * 0.08 }}
+                  transition={{ delay: index * 0.05 }}
                   whileHover={{ y: -3 }}
                   whileTap={{ scale: 0.98 }}
                   onClick={() => handleSelect(sector)}
