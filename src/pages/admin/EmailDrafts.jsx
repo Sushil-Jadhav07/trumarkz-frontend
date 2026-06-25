@@ -13,24 +13,8 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
-// ── Verification types that can have email drafts ─────────────────────────────
-const VERIFICATION_TYPE_OPTIONS = [
-  'quality_check',
-  'compliance_check',
-  'police_verification',
-  'education',
-  'experience',
-  'drug_test',
-  'address',
-  'criminal_record',
-  'driving_license',
-  'skills',
-  'warranty',
-  'authenticity',
-];
-
 // ── Type selector dropdown ─────────────────────────────────────────────────────
-const TypeSelector = ({ value, onChange }) => {
+const TypeSelector = ({ value, onChange, types, loading }) => {
   const [open, setOpen] = useState(false);
   const ref = React.useRef(null);
 
@@ -40,32 +24,40 @@ const TypeSelector = ({ value, onChange }) => {
     return () => document.removeEventListener('mousedown', handle);
   }, []);
 
+  const selected = types.find((t) => t.name === value);
+
   return (
     <div ref={ref} className="relative">
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className={`w-full flex items-center justify-between gap-3 px-4 py-3 rounded-xl border-2 transition-all font-inter text-sm bg-white ${open ? 'border-brand-blue ring-4 ring-brand-blue/10' : 'border-gray-200 hover:border-gray-300'}`}
+        disabled={loading}
+        className={`w-full flex items-center justify-between gap-3 px-4 py-3 rounded-xl border-2 transition-all font-inter text-sm bg-white ${open ? 'border-brand-blue ring-4 ring-brand-blue/10' : 'border-gray-200 hover:border-gray-300'} disabled:opacity-60`}
       >
         <span className={value ? 'text-brand-dark font-medium' : 'text-gray-400'}>
-          {value || 'Select verification type…'}
+          {loading ? 'Loading types…' : (selected?.name || 'Select verification type…')}
         </span>
-        <ChevronDown size={16} className={`text-gray-400 transition-transform ${open ? 'rotate-180' : ''}`} />
+        {loading
+          ? <RefreshCw size={14} className="text-gray-400 animate-spin" />
+          : <ChevronDown size={16} className={`text-gray-400 transition-transform ${open ? 'rotate-180' : ''}`} />
+        }
       </button>
-      {open && (
+      {open && !loading && (
         <motion.div
           initial={{ opacity: 0, y: -6 }}
           animate={{ opacity: 1, y: 0 }}
           className="absolute z-30 top-full mt-1.5 left-0 right-0 bg-white border border-gray-200 rounded-xl shadow-lg overflow-hidden max-h-52 overflow-y-auto"
         >
-          {VERIFICATION_TYPE_OPTIONS.map((opt) => (
+          {types.length === 0 ? (
+            <p className="px-4 py-3 text-sm text-gray-400 font-inter">No manual verification types found</p>
+          ) : types.map((t) => (
             <button
-              key={opt}
+              key={t.id || t.name}
               type="button"
-              onClick={() => { onChange(opt); setOpen(false); }}
-              className={`w-full text-left px-4 py-2.5 font-inter text-sm transition-colors ${opt === value ? 'bg-brand-blue/5 text-brand-blue font-medium' : 'text-brand-dark hover:bg-gray-50'}`}
+              onClick={() => { onChange(t.name); setOpen(false); }}
+              className={`w-full text-left px-4 py-2.5 font-inter text-sm transition-colors ${t.name === value ? 'bg-brand-blue/5 text-brand-blue font-medium' : 'text-brand-dark hover:bg-gray-50'}`}
             >
-              {opt.replace(/_/g, ' ')}
+              {t.name}
             </button>
           ))}
         </motion.div>
@@ -132,7 +124,7 @@ const DraftModal = ({ isOpen, onClose, verificationType, draft, onSuccess }) => 
     <Modal isOpen={isOpen} onClose={submitting ? undefined : onClose} title={isEdit ? 'Edit Email Draft' : 'Create Email Draft'} size="lg">
       <form onSubmit={handleSubmit} className="space-y-4">
         <div className="px-3 py-2 rounded-xl bg-blue-50 border border-blue-100 font-inter text-xs text-brand-blue">
-          Verification type: <span className="font-semibold">{verificationType?.replace(/_/g, ' ')}</span>
+          Verification type: <span className="font-semibold">{verificationType}</span>
         </div>
 
         <Input
@@ -281,12 +273,33 @@ const DraftCard = ({ draft, index, onEdit, onDelete }) => (
 
 // ── Main Page ──────────────────────────────────────────────────────────────────
 export const EmailDrafts = () => {
+  const [verificationTypes, setVerificationTypes] = useState([]);
+  const [typesLoading, setTypesLoading] = useState(true);
   const [selectedType, setSelectedType] = useState('');
   const [drafts, setDrafts] = useState([]);
   const [loading, setLoading] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [editModal, setEditModal] = useState({ open: false, draft: null });
   const [deleteModal, setDeleteModal] = useState({ open: false, draft: null });
+
+  // Fetch all manual verification types on mount
+  useEffect(() => {
+    const load = async () => {
+      setTypesLoading(true);
+      try {
+        const { data } = await verificationAPI.getVerificationTypes();
+        const list = Array.isArray(data) ? data : (data?.verification_types || data?.types || data?.items || []);
+        // Only manual types have email templates (they send emails to third-party verifiers)
+        setVerificationTypes(list.filter((t) => t.label === 'manual'));
+      } catch (err) {
+        toast.error(getApiError(err, 'Failed to load verification types'));
+        setVerificationTypes([]);
+      } finally {
+        setTypesLoading(false);
+      }
+    };
+    load();
+  }, []);
 
   const fetchDrafts = useCallback(async (type) => {
     if (!type) return;
@@ -352,7 +365,12 @@ export const EmailDrafts = () => {
             </div>
           </div>
           <div className="max-w-sm">
-            <TypeSelector value={selectedType} onChange={(v) => { setSelectedType(v); }} />
+            <TypeSelector
+              value={selectedType}
+              onChange={(v) => { setSelectedType(v); }}
+              types={verificationTypes}
+              loading={typesLoading}
+            />
           </div>
         </Card>
       </motion.div>
@@ -382,7 +400,7 @@ export const EmailDrafts = () => {
             </div>
             <p className="font-sora font-semibold text-brand-dark">No drafts yet</p>
             <p className="text-sm text-gray-400 font-inter mt-1 mb-4">
-              No email drafts for <span className="font-medium">{selectedType.replace(/_/g, ' ')}</span>
+              No email drafts for <span className="font-medium">{selectedType}</span>
             </p>
             <Button variant="primary" size="sm" icon={Plus} onClick={() => setCreateOpen(true)}>
               Create First Draft
@@ -394,7 +412,7 @@ export const EmailDrafts = () => {
               <p className="text-sm text-gray-400 font-inter">
                 <span className="font-semibold text-brand-dark">{drafts.length}</span>{' '}
                 draft{drafts.length !== 1 ? 's' : ''} for{' '}
-                <span className="text-brand-blue font-medium">{selectedType.replace(/_/g, ' ')}</span>
+                <span className="text-brand-blue font-medium">{selectedType}</span>
               </p>
             </div>
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
