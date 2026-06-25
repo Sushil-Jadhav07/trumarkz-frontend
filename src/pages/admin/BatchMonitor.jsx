@@ -10,7 +10,7 @@ import { Modal } from '@/components/ui/Modal';
 import { Input } from '@/components/ui/Input';
 import { verificationAPI, getApiError, triggerBlobDownload } from '@/services/api';
 import {
-  ArrowRight, CheckCircle, ChevronLeft, Clock, Download, Eye, FileText, Filter, IdCard,
+  ArrowRight, CheckCircle, ChevronLeft, Clock, Download, Eye, FileText, Filter, IdCard, Info,
   Mail, MoreVertical, Package, Pencil, QrCode, RefreshCw, Send, Upload, User, Users, XCircle,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -155,6 +155,7 @@ const SelectVerifierModal = ({ isOpen, onClose, onBulkSent, batch }) => {
   const [activeTab, setActiveTab] = useState('email');
   const [drafts, setDrafts] = useState([]);
   const [loadingDrafts, setLoadingDrafts] = useState(false);
+  const [deletingDraft, setDeletingDraft] = useState(null);
   const [sending, setSending] = useState(false);
 
   const defaultSubject = (label) => `Verification Request: ${label}`;
@@ -191,9 +192,10 @@ const SelectVerifierModal = ({ isOpen, onClose, onBulkSent, batch }) => {
 
   const currentData = stepData[currentGroup?.verification_name] || {
     selectedEmail: currentGroup?.emails?.[0] || '',
-    subject: defaultSubject(currentGroup?.label || ''),
-    body: defaultBody(currentGroup?.label || ''),
+    subject: defaultSubject(currentGroup?.verification_name || ''),
+    body: defaultBody(currentGroup?.verification_name || ''),
     saveAsDraft: false,
+    appliedDraftId: null,
   };
 
   const updateStep = (patch) => {
@@ -231,13 +233,18 @@ const SelectVerifierModal = ({ isOpen, onClose, onBulkSent, batch }) => {
     setSending(true);
     try {
       const verifiersPayload = groups.map((g) => {
-        const d = allData[g.verification_name] || { selectedEmail: g.emails[0] || '', subject: defaultSubject(g.label), body: defaultBody(g.label) };
+        const d = allData[g.verification_name] || { selectedEmail: g.emails[0] || '', subject: defaultSubject(g.verification_name), body: defaultBody(g.verification_name) };
         return { verification_type_name: g.verification_name, verifier_email: d.selectedEmail, email_subject: d.subject, email_body: d.body };
       });
       const { data: result } = await verificationAPI.sendBulkManualVerification({ batch_id: batch.id, verifiers: verifiersPayload });
       await Promise.allSettled(
         groups.filter((g) => allData[g.verification_name]?.saveAsDraft).map((g) => {
           const d = allData[g.verification_name];
+          if (d.appliedDraftId) {
+            // Update the existing draft via PUT
+            return verificationAPI.updateEmailDraft(d.appliedDraftId, { subject: d.subject, body: d.body });
+          }
+          // Create a new draft via POST
           return verificationAPI.createEmailDraft({ verification_type: g.verification_name, subject: d.subject, body: d.body });
         })
       );
@@ -275,25 +282,32 @@ const SelectVerifierModal = ({ isOpen, onClose, onBulkSent, batch }) => {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-xs text-gray-400 font-inter uppercase tracking-wider">Step {stepIndex + 1} of {groups.length}</p>
-                <p className="font-sora font-semibold text-brand-dark mt-0.5">{currentGroup?.label}</p>
+                <p className="font-sora font-semibold text-brand-dark mt-0.5">{currentGroup?.verification_name}</p>
+                {currentGroup?.label && (
+                  <p className="text-[11px] text-gray-400 font-inter mt-0.5">{currentGroup?.label}</p>
+                )}
               </div>
-              <div className="flex gap-1.5 items-center">
-                {groups.map((g, i) => (
-                  <div key={g.verification_name} className={`rounded-full transition-all ${i === stepIndex ? 'w-5 h-2 bg-brand-blue' : i < stepIndex ? 'w-2 h-2 bg-blue-300' : 'w-2 h-2 bg-gray-200'}`} />
-                ))}
-              </div>
+              {groups.length > 1 && (
+                <div className="flex gap-1.5 items-center">
+                  {groups.map((g, i) => (
+                    <div key={g.verification_name} className={`rounded-full transition-all ${i === stepIndex ? 'w-5 h-2 bg-brand-blue' : i < stepIndex ? 'w-2 h-2 bg-blue-300' : 'w-2 h-2 bg-gray-200'}`} />
+                  ))}
+                </div>
+              )}
             </div>
 
+            {/* Main tab bar: Select Verifier | Mail Template */}
             <div className="flex gap-1 bg-gray-100 p-1 rounded-xl">
-              {['email', 'template'].map((tab) => (
-                <button key={tab} type="button" onClick={() => setActiveTab(tab)}
-                  className={`flex-1 py-2 rounded-lg text-sm font-medium font-inter transition-all ${activeTab === tab ? 'bg-white text-brand-dark shadow-sm' : 'text-gray-500 hover:text-brand-dark'}`}>
-                  {tab === 'email' ? 'Select Verifier' : 'Mail Template'}
+              {[['email', 'Select Verifier'], ['template', 'Mail Template']].map(([val, label]) => (
+                <button key={val} type="button" onClick={() => setActiveTab(val)}
+                  className={`flex-1 py-2 rounded-lg text-sm font-medium font-inter transition-all ${activeTab === val ? 'bg-white text-brand-dark shadow-sm' : 'text-gray-500 hover:text-brand-dark'}`}>
+                  {label}
                 </button>
               ))}
             </div>
 
             {activeTab === 'email' ? (
+              /* ── Select Verifier tab ── */
               <div className="space-y-3">
                 <p className="text-xs text-gray-500 font-inter">Select the email address to send this verification request to:</p>
                 <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1">
@@ -303,7 +317,12 @@ const SelectVerifierModal = ({ isOpen, onClose, onBulkSent, batch }) => {
                       <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${currentData.selectedEmail === email ? 'bg-brand-blue text-white' : 'bg-brand-blue/10 text-brand-blue'}`}>
                         <Mail size={16} />
                       </div>
-                      <p className="flex-1 text-sm font-medium text-brand-dark font-inter truncate">{email}</p>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-[10px] font-semibold text-gray-400 font-inter uppercase tracking-wider mb-0.5">
+                          {currentGroup?.verification_name}
+                        </p>
+                        <p className="text-sm font-medium text-brand-dark font-inter truncate">{email}</p>
+                      </div>
                       {currentData.selectedEmail === email && <CheckCircle size={16} className="text-brand-blue shrink-0" />}
                     </button>
                   ))}
@@ -315,34 +334,100 @@ const SelectVerifierModal = ({ isOpen, onClose, onBulkSent, batch }) => {
                 </label>
               </div>
             ) : (
+              /* ── Mail Template tab ── */
               <div className="space-y-3">
-                {(loadingDrafts || drafts.length > 0) && (
-                  <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
-                    <p className="text-xs font-semibold text-gray-500 font-inter uppercase tracking-wider mb-2">Load from saved drafts</p>
-                    {loadingDrafts ? (
-                      <p className="text-xs text-gray-400 font-inter">Loading drafts...</p>
-                    ) : (
-                      <div className="flex flex-wrap gap-2">
-                        {drafts.map((d) => (
-                          <button key={d.id} type="button" onClick={() => { updateStep({ subject: d.subject, body: d.body }); toast.success('Draft applied'); }}
-                            className="px-3 py-1.5 rounded-lg border border-blue-100 bg-white text-xs font-medium text-brand-blue hover:bg-blue-50 font-inter transition-colors">
-                            {d.subject || 'Draft'}
+                {/* Template sub-tabs: Template 1, Template 2, … + New */}
+                {loadingDrafts ? (
+                  <div className="flex items-center gap-2 py-0.5">
+                    <RefreshCw size={11} className="animate-spin text-gray-400" />
+                    <span className="text-xs text-gray-400 font-inter">Loading templates…</span>
+                  </div>
+                ) : (
+                  <div className="flex gap-1 bg-gray-100 p-1 rounded-xl overflow-x-auto scrollbar-hidden">
+                    {drafts.map((d, idx) => {
+                      const isActive = currentData.appliedDraftId === d.id;
+                      return (
+                        <div
+                          key={d.id}
+                          className={`flex items-center shrink-0 rounded-lg overflow-hidden transition-all ${isActive ? 'bg-white shadow-sm' : 'hover:bg-gray-200/50'}`}
+                        >
+                          <button
+                            type="button"
+                            onClick={() => updateStep({ subject: d.subject, body: d.body, appliedDraftId: d.id })}
+                            className={`py-1.5 pl-3 pr-2 text-xs font-semibold font-inter whitespace-nowrap transition-colors ${isActive ? 'text-brand-dark' : 'text-gray-500 hover:text-brand-dark'}`}
+                          >
+                            Template {idx + 1}
                           </button>
-                        ))}
-                      </div>
-                    )}
+                          <button
+                            type="button"
+                            disabled={deletingDraft === d.id}
+                            onClick={async () => {
+                              setDeletingDraft(d.id);
+                              try {
+                                await verificationAPI.deleteEmailDraft(d.id);
+                                setDrafts((prev) => prev.filter((x) => x.id !== d.id));
+                                if (currentData.appliedDraftId === d.id) {
+                                  updateStep({
+                                    subject: defaultSubject(currentGroup?.verification_name || ''),
+                                    body: defaultBody(currentGroup?.verification_name || ''),
+                                    appliedDraftId: null,
+                                  });
+                                }
+                                toast.success('Template deleted');
+                              } catch {
+                                toast.error('Failed to delete template');
+                              } finally {
+                                setDeletingDraft(null);
+                              }
+                            }}
+                            className="px-1.5 text-gray-400 hover:text-red-400 disabled:opacity-40 transition-colors"
+                          >
+                            <XCircle size={11} />
+                          </button>
+                        </div>
+                      );
+                    })}
+                    {/* + New sub-tab */}
+                    <button
+                      type="button"
+                      onClick={() => updateStep({
+                        subject: defaultSubject(currentGroup?.verification_name || ''),
+                        body: defaultBody(currentGroup?.verification_name || ''),
+                        appliedDraftId: null,
+                      })}
+                      className={`shrink-0 py-1.5 px-3 rounded-lg text-xs font-semibold font-inter whitespace-nowrap transition-all ${
+                        !currentData.appliedDraftId
+                          ? 'bg-white shadow-sm text-brand-dark'
+                          : 'text-gray-500 hover:text-brand-dark'
+                      }`}
+                    >
+                      Default Template
+                    </button>
                   </div>
                 )}
+
+                {/* Subject & Body */}
                 <div>
                   <label className="block text-xs text-gray-500 font-inter mb-1">Subject</label>
-                  <input value={currentData.subject} onChange={(e) => updateStep({ subject: e.target.value })}
+                  <input value={currentData.subject} onChange={(e) => updateStep({ subject: e.target.value, appliedDraftId: null })}
                     className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm font-inter focus:outline-none focus:ring-2 focus:ring-brand-blue/30" />
                 </div>
                 <div>
                   <label className="block text-xs text-gray-500 font-inter mb-1">Body</label>
-                  <textarea rows={8} value={currentData.body} onChange={(e) => updateStep({ body: e.target.value })}
+                  <textarea rows={6} value={currentData.body} onChange={(e) => updateStep({ body: e.target.value, appliedDraftId: null })}
                     className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm font-inter resize-none focus:outline-none focus:ring-2 focus:ring-brand-blue/30" />
+                  <div className="mt-2 flex items-start gap-2 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2">
+                    <Info size={13} className="text-brand-blue mt-0.5 shrink-0" />
+                    <p className="text-[11px] text-brand-blue font-inter leading-relaxed">
+                      The <strong>one-time secure upload link</strong> is automatically appended to the bottom of this email by the system. The verifier will receive it at the end of their email.
+                    </p>
+                  </div>
                 </div>
+                <label className="flex items-center gap-2.5 cursor-pointer select-none group">
+                  <input type="checkbox" checked={currentData.saveAsDraft} onChange={(e) => updateStep({ saveAsDraft: e.target.checked })}
+                    className="w-4 h-4 rounded border-gray-300 accent-brand-blue cursor-pointer" />
+                  <span className="text-sm font-inter text-gray-600 group-hover:text-brand-dark">Save this template as a draft</span>
+                </label>
               </div>
             )}
 
@@ -490,6 +575,8 @@ const EditBatchModal = ({ isOpen, onClose, draft, onChange, onSave, saving }) =>
 // ── Main BatchMonitor component ───────────────────────────────────────────────
 export const BatchMonitor = () => {
   const [data, setData] = useState(null);
+  const [batchDetail, setBatchDetail] = useState(null);
+  const [loadingDetail, setLoadingDetail] = useState(false);
   const [statusFilter, setStatusFilter] = useState('');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -531,6 +618,15 @@ export const BatchMonitor = () => {
   }, []);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  useEffect(() => {
+    if (!selectedBatchId) { setBatchDetail(null); return; }
+    setLoadingDetail(true);
+    verificationAPI.getBatchDetails(selectedBatchId)
+      .then(({ data }) => setBatchDetail(data))
+      .catch(() => toast.error('Failed to load batch details'))
+      .finally(() => setLoadingDetail(false));
+  }, [selectedBatchId]);
 
   const records = data?.users || [];
   const batches = groupByBatch(records).map((batch) => {
@@ -676,7 +772,8 @@ export const BatchMonitor = () => {
     setGeneratingAssets(true);
     const toastId = toast.loading(`Generating assets for ${batch.total} records…`);
     try {
-      const finalAssets = await Promise.all(batch.records.map(async (r) => {
+      const batchRecords = batch.records.length ? batch.records : (batchDetail?.users || []);
+      const finalAssets = await Promise.all(batchRecords.map(async (r) => {
           let idCardUrl = `/mock-assets/${batch.id}/${r.id}-id-card.pdf`;
           try {
             const { data } = await verificationAPI.generateQRAndCertificate(r.id);
@@ -704,10 +801,11 @@ export const BatchMonitor = () => {
   // ── Action: Send to Organization ────────────────────────────────────────
   const handleSendToOrganization = async (batch) => {
     setSendingToOrg(true);
+    const fallbackRecords = batch.records.length ? batch.records : (batchDetail?.users || []);
     try {
       const assets = batch.assets.length
         ? batch.assets
-        : batch.records.map((r) => ({
+        : fallbackRecords.map((r) => ({
             recordId: r.id,
             title: recordTitle(r),
             idCardUrl: `/mock-assets/${batch.id}/${r.id}-id-card.pdf`,
@@ -717,8 +815,7 @@ export const BatchMonitor = () => {
       updateBatchWorkflow(batch.id, { status: 'send_to_organization', assets });
       toast.success(`${batch.name} assets shared with the organization`);
     } catch (err) {
-      // Fallback mock
-      const assets = batch.assets.length ? batch.assets : batch.records.map((r) => ({
+      const assets = batch.assets.length ? batch.assets : fallbackRecords.map((r) => ({
         recordId: r.id, title: recordTitle(r),
         idCardUrl: `/mock-assets/${batch.id}/${r.id}-id-card.pdf`,
         qrCodeUrl: `/mock-assets/${batch.id}/${r.id}-qr.png`,
@@ -1161,15 +1258,15 @@ export const BatchMonitor = () => {
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
                         <Badge status={req.status === 'failed' ? 'error' : 'success'}>{req.status || 'sent'}</Badge>
-                        {req.request_id && (
+                        {req.status !== 'failed' && (
                           <button
                             type="button"
-                            disabled={resending === req.request_id}
-                            onClick={() => handleResend(req.request_id, req.verifier_email)}
+                            disabled={resending === (req.request_id || req.token)}
+                            onClick={() => handleResend(req.request_id || req.token, req.verifier_email)}
                             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-blue-200 bg-white text-xs font-semibold font-inter text-brand-blue hover:bg-blue-50 disabled:opacity-50 transition-colors"
                           >
-                            <RefreshCw size={12} className={resending === req.request_id ? 'animate-spin' : ''} />
-                            {resending === req.request_id ? 'Resending...' : 'Resend'}
+                            <RefreshCw size={12} className={resending === (req.request_id || req.token) ? 'animate-spin' : ''} />
+                            {resending === (req.request_id || req.token) ? 'Resending...' : 'Resend'}
                           </button>
                         )}
                       </div>
@@ -1180,69 +1277,85 @@ export const BatchMonitor = () => {
             )}
 
             {/* Records table */}
-            <div className="rounded-2xl border border-gray-100 bg-white overflow-hidden">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-5 py-4 border-b border-gray-100 bg-gray-50">
-                <div>
-                  <h4 className="font-sora font-semibold text-sm text-brand-dark">Batch Records</h4>
-                  <p className="text-xs text-gray-400 font-inter mt-1">Individual approvals are disabled. Assets appear after batch verification.</p>
+            {(() => {
+              const detailRecords = batchDetail?.users || selectedBatch.records || [];
+              return (
+                <div className="rounded-2xl border border-gray-100 bg-white overflow-hidden">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-5 py-4 border-b border-gray-100 bg-gray-50">
+                    <div>
+                      <h4 className="font-sora font-semibold text-sm text-brand-dark">Batch Records</h4>
+                      <p className="text-xs text-gray-400 font-inter mt-1">Individual approvals are disabled. Assets appear after batch verification.</p>
+                    </div>
+                    <Badge status="default">{loadingDetail ? '…' : detailRecords.length} records</Badge>
+                  </div>
+                  <div className="max-h-80 overflow-y-auto scrollbar-hidden">
+                    {loadingDetail ? (
+                      <div className="flex items-center justify-center py-10 gap-2">
+                        <RefreshCw size={16} className="animate-spin text-brand-blue" />
+                        <p className="text-sm text-gray-400 font-inter">Loading records…</p>
+                      </div>
+                    ) : detailRecords.length === 0 ? (
+                      <div className="py-8 text-center">
+                        <p className="text-sm text-gray-400 font-inter">No records found for this batch</p>
+                      </div>
+                    ) : (
+                      <table className="w-full min-w-[640px]">
+                        <thead className="bg-gray-50 sticky top-0">
+                          <tr>
+                            <th className="px-4 py-2 text-left text-[11px] font-semibold uppercase text-gray-500 font-inter">Record</th>
+                            <th className="px-4 py-2 text-left text-[11px] font-semibold uppercase text-gray-500 font-inter">Type</th>
+                            <th className="px-4 py-2 text-left text-[11px] font-semibold uppercase text-gray-500 font-inter">Status</th>
+                            <th className="px-4 py-2 text-left text-[11px] font-semibold uppercase text-gray-500 font-inter">Assets</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100">
+                          {detailRecords.map((record) => {
+                            const product = isProductRecord(record);
+                            const Icon = product ? Package : User;
+                            const status = selectedBatch.status === 'verified' || selectedBatch.status === 'send_to_organization'
+                              ? { variant: 'success', label: 'Verified' }
+                              : statusBadge(record.verification_status);
+                            return (
+                              <tr key={record.id} className="hover:bg-gray-50/70 transition-colors">
+                                <td className="px-4 py-3">
+                                  <div className="flex items-center gap-3">
+                                    <div className="w-9 h-9 rounded-xl bg-brand-blue/10 border border-blue-100 flex items-center justify-center">
+                                      <Icon size={15} className="text-brand-blue" />
+                                    </div>
+                                    <div className="min-w-0">
+                                      <p className="text-sm font-medium text-brand-dark font-inter truncate">{recordTitle(record)}</p>
+                                      <p className="text-xs text-gray-400 font-inter truncate">{product ? record.category_name || 'Product' : record.email || 'Human'}</p>
+                                    </div>
+                                  </div>
+                                </td>
+                                <td className="px-4 py-3 text-sm text-gray-600 font-inter">{product ? 'Product' : 'Human'}</td>
+                                <td className="px-4 py-3"><Badge status={status.variant}>{status.label}</Badge></td>
+                                <td className="px-4 py-3">
+                                  {selectedBatch.status === 'verified' || selectedBatch.status === 'send_to_organization' ? (
+                                    <div className="flex flex-wrap gap-1.5">
+                                      <Button variant="ghost" size="sm" icon={IdCard}
+                                        onClick={() => handleDownloadAsset(selectedBatch, 'id-card', record)}>
+                                        ID Card
+                                      </Button>
+                                      <Button variant="ghost" size="sm" icon={QrCode}
+                                        onClick={() => handleDownloadAsset(selectedBatch, 'qr-code', record)}>
+                                        QR
+                                      </Button>
+                                    </div>
+                                  ) : (
+                                    <span className="text-xs text-gray-400 font-inter">Available after verification</span>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
                 </div>
-                <Badge status="default">{selectedBatch.records.length} records</Badge>
-              </div>
-              <div className="max-h-80 overflow-y-auto scrollbar-hidden">
-                <table className="w-full min-w-[640px]">
-                  <thead className="bg-gray-50 sticky top-0">
-                    <tr>
-                      <th className="px-4 py-2 text-left text-[11px] font-semibold uppercase text-gray-500 font-inter">Record</th>
-                      <th className="px-4 py-2 text-left text-[11px] font-semibold uppercase text-gray-500 font-inter">Type</th>
-                      <th className="px-4 py-2 text-left text-[11px] font-semibold uppercase text-gray-500 font-inter">Status</th>
-                      <th className="px-4 py-2 text-left text-[11px] font-semibold uppercase text-gray-500 font-inter">Assets</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100">
-                    {selectedBatch.records.map((record) => {
-                      const product = isProductRecord(record);
-                      const Icon = product ? Package : User;
-                      const status = selectedBatch.status === 'verified' || selectedBatch.status === 'send_to_organization'
-                        ? { variant: 'success', label: 'Verified' }
-                        : statusBadge(record.verification_status);
-                      return (
-                        <tr key={record.id} className="hover:bg-gray-50/70 transition-colors">
-                          <td className="px-4 py-3">
-                            <div className="flex items-center gap-3">
-                              <div className="w-9 h-9 rounded-xl bg-brand-blue/10 border border-blue-100 flex items-center justify-center">
-                                <Icon size={15} className="text-brand-blue" />
-                              </div>
-                              <div className="min-w-0">
-                                <p className="text-sm font-medium text-brand-dark font-inter truncate">{recordTitle(record)}</p>
-                                <p className="text-xs text-gray-400 font-inter truncate">{product ? record.category_name || 'Product' : record.email || 'Human'}</p>
-                              </div>
-                            </div>
-                          </td>
-                          <td className="px-4 py-3 text-sm text-gray-600 font-inter">{product ? 'Product' : 'Human'}</td>
-                          <td className="px-4 py-3"><Badge status={status.variant}>{status.label}</Badge></td>
-                          <td className="px-4 py-3">
-                            {selectedBatch.status === 'verified' || selectedBatch.status === 'send_to_organization' ? (
-                              <div className="flex flex-wrap gap-1.5">
-                                <Button variant="ghost" size="sm" icon={IdCard}
-                                  onClick={() => handleDownloadAsset(selectedBatch, 'id-card', record)}>
-                                  ID Card
-                                </Button>
-                                <Button variant="ghost" size="sm" icon={QrCode}
-                                  onClick={() => handleDownloadAsset(selectedBatch, 'qr-code', record)}>
-                                  QR
-                                </Button>
-                              </div>
-                            ) : (
-                              <span className="text-xs text-gray-400 font-inter">Available after verification</span>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
+              );
+            })()}
           </div>
         )}
       </Modal>
