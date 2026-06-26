@@ -515,6 +515,62 @@ export const verificationAPI = {
   },
 };
 
+export const skillsAPI = {
+  addSkill: (data) => {
+    const formData = new FormData();
+    formData.append('skill_type', data.skill_type);
+    formData.append('skill_name', data.skill_name);
+    if (data.skill_info) formData.append('skill_info', data.skill_info);
+    if (data.institution_name) formData.append('institution_name', data.institution_name);
+    if (data.degree) formData.append('degree', data.degree);
+    if (data.document_label) formData.append('document_label', data.document_label);
+    if (data.files && data.files.length > 0) {
+      Array.from(data.files).forEach((file) => formData.append('files', file));
+    }
+    return api.post('/skills/add', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
+
+  getMySkills: () => api.get('/skills/me'),
+
+  uploadDocument: (skillId, documentLabel, file) => {
+    const formData = new FormData();
+    formData.append('document_label', documentLabel);
+    formData.append('file', file);
+    return api.post(`/skills/${skillId}/upload-doc`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
+
+  getIndividualSkills: (individualId) => api.get(`/skills/${individualId}`),
+
+  getAllSkills: (params = {}) => {
+    const query = new URLSearchParams();
+    if (params.status) query.append('status', params.status);
+    if (params.skill_type) query.append('skill_type', params.skill_type);
+    const qs = query.toString();
+    return api.get(`/skills/all/list${qs ? `?${qs}` : ''}`);
+  },
+
+  updateSkillStatus: (skillId, status, reason) =>
+    api.patch(`/skills/${skillId}/status`, cleanObject({ status, reason })),
+
+  sendVerificationRequest: (skillId, verifierEmail) =>
+    api.post(`/skills/${skillId}/verify/request`, { verifier_email: verifierEmail }),
+
+  resendVerificationLink: (requestId) =>
+    api.post(`/skills/verify/resend/${requestId}`),
+
+  uploadVerifierReport: (token, files) => {
+    const formData = new FormData();
+    Array.from(files).forEach((file) => formData.append('files', file));
+    return axios.post(`${API_BASE_URL}/skills/verify/upload/${token}`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
+};
+
 export const healthCheck = () => api.get('/health');
 
 export const tokenHelpers = {

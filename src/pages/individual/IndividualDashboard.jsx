@@ -1,4 +1,4 @@
-﻿import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { AuthLayout } from '@/components/layout/AuthLayout';
@@ -6,47 +6,59 @@ import { PageHeader } from '@/components/shared/PageHeader';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
-import { mockSkillTree } from '@/data/mockData';
-import { GitBranch, Award, Share2, ArrowRight, CheckCircle, Clock, Hash } from 'lucide-react';
+import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
+import { skillsAPI, getApiError } from '@/services/api';
+import toast from 'react-hot-toast';
+import { GitBranch, Award, Share2, ArrowRight, CheckCircle, Clock, Code2, Heart, GraduationCap, FolderKanban } from 'lucide-react';
 
 const sectionStyles = {
   education: 'bg-blue-50 text-brand-blue',
-  courses: 'bg-green-50 text-green-600',
-  experience: 'bg-blue-50 text-brand-blue',
-  skills: 'bg-orange-50 text-orange-600',
+  technical: 'bg-green-50 text-green-600',
+  soft: 'bg-purple-50 text-purple-600',
+  project: 'bg-orange-50 text-orange-600',
 };
 
 const sectionLabels = {
   education: 'Education',
-  courses: 'Course',
-  experience: 'Experience',
-  skills: 'Skill',
+  technical: 'Technical',
+  soft: 'Soft Skill',
+  project: 'Project',
 };
 
-const getTitle = (item) => item.level || item.name || item.role || item.skill;
-const getSubtitle = (item) => item.institution || item.provider || item.company || '';
+const statusBadge = (status) => {
+  if (status === 'verified') return { status: 'verified', label: 'Verified' };
+  if (status === 'rejected') return { status: 'failed', label: 'Rejected' };
+  return { status: 'pending', label: 'Pending' };
+};
 
 export const IndividualDashboard = () => {
   const navigate = useNavigate();
+  const [skills, setSkills] = useState([]);
+  const [loading, setLoading] = useState(true);
 
-  const allItems = [
-    ...mockSkillTree.education.map((i) => ({ ...i, section: 'education' })),
-    ...mockSkillTree.courses.map((i) => ({ ...i, section: 'courses' })),
-    ...mockSkillTree.experience.map((i) => ({ ...i, section: 'experience' })),
-    ...mockSkillTree.skills.map((i) => ({ ...i, section: 'skills' })),
-  ];
+  useEffect(() => {
+    const fetchSkills = async () => {
+      try {
+        const res = await skillsAPI.getMySkills();
+        setSkills(res.data.skills || []);
+      } catch (err) {
+        toast.error(getApiError(err, 'Failed to load skills'));
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchSkills();
+  }, []);
 
-  const visibleItems = allItems.filter((i) => i.status !== 'empty');
-  const previewItems = visibleItems.slice(0, 6);
-
-  const verified = allItems.filter((i) => i.status === 'verified').length;
-  const pending = allItems.filter((i) => i.status === 'pending').length;
-  const total = visibleItems.length;
+  const verified = skills.filter((s) => s.status === 'verified').length;
+  const pending = skills.filter((s) => s.status === 'pending').length;
+  const total = skills.length;
+  const previewItems = skills.slice(0, 6);
 
   const stats = [
-    { label: 'Verified Credentials', value: verified, icon: CheckCircle, bg: 'bg-green-50', text: 'text-green-600' },
+    { label: 'Verified Skills', value: verified, icon: CheckCircle, bg: 'bg-green-50', text: 'text-green-600' },
     { label: 'Pending Verification', value: pending, icon: Clock, bg: 'bg-orange-50', text: 'text-orange-600' },
-    { label: 'Total Skill Nodes', value: total, icon: GitBranch, bg: 'bg-blue-50', text: 'text-brand-blue' },
+    { label: 'Total Skills', value: total, icon: GitBranch, bg: 'bg-blue-50', text: 'text-brand-blue' },
   ];
 
   const quickActions = [
@@ -54,6 +66,16 @@ export const IndividualDashboard = () => {
     { label: 'My Credentials', icon: Award, path: '/individual/credentials', color: 'bg-brand-dark text-white' },
     { label: 'Share Profile', icon: Share2, path: '/individual/share', color: 'bg-green-500 text-white' },
   ];
+
+  if (loading) {
+    return (
+      <AuthLayout title="My Dashboard">
+        <div className="flex items-center justify-center py-20">
+          <LoadingSpinner size="lg" />
+        </div>
+      </AuthLayout>
+    );
+  }
 
   return (
     <AuthLayout title="My Dashboard">
@@ -100,46 +122,59 @@ export const IndividualDashboard = () => {
           <div className="flex items-center justify-between mb-4">
             <div>
               <h3 className="font-sora font-semibold text-lg text-brand-dark">Skill Tree Preview</h3>
-              <p className="text-xs text-gray-500 font-inter mt-0.5">Recent verified and in-progress nodes</p>
+              <p className="text-xs text-gray-500 font-inter mt-0.5">Recent verified and in-progress skills</p>
             </div>
             <Button variant="ghost" size="sm" icon={ArrowRight} onClick={() => navigate('/individual/skill-tree')}>
               View Full
             </Button>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-            {previewItems.map((item, i) => (
-              <motion.div
-                key={item.id}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: i * 0.05 }}
-                className="p-4 rounded-xl bg-gray-50 hover:bg-gray-100 transition-colors"
+          {previewItems.length === 0 ? (
+            <div className="text-center py-8">
+              <GitBranch size={40} className="text-gray-300 mx-auto mb-3" />
+              <p className="font-sora font-semibold text-brand-dark">No skills added yet</p>
+              <p className="text-sm text-gray-400 font-inter mt-1">Start building your verified skill tree</p>
+              <Button
+                variant="primary"
+                size="sm"
+                className="mt-3"
+                onClick={() => navigate('/individual/skill-tree/build?section=education')}
               >
-                <div className="flex items-start justify-between gap-3 mb-2">
-                  <span className={`text-[11px] px-2 py-0.5 rounded-full font-inter font-medium ${sectionStyles[item.section]}`}>
-                    {sectionLabels[item.section]}
-                  </span>
-                  <Badge status={item.status === 'verified' ? 'verified' : 'pending'}>
-                    {item.status === 'verified' ? 'Verified' : 'Pending'}
-                  </Badge>
-                </div>
+                Add Your First Skill
+              </Button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+              {previewItems.map((item, i) => {
+                const badge = statusBadge(item.status);
+                return (
+                  <motion.div
+                    key={item.id}
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: i * 0.05 }}
+                    className="p-4 rounded-xl bg-gray-50 hover:bg-gray-100 transition-colors"
+                  >
+                    <div className="flex items-start justify-between gap-3 mb-2">
+                      <span className={`text-[11px] px-2 py-0.5 rounded-full font-inter font-medium ${sectionStyles[item.skill_type] || sectionStyles.technical}`}>
+                        {sectionLabels[item.skill_type] || item.skill_type}
+                      </span>
+                      <Badge status={badge.status}>
+                        {badge.label}
+                      </Badge>
+                    </div>
 
-                <p className="text-base font-sora font-semibold text-brand-dark leading-tight">{getTitle(item)}</p>
-                <p className="text-sm text-gray-500 font-inter mt-1">
-                  {getSubtitle(item) || 'No source specified'}
-                  {item.year ? ` · ${item.year}` : ''}
-                </p>
-
-                {item.credId && (
-                  <div className="flex items-center gap-1.5 mt-2">
-                    <Hash size={11} className="text-brand-blue" />
-                    <span className="text-xs text-brand-blue font-mono">{item.credId}</span>
-                  </div>
-                )}
-              </motion.div>
-            ))}
-          </div>
+                    <p className="text-base font-sora font-semibold text-brand-dark leading-tight">
+                      {item.skill_name}
+                    </p>
+                    <p className="text-sm text-gray-500 font-inter mt-1">
+                      {item.institution_name || item.skill_info || 'No details specified'}
+                    </p>
+                  </motion.div>
+                );
+              })}
+            </div>
+          )}
         </Card>
       </div>
     </AuthLayout>

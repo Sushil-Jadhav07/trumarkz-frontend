@@ -7,7 +7,7 @@ import {
   Wallet, HelpCircle, User, LogOut, ChevronLeft, ChevronRight,
   GitBranch, Share2, CheckSquare, Building2,
   AlertTriangle, Activity, ShieldCheck, UserCog, UserSearch,
-  Mail, Package,
+  Mail, Package, Star,
 } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -56,6 +56,7 @@ export const Sidebar = ({ collapsed, onToggle, mobileOpen = false, onMobileClose
         { path: '/admin/user-list', label: 'User List', icon: UserSearch },
         { path: '/admin/email-drafts', label: 'Email Drafts', icon: Mail },
         { path: '/admin/product-warranty', label: 'Warranty Review', icon: Package },
+        { path: '/admin/skills-management', label: 'Skills Review', icon: Star },
         { path: '/admin/promote-super-admin', label: 'Promote Admin', icon: UserCog },
         { path: '/admin/verifiers', label: 'Verifiers', icon: Building2 },
         { path: '/admin/disputes', label: 'Disputes', icon: AlertTriangle },

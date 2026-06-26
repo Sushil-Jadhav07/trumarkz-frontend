@@ -91,6 +91,8 @@ import CreateSuperAdmin from '@/pages/admin/CreateSuperAdmin';
 import AllUsersList from '@/pages/admin/AllUsersList';
 import EmailDrafts from '@/pages/admin/EmailDrafts';
 import ProductWarrantyAdmin from '@/pages/admin/ProductWarrantyAdmin';
+import SkillsManagement from '@/pages/admin/SkillsManagement';
+import SkillVerifierUpload from '@/pages/public/SkillVerifierUpload';
 
 const ProtectedRoute = ({ children }) => {
   const { isAuthenticated, loading } = useAuth();
@@ -144,6 +146,7 @@ const AnimatedRoutes = () => {
           <Route path="/auth/error" element={<AuthError />} />
           <Route path="/auth/google/callback" element={<GoogleCallback />} />
           <Route path="/upload" element={<DocumentUpload />} />
+          <Route path="/skills/verify/upload/:token" element={<SkillVerifierUpload />} />
 
           {/* ── Registration routes ── */}
           <Route path="/org-registration" element={<OrgRegistration />} />
@@ -221,6 +224,7 @@ const AnimatedRoutes = () => {
           <Route path="/admin/user-list" element={<ProtectedRoute><AdminRoute><AllUsersList /></AdminRoute></ProtectedRoute>} />
           <Route path="/admin/email-drafts" element={<ProtectedRoute><AdminRoute><EmailDrafts /></AdminRoute></ProtectedRoute>} />
           <Route path="/admin/product-warranty" element={<ProtectedRoute><AdminRoute><ProductWarrantyAdmin /></AdminRoute></ProtectedRoute>} />
+          <Route path="/admin/skills-management" element={<ProtectedRoute><AdminRoute><SkillsManagement /></AdminRoute></ProtectedRoute>} />
         </Routes>
       </div>
     </AnimatePresence>
