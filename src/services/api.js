@@ -327,6 +327,15 @@ export const verificationAPI = {
     appendFormValue(formData, 'verification_types', options.verificationTypes || options.verification_types);
     appendFormValue(formData, 'template_id', options.templateId || options.template_id);
 
+    // Document attachments — doc_files must be appended individually (not joined)
+    const docNames  = options.docProductNames || options.doc_product_names;
+    const docLabels = options.docLabels       || options.doc_labels;
+    const docFiles  = options.docFiles        || options.doc_files;
+
+    if (Array.isArray(docNames)  && docNames.length  > 0) formData.append('doc_product_names', docNames.join(','));
+    if (Array.isArray(docLabels) && docLabels.length > 0) formData.append('doc_labels', docLabels.join(','));
+    if (Array.isArray(docFiles))  docFiles.forEach((f) => formData.append('doc_files', f));
+
     return verificationApi.post('/verification/bulk-upload/products', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
       onUploadProgress: onProgress
@@ -492,11 +501,23 @@ export const verificationAPI = {
   downloadWarrantyTemplate: () =>
     verificationApi.get('/verification/products/warranty-template', { responseType: 'blob' }),
 
-  uploadWarrantyExcel: (file, batchName, description = '', onProgress) => {
+  uploadWarrantyExcel: (file, batchName, description = '', maybeOptions, maybeProgress) => {
     const formData = new FormData();
+    const { options, onProgress } = normalizeUploadArgs(maybeOptions, maybeProgress);
+
     formData.append('file', file);
     formData.append('batch_name', batchName);
     if (description) formData.append('description', description);
+
+    // Document attachments
+    const docNames  = options.docProductNames || options.doc_product_names;
+    const docLabels = options.docLabels       || options.doc_labels;
+    const docFiles  = options.docFiles        || options.doc_files;
+
+    if (Array.isArray(docNames)  && docNames.length  > 0) formData.append('doc_product_names', docNames.join(','));
+    if (Array.isArray(docLabels) && docLabels.length > 0) formData.append('doc_labels', docLabels.join(','));
+    if (Array.isArray(docFiles))  docFiles.forEach((f) => formData.append('doc_files', f));
+
     return verificationApi.post('/verification/products/warranty-upload', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
       onUploadProgress: onProgress
@@ -553,6 +574,17 @@ export const skillsAPI = {
     return api.get(`/skills/all/list${qs ? `?${qs}` : ''}`);
   },
 
+  editSkill: (skillId, payload) =>
+    api.patch(
+      `/skills/${skillId}/edit`,
+      cleanObject({
+        skill_name: payload.skill_name,
+        skill_info: payload.skill_info,
+        institution_name: payload.institution_name,
+        degree: payload.degree,
+      })
+    ),
+
   updateSkillStatus: (skillId, status, reason) =>
     api.patch(`/skills/${skillId}/status`, cleanObject({ status, reason })),
 
@@ -569,6 +601,10 @@ export const skillsAPI = {
       headers: { 'Content-Type': 'multipart/form-data' },
     });
   },
+
+  deleteSkill: (skillId) => api.delete(`/skills/${skillId}`),
+
+  deleteAllSkills: (individualId) => api.delete(`/skills/all/${individualId}`),
 };
 
 export const healthCheck = () => api.get('/health');

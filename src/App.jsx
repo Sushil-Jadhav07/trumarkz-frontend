@@ -170,7 +170,7 @@ const AnimatedRoutes = () => {
           <Route path="/org/costing" element={<CostBreakdown />} />
           <Route path="/org/certificate-preview" element={<CertificatePreview />} />
           <Route path="/org/create-batch" element={<CreateBatch />} />
-          <Route path="/org/batch-status" element={<BatchStatus />} />
+          <Route path="/org/batch-status" element={<ProtectedRoute><BatchStatus /></ProtectedRoute>} />
           <Route path="/org/record/:id" element={<RecordDetail />} />
 
           {/* ── Product verification flow ── */}

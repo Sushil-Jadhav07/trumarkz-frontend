@@ -126,24 +126,36 @@ const formatLastAction = (value) => {
   return new Date(value).toLocaleString([], { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
 };
 
+const formatCreatedAt = (value) => {
+  if (!value) return 'Created date unavailable';
+  return new Date(value).toLocaleString([], { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+};
+
 const groupByBatch = (records) => {
   const batches = records.reduce((acc, record) => {
     const id = record.batch_id || 'single-records';
+    const createdAt = record.created_at ? new Date(record.created_at).getTime() : 0;
     if (!acc[id]) {
       acc[id] = {
         id, name: id === 'single-records' ? 'Single records' : `Batch ${id.slice(0, 8)}`,
         orgName: record.organization_name || record.org_name || 'Organization',
-        records: [], total: 0, pending: 0, verified: 0, failed: 0,
+        records: [], total: 0, pending: 0, verified: 0, failed: 0, latestCreatedAt: createdAt,
       };
     }
     acc[id].records.push(record);
     acc[id].total += 1;
+    if (createdAt > (acc[id].latestCreatedAt || 0)) acc[id].latestCreatedAt = createdAt;
     if (record.verification_status === 'verified') acc[id].verified += 1;
     else if (record.verification_status === 'failed') acc[id].failed += 1;
     else acc[id].pending += 1;
     return acc;
   }, {});
-  return Object.values(batches).sort((a, b) => b.pending - a.pending || b.total - a.total);
+  return Object.values(batches).sort((a, b) => {
+    if ((b.latestCreatedAt || 0) !== (a.latestCreatedAt || 0)) {
+      return (b.latestCreatedAt || 0) - (a.latestCreatedAt || 0);
+    }
+    return b.pending - a.pending || b.total - a.total;
+  });
 };
 
 // ── Select-Verifier sub-modal (multi-step wizard) ────────────────────────────
@@ -640,6 +652,7 @@ export const BatchMonitor = () => {
       ...batch,
       name: edited.name || batch.name,
       orgName: edited.orgName || batch.orgName,
+      createdAt: batch.latestCreatedAt || null,
       pending: batchComplete ? 0 : batch.pending,
       verified: batchComplete ? batch.total - batch.failed : batch.verified,
       status,
@@ -990,8 +1003,8 @@ export const BatchMonitor = () => {
                             </div>
                             <div className="min-w-0">
                               <p className="font-sora font-semibold text-lg leading-5 text-brand-dark">{batch.name}</p>
-                              <p className="text-xs text-gray-400 font-inter mt-1 truncate">{batch.orgName} / {batch.id}</p>
-                              <p className="text-[11px] text-gray-400 font-inter mt-2">{formatLastAction(batch.lastAction)}</p>
+                              <p className="text-xs text-gray-400 font-inter mt-1 truncate">{batch.orgName}</p>
+                              <p className="text-[11px] text-gray-400 font-inter mt-2">Created {formatCreatedAt(batch.createdAt)}</p>
                             </div>
                           </div>
                         </td>
@@ -1100,7 +1113,7 @@ export const BatchMonitor = () => {
                     <div>
                       <p className="text-xs font-semibold uppercase tracking-wide opacity-80 font-inter">Current stage</p>
                       <h3 className="font-sora font-bold text-2xl mt-1">{selectedBatch.statusMeta.label}</h3>
-                      <p className="text-xs opacity-80 font-inter mt-2">{selectedBatch.orgName} / {selectedBatch.id}</p>
+                      <p className="text-xs opacity-80 font-inter mt-2">{selectedBatch.orgName}</p>
                     </div>
                     <div className="w-12 h-12 rounded-2xl bg-white/70 flex items-center justify-center shrink-0">
                       <Package size={22} />
@@ -1123,7 +1136,7 @@ export const BatchMonitor = () => {
 
                 <div className="min-w-0 rounded-xl border border-gray-100 bg-white p-5">
                   <p className="text-xs text-gray-400 font-inter">Last action</p>
-                  <p className="font-sora font-semibold text-brand-dark mt-1">{formatLastAction(selectedBatch.lastAction)}</p>
+                      <p className="font-sora font-semibold text-brand-dark mt-1">{formatCreatedAt(selectedBatch.createdAt)}</p>
                   <div className="mt-4 space-y-3">
                     <div className="flex items-center justify-between text-xs font-inter">
                       <span className="text-gray-500">Verified document</span>

@@ -121,66 +121,6 @@ const typeLabels = {
   project: 'Project',
 };
 
-const demoSkills = [
-  {
-    id: 'demo-skill-1',
-    skill_name: 'B.Com',
-    skill_type: 'education',
-    institution_name: 'Thakur College',
-    degree: 'Finance',
-    skill_info: '2024 passout',
-    individual_name: 'Aarav Shah',
-    status: 'pending',
-    documents: [],
-  },
-  {
-    id: 'demo-skill-2',
-    skill_name: 'React',
-    skill_type: 'technical',
-    skill_info: 'Built admin dashboards and forms',
-    individual_name: 'Rhea Patil',
-    status: 'verified',
-    documents: [{ id: 'doc-1' }],
-  },
-  {
-    id: 'demo-skill-3',
-    skill_name: 'Communication',
-    skill_type: 'soft',
-    skill_info: 'Handled client coordination and support',
-    individual_name: 'Kabir Mehta',
-    status: 'pending',
-    documents: [],
-  },
-  {
-    id: 'demo-skill-4',
-    skill_name: 'Inventory App',
-    skill_type: 'project',
-    skill_info: 'Created a stock tracking web app',
-    individual_name: 'Nisha Verma',
-    status: 'rejected',
-    documents: [{ id: 'doc-2' }, { id: 'doc-3' }],
-  },
-  {
-    id: 'demo-skill-5',
-    skill_name: '12th',
-    skill_type: 'education',
-    institution_name: 'NL Dalmia',
-    degree: 'Commerce',
-    individual_name: 'Pooja Rao',
-    status: 'pending',
-    documents: [],
-  },
-  {
-    id: 'demo-skill-6',
-    skill_name: 'Node.js',
-    skill_type: 'technical',
-    skill_info: 'REST APIs and authentication flows',
-    individual_name: 'Dev Malhotra',
-    status: 'verified',
-    documents: [{ id: 'doc-4' }],
-  },
-];
-
 const statusBadgeMap = (status) => {
   if (status === 'verified') return { status: 'verified', label: 'Verified' };
   if (status === 'rejected') return { status: 'failed', label: 'Rejected' };
@@ -198,7 +138,6 @@ const skillDetails = (skill) => {
 export const SkillsManagement = () => {
   const [skills, setSkills] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [usingDemoData, setUsingDemoData] = useState(false);
   const [filterStatus, setFilterStatus] = useState('');
   const [filterType, setFilterType] = useState('');
   const [actionModal, setActionModal] = useState(null);
@@ -214,38 +153,10 @@ export const SkillsManagement = () => {
       if (filterStatus) params.status = filterStatus;
       if (filterType) params.skill_type = filterType;
       const res = await skillsAPI.getAllSkills(params);
-      const apiSkills = res.data.skills || [];
-
-      if (apiSkills.length > 0) {
-        setSkills(apiSkills);
-        setUsingDemoData(false);
-      } else {
-        const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-        if (isLocalhost) {
-          const filteredDemoSkills = demoSkills.filter((skill) => {
-            const statusMatch = !filterStatus || skill.status === filterStatus;
-            const typeMatch = !filterType || skill.skill_type === filterType;
-            return statusMatch && typeMatch;
-          });
-          setSkills(filteredDemoSkills);
-          setUsingDemoData(true);
-        } else {
-          setSkills([]);
-          setUsingDemoData(false);
-        }
-      }
+      setSkills(res.data.skills || []);
     } catch (err) {
       toast.error(getApiError(err, 'Failed to load skills'));
-      const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-      if (isLocalhost) {
-        const filteredDemoSkills = demoSkills.filter((skill) => {
-          const statusMatch = !filterStatus || skill.status === filterStatus;
-          const typeMatch = !filterType || skill.skill_type === filterType;
-          return statusMatch && typeMatch;
-        });
-        setSkills(filteredDemoSkills);
-        setUsingDemoData(true);
-      }
+      setSkills([]);
     } finally {
       setLoading(false);
     }
@@ -330,7 +241,6 @@ export const SkillsManagement = () => {
               <Filter size={16} className="text-gray-400" />
               <h3 className="font-sora text-brand-dark font-semibold">All Skills</h3>
               <Badge status="info">{skills.length} Total</Badge>
-              {usingDemoData && <Badge status="warning">Demo Data</Badge>}
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
@@ -379,9 +289,9 @@ export const SkillsManagement = () => {
                           </div>
                           <div className="min-w-0">
                             <p className="truncate text-sm font-semibold text-brand-dark font-inter">{skill.skill_name}</p>
-                            {skill.individual_name && (
+                            {(skill.individual_name || skill.individual_id) && (
                               <p className="mt-1 flex items-center gap-1 text-xs text-gray-400 font-inter">
-                                <User size={10} /> {skill.individual_name}
+                                <User size={10} /> {skill.individual_name || skill.individual_id}
                               </p>
                             )}
                           </div>
@@ -407,6 +317,9 @@ export const SkillsManagement = () => {
                           ))
                         ) : (
                           <p className="text-xs text-gray-300 font-inter">No extra details</p>
+                        )}
+                        {skill.status === 'rejected' && (skill.status_reason || skill.reason) && (
+                          <p className="text-xs text-red-500 font-inter">{skill.status_reason || skill.reason}</p>
                         )}
                       </div>
 
@@ -505,6 +418,12 @@ export const SkillsManagement = () => {
                 <div className="sm:col-span-2">
                   <p className="text-xs text-gray-400">Info</p>
                   <p className="font-medium text-brand-dark">{actionModal.skill_info}</p>
+                </div>
+              )}
+              {(actionModal?.status_reason || actionModal?.reason) && (
+                <div className="sm:col-span-2">
+                  <p className="text-xs text-gray-400">Reason</p>
+                  <p className="font-medium text-brand-dark">{actionModal.status_reason || actionModal.reason}</p>
                 </div>
               )}
             </div>

@@ -8,7 +8,7 @@ import { Card } from '@/components/ui/Card';
 import { Modal } from '@/components/ui/Modal';
 import { StepWizard } from '@/components/ui/StepWizard';
 import { FileUpload } from '@/components/ui/FileUpload';
-import { ArrowRight, Download, Plus, Upload, X } from 'lucide-react';
+import { ArrowRight, CheckCircle, ChevronDown, Download, FileText, Plus, RefreshCw, Upload, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useApp } from '@/context/AppContext';
 import {
@@ -67,7 +67,75 @@ export const ProductTemplate = () => {
   const [fieldInput, setFieldInput] = useState('');
   const [modalOpen, setModalOpen] = useState(false);
   const [downloading, setDownloading] = useState(false);
-const [excelFile, setExcelFile] = useState(null);
+  const [excelFile, setExcelFile] = useState(null);
+
+  // Document attachments — labels differ by warranty vs product flow
+  const _isWarrantyFlow = selectedProductService?.id === 'warranty';
+  const DOC_LABEL_OPTIONS = _isWarrantyFlow
+    ? [
+        { value: 'warranty_card',        label: 'Warranty Card' },
+        { value: 'warranty_certificate', label: 'Warranty Certificate' },
+      ]
+    : [
+        { value: 'certificate',    label: 'Certificate' },
+        { value: 'warranty_card',  label: 'Warranty Card' },
+        { value: 'compliance_doc', label: 'Compliance Doc' },
+      ];
+  const docFileInputRef = useRef(null);
+  const [docEntries, setDocEntries] = useState([]);
+  const [activeDocIdx, setActiveDocIdx] = useState(null);
+
+  const addDocEntry = () =>
+    setDocEntries((prev) => [
+      ...prev,
+      { id: Date.now(), productName: '', label: '', file: null },
+    ]);
+
+  const removeDocEntry = (id) =>
+    setDocEntries((prev) => prev.filter((e) => e.id !== id));
+
+  const updateDocEntry = (id, patch) =>
+    setDocEntries((prev) => prev.map((e) => (e.id === id ? { ...e, ...patch } : e)));
+
+  const openDocFilePicker = (idx) => {
+    setActiveDocIdx(idx);
+    docFileInputRef.current?.click();
+  };
+
+  const handleDocFileChange = (e) => {
+    const file = e.target.files?.[0];
+    if (!file || activeDocIdx === null) return;
+    setDocEntries((prev) =>
+      prev.map((entry, i) => (i === activeDocIdx ? { ...entry, file } : entry))
+    );
+    e.target.value = '';
+    setActiveDocIdx(null);
+  };
+
+  // Product names parsed from the uploaded Excel — drives the product name dropdown
+  const [excelProductNames, setExcelProductNames] = useState([]);
+  const [openProductDropdownId, setOpenProductDropdownId] = useState(null);
+
+  useEffect(() => {
+    if (!excelFile) { setExcelProductNames([]); return; }
+    const read = async () => {
+      try {
+        const buf = await excelFile.arrayBuffer();
+        const wb = XLSX.read(buf, { type: 'array' });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json(ws, { header: 1 });
+        const headers = (rows[0] || []).map((h) => sanitizeKey(h));
+        const nameIdx = headers.indexOf('product_name');
+        if (nameIdx === -1) { setExcelProductNames([]); return; }
+        const names = rows.slice(1)
+          .map((row) => String(row[nameIdx] ?? '').trim())
+          .filter(Boolean);
+        setExcelProductNames([...new Set(names)]);
+      } catch { setExcelProductNames([]); }
+    };
+    read();
+  }, [excelFile]);
+
   const isWarranty = selectedProductService?.id === 'warranty';
   const [batchNameValue, setBatchNameValue] = useState(() => {
     const d = new Date();
@@ -126,6 +194,18 @@ const [excelFile, setExcelFile] = useState(null);
 
   const handleContinue = async () => {
     if (!excelFile) { toast.error('Please upload the completed Excel file'); return; }
+
+    // Validate doc entries — reject partial ones before proceeding
+    const incompleteDocs = docEntries.filter(
+      (e) =>
+        (e.productName.trim() || e.label?.trim() || e.file) &&
+        !(e.productName.trim() && e.label?.trim() && e.file)
+    );
+    if (incompleteDocs.length > 0) {
+      toast.error(`${incompleteDocs.length} document attachment(s) are incomplete — fill product name and file or remove them.`);
+      return;
+    }
+
     try {
       const arrayBuffer = await excelFile.arrayBuffer();
       const workbook = XLSX.read(arrayBuffer, { type: 'array' });
@@ -147,6 +227,8 @@ const [excelFile, setExcelFile] = useState(null);
         .length;
       if (recordCount <= 0) { toast.error('The uploaded file has no data rows'); return; }
 
+      const validDocs = docEntries.filter((e) => e.productName.trim() && e.label?.trim() && e.file);
+
       setProductBatchData({
         file: excelFile,
         batchName: batchNameValue,
@@ -156,6 +238,7 @@ const [excelFile, setExcelFile] = useState(null);
         fileName: excelFile.name,
         costConfirmed: false,
         uploadResponse: null,
+        docEntries: validDocs,
       });
       navigate('/org/product/costing');
     } catch {
@@ -183,66 +266,343 @@ const [excelFile, setExcelFile] = useState(null);
         />
 
         <div>
-          <Card className="p-6 border border-blue-100 shadow-[0_18px_48px_-40px_rgba(37,99,235,0.28)] space-y-5">
-            <div className="flex items-center gap-3 pb-1 border-b border-gray-100">
-              <div className="w-10 h-10 rounded-xl bg-blue-50 text-brand-blue flex items-center justify-center shrink-0">
-                <Upload size={18} />
+          <Card className="overflow-hidden border border-gray-100 p-0">
+
+            {/* ══ TOP — Context + Batch Name (full width) ══════════════════ */}
+            <div className="border-b border-gray-100 bg-gray-50/60 px-8 py-6">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="rounded-lg border border-brand-blue/20 bg-brand-blue/10 px-2.5 py-1 font-inter text-xs font-semibold text-brand-blue">
+                    {selectedProductSector?.title}
+                  </span>
+                  <span className="font-inter text-xs text-gray-300">→</span>
+                  <span className="rounded-lg border border-gray-200 bg-white px-2.5 py-1 font-inter text-xs font-semibold text-gray-500">
+                    {selectedProductService?.title}
+                  </span>
+                </div>
               </div>
-              <div>
-                <h3 className="font-sora text-base font-semibold text-slate-950">Upload Batch File</h3>
-                <p className="font-inter text-xs text-slate-500 mt-0.5">
-                  {selectedProductSector?.title} · {selectedProductService?.title}
-                </p>
+              <div className="mt-5">
+                <label className="mb-1.5 block font-inter text-xs font-semibold uppercase tracking-widest text-gray-400">
+                  Batch Name
+                </label>
+                <input
+                  value={batchNameValue}
+                  onChange={(e) => setBatchNameValue(e.target.value)}
+                  className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3 font-inter text-sm font-medium text-brand-dark outline-none transition-all placeholder:text-gray-300 focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/15"
+                  placeholder="e.g. Electronics Batch June 2026"
+                />
               </div>
             </div>
 
-            <div>
-              <label className="block font-inter text-sm font-medium text-slate-800 mb-1.5">
-                Batch Name
-              </label>
-              <input
-                value={batchNameValue}
-                onChange={(e) => setBatchNameValue(e.target.value)}
-                className="w-full rounded-xl border-2 border-slate-200 px-4 py-2.5 font-inter text-sm text-slate-950 outline-none focus:border-brand-blue focus:ring-4 focus:ring-brand-blue/10 transition-all"
-                placeholder="e.g. Electronics Batch June 2026"
-              />
+            {/* ══ BODY — Two columns ══════════════════════════════════════ */}
+            <div className="flex min-h-0 flex-col lg:flex-row">
+
+              {/* ── LEFT — Upload Data File + Summary ─────────────────── */}
+              <div className="flex w-1/2 shrink-0 flex-col border-b border-gray-100 bg-gray-50/30 lg:border-b-0 lg:border-r">
+
+                {/* Section header */}
+                <div className="flex items-center gap-2.5 border-b border-gray-100 bg-gray-50/60 px-6 py-4">
+                  <div className={`flex h-7 w-7 items-center justify-center rounded-lg ${excelFile ? 'bg-green-100' : 'bg-blue-50'}`}>
+                    <Upload size={13} className={excelFile ? 'text-green-600' : 'text-brand-blue'} />
+                  </div>
+                  <div>
+                    <p className="font-inter text-sm font-semibold text-brand-dark">Upload Data File</p>
+                    <p className="font-inter text-[11px] text-gray-400">.xlsx · Max 5 MB</p>
+                  </div>
+                  {excelFile && (
+                    <span className="ml-auto flex items-center gap-1 rounded-full bg-green-100 px-2.5 py-1 font-inter text-[10px] font-bold text-green-700">
+                      <CheckCircle size={10} /> Ready
+                    </span>
+                  )}
+                </div>
+
+                {/* File upload zone */}
+                <div className="border-b border-gray-100 p-6">
+                  <FileUpload
+                    label="Completed Excel file (.xlsx)"
+                    fileType="xlsx"
+                    accept={{ 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'] }}
+                    selectedFile={excelFile}
+                    onFileSelect={setExcelFile}
+                    onRemove={() => setExcelFile(null)}
+                  />
+                </div>
+
+                {/* Stats */}
+                <div className="flex-1 space-y-3 p-6">
+
+                  {/* Columns + Custom tiles */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="rounded-xl border border-gray-200 bg-white p-4 text-center">
+                      <p className="font-sora text-2xl font-bold text-brand-dark">{templateHeaders.length}</p>
+                      <p className="mt-0.5 font-inter text-[11px] text-gray-400">Columns</p>
+                    </div>
+                    <div className="rounded-xl border border-gray-200 bg-white p-4 text-center">
+                      <p className="font-sora text-2xl font-bold text-brand-dark">{customFields.length}</p>
+                      <p className="mt-0.5 font-inter text-[11px] text-gray-400">Custom Fields</p>
+                    </div>
+                  </div>
+
+                  {/* Docs stat */}
+                  <div className={`rounded-xl border p-4 transition-colors ${docEntries.length > 0 ? 'border-blue-100 bg-blue-50/40' : 'border-gray-200 bg-white'}`}>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="font-inter text-[10px] font-bold uppercase tracking-widest text-gray-400">Documents</p>
+                        <p className={`mt-0.5 font-inter text-sm font-semibold ${docEntries.length > 0 ? 'text-brand-dark' : 'text-gray-300'}`}>
+                          {docEntries.length > 0
+                            ? `${docEntries.filter((e) => e.file).length} / ${docEntries.length} attached`
+                            : 'None attached'}
+                        </p>
+                      </div>
+                      {docEntries.length > 0 && docEntries.every((e) => e.file && e.productName.trim() && e.label?.trim()) && (
+                        <span className="rounded-full bg-green-100 px-2 py-0.5 font-inter text-[10px] font-bold text-green-700">All ready</span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Checklist */}
+                  <div className="rounded-xl border border-gray-100 bg-white p-4">
+                    <p className="mb-3 font-inter text-[10px] font-bold uppercase tracking-widest text-gray-400">Checklist</p>
+                    <div className="space-y-2.5">
+                      {[
+                        { label: 'Batch name set',          done: Boolean(batchNameValue.trim()) },
+                        { label: 'Excel file uploaded',     done: Boolean(excelFile) },
+                        { label: 'Docs ready (or skipped)', done: docEntries.length === 0 || docEntries.every((e) => e.file && e.productName.trim() && e.label?.trim()) },
+                      ].map(({ label, done }) => (
+                        <div key={label} className="flex items-center gap-2.5">
+                          <div className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full transition-colors ${done ? 'bg-green-100' : 'bg-gray-100'}`}>
+                            {done
+                              ? <CheckCircle size={10} className="text-green-600" />
+                              : <div className="h-1.5 w-1.5 rounded-full bg-gray-300" />}
+                          </div>
+                          <span className={`font-inter text-xs ${done ? 'text-brand-dark' : 'text-gray-400'}`}>{label}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                </div>
+
+              </div>{/* end LEFT — Upload Data File */}
+
+              {/* ── RIGHT — Product Documents ─────────────────────────── */}
+              <div className="flex-1 bg-gray-50">
+
+                {/* Section header */}
+                <div className="flex items-center justify-between border-b border-gray-200 bg-white px-6 py-4">
+                  <div className="flex items-center gap-2.5">
+                    <div className={`flex h-7 w-7 items-center justify-center rounded-lg ${docEntries.length > 0 && docEntries.every((e) => e.file && e.productName.trim() && e.label?.trim()) ? 'bg-green-100' : 'bg-blue-100'}`}>
+                      <FileText size={13} className={docEntries.length > 0 && docEntries.every((e) => e.file && e.productName.trim() && e.label?.trim()) ? 'text-green-600' : 'text-brand-blue'} />
+                    </div>
+                    <div>
+                      <p className="font-inter text-sm font-semibold text-brand-dark">Product Documents</p>
+                      <p className="font-inter text-[11px] text-gray-500">Attach warranty cards or certificates to products</p>
+                    </div>
+                    <span className="rounded-md bg-gray-200 px-2 py-0.5 font-inter text-[10px] font-semibold text-gray-500">Optional</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={addDocEntry}
+                    className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-brand-blue/30 bg-brand-blue/10 px-3 py-1.5 font-inter text-xs font-semibold text-brand-blue transition-colors hover:bg-brand-blue hover:text-white"
+                  >
+                    <Plus size={12} />
+                    {docEntries.length === 0 ? 'Add Document' : 'Add More'}
+                  </button>
+                </div>
+
+                {/* ── Document entries ── */}
+                <div className="bg-gray-50">
+
+              {/* Empty state */}
+              {docEntries.length === 0 ? (
+                <div className="flex flex-col items-center gap-3 py-10 text-center">
+                  <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-gray-200 bg-white">
+                    <FileText size={17} className="text-gray-400" />
+                  </div>
+                  <p className="max-w-xs font-inter text-xs text-gray-500">
+                    Optionally attach warranty cards, certificates, or compliance docs to individual products in your sheet.
+                  </p>
+                </div>
+              ) : (
+                <>
+                  {/* Entry cards */}
+                  <div className="space-y-2 p-4">
+                    {docEntries.map((entry, idx) => {
+                      const isComplete = entry.productName.trim() && entry.label?.trim() && entry.file;
+                      return (
+                        <div
+                          key={entry.id}
+                          className={`rounded-xl border p-3 transition-colors ${
+                            isComplete
+                              ? 'border-green-200 bg-green-50'
+                              : 'border-gray-200 bg-white'
+                          }`}
+                        >
+                          <div className="flex items-center gap-3">
+                            {/* Index / done indicator */}
+                            <div
+                              className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg font-inter text-[11px] font-bold transition-colors ${
+                                isComplete
+                                  ? 'bg-green-100 text-green-600'
+                                  : 'bg-gray-100 border border-gray-300 text-gray-500'
+                              }`}
+                            >
+                              {isComplete
+                                ? <CheckCircle size={14} />
+                                : String(idx + 1).padStart(2, '0')}
+                            </div>
+
+                            {/* Product name dropdown */}
+                            <div className="relative min-w-0 flex-1">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setOpenProductDropdownId(
+                                    openProductDropdownId === entry.id ? null : entry.id
+                                  )
+                                }
+                                className={`flex w-full items-center justify-between rounded-xl border px-3 py-2 font-inter text-sm transition-colors focus:outline-none ${
+                                  openProductDropdownId === entry.id
+                                    ? 'border-brand-blue bg-white ring-2 ring-brand-blue/15'
+                                    : isComplete
+                                    ? 'border-green-200 bg-white text-brand-dark'
+                                    : 'border-gray-200 bg-white hover:border-gray-300'
+                                }`}
+                              >
+                                <span className={`truncate text-sm ${entry.productName ? 'text-brand-dark' : 'text-gray-400'}`}>
+                                  {entry.productName || 'Select product…'}
+                                </span>
+                                <ChevronDown
+                                  size={13}
+                                  className={`ml-2 shrink-0 text-gray-400 transition-transform duration-200 ${
+                                    openProductDropdownId === entry.id ? 'rotate-180' : ''
+                                  }`}
+                                />
+                              </button>
+
+                              {openProductDropdownId === entry.id && (
+                                <>
+                                  <div className="fixed inset-0 z-40" onClick={() => setOpenProductDropdownId(null)} />
+                                  <div className="absolute left-0 top-[calc(100%+4px)] z-50 w-full rounded-xl border border-gray-200 bg-white">
+                                    {excelProductNames.length === 0 ? (
+                                      <div className="px-4 py-5 text-center">
+                                        <p className="font-inter text-xs text-gray-400">
+                                          {excelFile ? 'No product_name column found in the file' : 'Upload your Excel file first to see products'}
+                                        </p>
+                                      </div>
+                                    ) : (
+                                      <div className="max-h-40 overflow-y-auto rounded-xl">
+                                        {excelProductNames.map((name) => (
+                                          <div
+                                            key={name}
+                                            role="button"
+                                            onClick={() => {
+                                              updateDocEntry(entry.id, { productName: name });
+                                              setOpenProductDropdownId(null);
+                                            }}
+                                            className={`cursor-pointer px-3 py-2.5 font-inter text-sm transition-colors first:rounded-t-xl last:rounded-b-xl hover:bg-blue-50 hover:text-brand-blue ${
+                                              entry.productName === name
+                                                ? 'bg-blue-50 font-semibold text-brand-blue'
+                                                : 'text-brand-dark'
+                                            }`}
+                                          >
+                                            {name}
+                                          </div>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
+                                </>
+                              )}
+                            </div>
+
+                            {/* Doc type */}
+                            <input
+                              type="text"
+                              value={entry.label}
+                              onChange={(e) => updateDocEntry(entry.id, { label: e.target.value })}
+                              placeholder="Doc type"
+                              className={`w-32 shrink-0 rounded-xl border px-3 py-2 font-inter text-sm placeholder-gray-400 focus:border-brand-blue focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-blue/15 ${
+                                isComplete ? 'border-green-200 bg-white text-brand-dark' : 'border-gray-300 bg-white text-brand-dark'
+                              }`}
+                            />
+
+                            {/* File */}
+                            {entry.file ? (
+                              <div className="flex w-44 shrink-0 items-center gap-2 rounded-xl border border-green-200 bg-green-50 px-3 py-2">
+                                <CheckCircle size={13} className="shrink-0 text-green-600" />
+                                <span className="min-w-0 flex-1 truncate font-inter text-xs font-medium text-green-700">
+                                  {entry.file.name}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => updateDocEntry(entry.id, { file: null })}
+                                  className="shrink-0 text-green-400 transition-colors hover:text-red-500"
+                                >
+                                  <X size={11} />
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => openDocFilePicker(idx)}
+                                className="flex w-44 shrink-0 items-center justify-center gap-1.5 rounded-xl border border-dashed border-gray-400 py-2 font-inter text-xs text-gray-500 transition-colors hover:border-brand-blue hover:bg-blue-50/40 hover:text-brand-blue"
+                              >
+                                <Upload size={12} />
+                                Pick file
+                              </button>
+                            )}
+
+                            {/* Remove */}
+                            <button
+                              type="button"
+                              onClick={() => removeDocEntry(entry.id)}
+                              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-gray-300 transition-colors hover:bg-red-50 hover:text-red-500"
+                            >
+                              <X size={13} />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Footer strip when entries exist */}
+                  {docEntries.length > 0 && (
+                    <div className="flex items-center justify-between border-t border-gray-200 bg-white px-4 py-2.5">
+                      <span className="font-inter text-[11px] text-gray-500">
+                        {docEntries.filter((e) => e.file && e.productName.trim() && e.label?.trim()).length} of {docEntries.length} complete
+                      </span>
+                      {docEntries.every((e) => e.file && e.productName.trim() && e.label?.trim()) && (
+                        <span className="flex items-center gap-1 font-inter text-[11px] font-semibold text-green-600">
+                          <CheckCircle size={11} /> All ready
+                        </span>
+                      )}
+                    </div>
+                  )}
+
+                  <input
+                    ref={docFileInputRef}
+                    type="file"
+                    accept=".pdf,.jpg,.jpeg,.png,.xlsx,.xls,.doc,.docx"
+                    onChange={handleDocFileChange}
+                    className="hidden"
+                  />
+                </>
+              )}
+              </div>{/* end doc entries container */}
+
+              </div>{/* end RIGHT — Product Documents */}
+
+            </div>{/* end body flex row */}
+
+            {/* ══ BOTTOM — Continue button (full width) ══════════════════ */}
+            <div className="border-t border-gray-100 bg-white px-8 py-5">
+              <Button variant="primary" size="lg" className="w-full" onClick={handleContinue} icon={ArrowRight}>
+                Continue
+              </Button>
             </div>
 
-            <FileUpload
-              label="Completed Excel file (.xlsx)"
-              fileType="xlsx"
-              accept={{ 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'] }}
-              selectedFile={excelFile}
-              onFileSelect={setExcelFile}
-              onRemove={() => setExcelFile(null)}
-            />
-
-            <div className="rounded-xl bg-slate-50 border border-slate-100 px-4 py-3 space-y-2">
-              <div className="flex items-center justify-between font-inter text-sm">
-                <span className="text-slate-500">Template columns</span>
-                <span className="font-semibold text-slate-900">{templateHeaders.length}</span>
-              </div>
-              <div className="flex items-center justify-between font-inter text-sm">
-                <span className="text-slate-500">Custom fields added</span>
-                <span className="font-semibold text-slate-900">{customFields.length}</span>
-              </div>
-              <div className="flex items-center justify-between font-inter text-sm">
-                <span className="text-slate-500">File attached</span>
-                <span className={`font-semibold ${excelFile ? 'text-brand-blue' : 'text-slate-400'}`}>
-                  {excelFile ? excelFile.name : 'None'}
-                </span>
-              </div>
-            </div>
-
-            <Button
-              variant="primary"
-              size="lg"
-              className="w-full"
-              onClick={handleContinue}
-              icon={ArrowRight}
-            >
-              Continue
-            </Button>
           </Card>
         </div>
       </div>

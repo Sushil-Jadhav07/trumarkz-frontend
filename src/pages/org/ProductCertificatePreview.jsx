@@ -63,10 +63,18 @@ export const ProductCertificatePreview = () => {
       // Warranty: use the dedicated warranty upload endpoint
       setSubmitting(true);
       try {
+        const warrantyDocs = (productBatchData.docEntries || []).filter(
+          (e) => e.productName?.trim() && e.label && e.file
+        );
         const { data } = await verificationAPI.uploadWarrantyExcel(
           productBatchData.file,
           productBatchData.batchName.trim(),
-          productBatchData.description || ''
+          productBatchData.description || '',
+          {
+            docProductNames: warrantyDocs.map((e) => e.productName.trim()),
+            docLabels:       warrantyDocs.map((e) => e.label),
+            docFiles:        warrantyDocs.map((e) => e.file),
+          }
         );
         setProductBatchData((current) => ({
           ...(current || {}),
@@ -85,6 +93,9 @@ export const ProductCertificatePreview = () => {
     // Product verification: standard bulk upload
     setSubmitting(true);
     try {
+      const validDocs = (productBatchData.docEntries || []).filter(
+        (e) => e.productName?.trim() && e.label && e.file
+      );
       const { data } = await verificationAPI.bulkUploadProducts(
         productBatchData.file,
         productBatchData.batchName.trim(),
@@ -94,6 +105,9 @@ export const ProductCertificatePreview = () => {
           verificationTypes: selectedProductVerifications,
           credentialVisibility,
           templateId: activeTemplate,
+          docProductNames: validDocs.map((e) => e.productName.trim()),
+          docLabels:       validDocs.map((e) => e.label),
+          docFiles:        validDocs.map((e) => e.file),
         }
       );
 
