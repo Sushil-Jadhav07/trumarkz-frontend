@@ -11,7 +11,7 @@ import { Input } from '@/components/ui/Input';
 import { verificationAPI, verifiersAPI, getApiError, triggerBlobDownload } from '@/services/api';
 import {
   ArrowRight, CheckCircle, ChevronLeft, Clock, Download, Eye, FileText, Filter, IdCard, Info,
-  Mail, MoreVertical, Package, Pencil, Plus, QrCode, RefreshCw, Send, Trash2, Upload, User, Users, XCircle, Zap,
+  Mail, MoreVertical, Package, Pencil, Plus, QrCode, RefreshCw, Send, Trash2, Upload, User, Users, X, XCircle, Zap,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -151,30 +151,56 @@ const groupByBatch = (records) => {
   });
 };
 
-// ── Smart Send — Verifier Row (extracted to satisfy Rules of Hooks) ───────────
-const VerifierRow = ({ row, ri, rowCount, typeName, allVerifiers, onUpdate, onRemove }) => {
+// ── Smart Send — Verifier Row ─────────────────────────────────────────────────
+const VerifierRow = ({ row, ri, allVerifiers, batchUsers, takenUserIds, onUpdate, onRemove }) => {
   const [showTemplate, setShowTemplate] = useState(false);
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [showUserPicker, setShowUserPicker] = useState(false);
+  const [userSearch, setUserSearch] = useState('');
   const dropdownRef = useRef(null);
+
   const verifierInfo = allVerifiers.find((v) => v.id === row.verifier_id);
+  const assignedIds = new Set(row.user_ids || []);
+  // users not taken by OTHER rows in same type
+  const availableUsers = batchUsers.filter((u) => !takenUserIds.has(u.id));
+  const filteredAvailable = availableUsers.filter(
+    (u) => !assignedIds.has(u.id) &&
+      (userSearch === '' || u.name.toLowerCase().includes(userSearch.toLowerCase()))
+  );
 
   useEffect(() => {
     if (!dropdownOpen) return;
-    const handler = (e) => { if (dropdownRef.current && !dropdownRef.current.contains(e.target)) setDropdownOpen(false); };
+    const handler = (e) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) setDropdownOpen(false);
+    };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, [dropdownOpen]);
 
+  const toggleUser = (userId) => {
+    const current = row.user_ids || [];
+    onUpdate(row._key, {
+      user_ids: current.includes(userId) ? current.filter((id) => id !== userId) : [...current, userId],
+    });
+  };
+
+  const selectAllAvailable = () => {
+    const current = row.user_ids || [];
+    onUpdate(row._key, { user_ids: [...new Set([...current, ...availableUsers.map((u) => u.id)])] });
+  };
+
   return (
-    <div className="rounded-xl border border-gray-200 bg-white p-3 space-y-2.5">
-      {/* Verifier header row */}
+    <div className="rounded-xl border border-gray-200 bg-white p-3 space-y-3">
+      {/* Header */}
       <div className="flex items-center gap-2">
         <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-brand-blue text-[10px] font-bold text-white font-inter">
           {ri + 1}
         </span>
         <p className="flex-1 text-xs font-semibold text-brand-dark font-inter">Verifier {ri + 1}</p>
-        {rowCount >= 2 && (
-          <span className="text-[10px] text-gray-400 font-inter">~{Math.round(100 / rowCount)}% of users</span>
+        {assignedIds.size > 0 && (
+          <span className="rounded-full bg-brand-blue/10 px-2 py-0.5 text-[10px] font-semibold text-brand-blue font-inter">
+            {assignedIds.size} user{assignedIds.size !== 1 ? 's' : ''}
+          </span>
         )}
         <button type="button" onClick={() => onRemove(row._key)}
           className="rounded-lg p-1 text-gray-400 hover:bg-red-50 hover:text-red-500 transition-colors">
@@ -182,7 +208,7 @@ const VerifierRow = ({ row, ri, rowCount, typeName, allVerifiers, onUpdate, onRe
         </button>
       </div>
 
-      {/* Custom verifier dropdown */}
+      {/* Verifier picker */}
       <div>
         <label className="block text-[11px] font-medium text-gray-500 font-inter mb-1">Select Verifier *</label>
         <div ref={dropdownRef}>
@@ -196,34 +222,25 @@ const VerifierRow = ({ row, ri, rowCount, typeName, allVerifiers, onUpdate, onRe
                 ? `${verifierInfo.name || verifierInfo.email}${verifierInfo.organization ? ` — ${verifierInfo.organization}` : ''}`
                 : '— Choose a verifier —'}
             </span>
-            <ChevronLeft size={14} className="shrink-0 text-gray-400 transition-transform" style={{ transform: dropdownOpen ? 'rotate(90deg)' : 'rotate(-90deg)' }} />
+            <ChevronLeft size={14} className="shrink-0 text-gray-400" style={{ transform: dropdownOpen ? 'rotate(90deg)' : 'rotate(-90deg)' }} />
           </button>
-
           {dropdownOpen && (
             <div className="rounded-b-xl border border-t-0 border-brand-blue/40 bg-white overflow-hidden">
-              <button
-                type="button"
-                onClick={() => { onUpdate(row._key, { verifier_id: '' }); setDropdownOpen(false); }}
-                className="w-full px-3 py-2 text-left text-sm font-inter text-gray-400 hover:bg-gray-50 transition-colors border-b border-gray-100"
-              >
+              <button type="button" onClick={() => { onUpdate(row._key, { verifier_id: '' }); setDropdownOpen(false); }}
+                className="w-full px-3 py-2 text-left text-sm font-inter text-gray-400 hover:bg-gray-50 transition-colors border-b border-gray-100">
                 — Choose a verifier —
               </button>
-              <div className="max-h-40 overflow-y-auto">
+              <div className="max-h-36 overflow-y-auto">
                 {allVerifiers.map((v) => (
-                  <button
-                    key={v.id}
-                    type="button"
+                  <button key={v.id} type="button"
                     onClick={() => { onUpdate(row._key, { verifier_id: v.id }); setDropdownOpen(false); }}
-                    className={`w-full px-3 py-2.5 text-left transition-colors hover:bg-blue-50 border-b border-gray-50 last:border-0 ${row.verifier_id === v.id ? 'bg-blue-50' : ''}`}
-                  >
+                    className={`w-full px-3 py-2.5 text-left transition-colors hover:bg-blue-50 border-b border-gray-50 last:border-0 ${row.verifier_id === v.id ? 'bg-blue-50' : ''}`}>
                     <p className="text-sm font-semibold text-brand-dark font-inter leading-tight">
                       {v.name || v.email}
                       {row.verifier_id === v.id && <span className="ml-2 text-[10px] font-bold text-brand-blue">✓</span>}
                     </p>
                     {(v.organization || v.specialization) && (
-                      <p className="text-[11px] text-gray-400 font-inter mt-0.5">
-                        {[v.organization, v.specialization].filter(Boolean).join(' · ')}
-                      </p>
+                      <p className="text-[11px] text-gray-400 font-inter mt-0.5">{[v.organization, v.specialization].filter(Boolean).join(' · ')}</p>
                     )}
                   </button>
                 ))}
@@ -231,39 +248,99 @@ const VerifierRow = ({ row, ri, rowCount, typeName, allVerifiers, onUpdate, onRe
             </div>
           )}
         </div>
-        {verifierInfo?.email && (
-          <p className="mt-1 text-[11px] text-gray-400 font-inter">{verifierInfo.email}</p>
+        {verifierInfo?.email && <p className="mt-1 text-[11px] text-gray-400 font-inter">{verifierInfo.email}</p>}
+      </div>
+
+      {/* User assignment */}
+      <div className="rounded-xl border border-gray-100 bg-gray-50/60 p-2.5 space-y-2">
+        <div className="flex items-center justify-between">
+          <span className="text-[11px] font-semibold text-gray-500 font-inter">
+            Assigned Users
+            <span className={`ml-1.5 font-bold ${assignedIds.size > 0 ? 'text-brand-blue' : 'text-gray-400'}`}>
+              ({assignedIds.size}/{batchUsers.length})
+            </span>
+          </span>
+          <div className="flex items-center gap-2">
+            {availableUsers.length > 0 && (
+              <button type="button" onClick={selectAllAvailable}
+                className="text-[10px] font-semibold text-brand-blue font-inter hover:opacity-70">
+                + All available
+              </button>
+            )}
+            <button type="button" onClick={() => { setShowUserPicker((p) => !p); setUserSearch(''); }}
+              className="text-[10px] font-semibold text-gray-500 font-inter hover:text-brand-blue transition-colors">
+              {showUserPicker ? 'Close' : 'Pick users'}
+            </button>
+          </div>
+        </div>
+
+        {/* Assigned chips */}
+        {assignedIds.size > 0 && (
+          <div className="flex flex-wrap gap-1">
+            {[...assignedIds].map((uid) => {
+              const user = batchUsers.find((u) => u.id === uid);
+              return (
+                <span key={uid} className="flex items-center gap-1 rounded-full bg-brand-blue/10 px-2 py-0.5 text-[11px] font-inter text-brand-blue">
+                  {user?.name || uid.slice(0, 8) + '…'}
+                  <button type="button" onClick={() => toggleUser(uid)} className="hover:text-red-500 transition-colors">
+                    <X size={9} />
+                  </button>
+                </span>
+              );
+            })}
+          </div>
+        )}
+
+        {assignedIds.size === 0 && !showUserPicker && (
+          <p className="text-[11px] text-gray-400 font-inter">No users assigned — click "Pick users" to assign</p>
+        )}
+
+        {/* Inline user picker */}
+        {showUserPicker && (
+          <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
+            {batchUsers.length > 5 && (
+              <div className="px-2.5 pt-2 pb-1.5 border-b border-gray-100">
+                <input value={userSearch} onChange={(e) => setUserSearch(e.target.value)}
+                  placeholder="Search users…" autoFocus
+                  className="w-full rounded-lg border border-gray-200 bg-gray-50 px-2.5 py-1.5 text-xs font-inter focus:outline-none focus:ring-2 focus:ring-brand-blue/30" />
+              </div>
+            )}
+            <div className="max-h-36 overflow-y-auto">
+              {filteredAvailable.length === 0 ? (
+                <p className="px-3 py-3 text-xs text-gray-400 font-inter text-center">
+                  {availableUsers.length === 0 ? 'All users assigned to other verifiers' : 'No users match'}
+                </p>
+              ) : filteredAvailable.map((u) => (
+                <button key={u.id} type="button" onClick={() => toggleUser(u.id)}
+                  className="flex w-full items-center gap-2.5 px-3 py-2 text-left hover:bg-blue-50 transition-colors border-b border-gray-50 last:border-0">
+                  <div className={`h-3.5 w-3.5 shrink-0 rounded border-2 flex items-center justify-center transition-colors ${assignedIds.has(u.id) ? 'border-brand-blue bg-brand-blue' : 'border-gray-300'}`}>
+                    {assignedIds.has(u.id) && <CheckCircle size={8} className="text-white" />}
+                  </div>
+                  <span className="text-xs font-inter text-brand-dark truncate">{u.name}</span>
+                </button>
+              ))}
+            </div>
+          </div>
         )}
       </div>
 
       {/* Email template toggle */}
-      <button
-        type="button"
-        onClick={() => setShowTemplate((p) => !p)}
-        className="flex items-center gap-1.5 text-xs text-brand-blue font-inter hover:opacity-70"
-      >
-        <Mail size={11} />
-        {showTemplate ? 'Hide email template' : 'Customize email template'}
+      <button type="button" onClick={() => setShowTemplate((p) => !p)}
+        className="flex items-center gap-1.5 text-xs text-brand-blue font-inter hover:opacity-70">
+        <Mail size={11} />{showTemplate ? 'Hide email template' : 'Customize email template'}
       </button>
 
       {showTemplate && (
         <div className="space-y-2">
           <div>
             <label className="block text-[11px] font-medium text-gray-500 font-inter mb-1">Subject *</label>
-            <input
-              value={row.email_subject}
-              onChange={(e) => onUpdate(row._key, { email_subject: e.target.value })}
-              className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm font-inter focus:outline-none focus:ring-2 focus:ring-brand-blue/30"
-            />
+            <input value={row.email_subject} onChange={(e) => onUpdate(row._key, { email_subject: e.target.value })}
+              className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm font-inter focus:outline-none focus:ring-2 focus:ring-brand-blue/30" />
           </div>
           <div>
             <label className="block text-[11px] font-medium text-gray-500 font-inter mb-1">Body *</label>
-            <textarea
-              rows={4}
-              value={row.email_body}
-              onChange={(e) => onUpdate(row._key, { email_body: e.target.value })}
-              className="w-full resize-none rounded-xl border border-gray-200 px-3 py-2 text-sm font-inter focus:outline-none focus:ring-2 focus:ring-brand-blue/30"
-            />
+            <textarea rows={4} value={row.email_body} onChange={(e) => onUpdate(row._key, { email_body: e.target.value })}
+              className="w-full resize-none rounded-xl border border-gray-200 px-3 py-2 text-sm font-inter focus:outline-none focus:ring-2 focus:ring-brand-blue/30" />
             <p className="mt-1 text-[10px] text-gray-400 font-inter">The Excel file and upload link are automatically appended by the system.</p>
           </div>
         </div>
@@ -277,17 +354,21 @@ const SmartSendModal = ({ isOpen, onClose, onSent, batch }) => {
   const [verificationTypes, setVerificationTypes] = useState([]);
   const [allVerifiers,      setAllVerifiers]      = useState([]);
   const [loading,           setLoading]           = useState(false);
-  // assignments: { [type_name]: [{ _key, verifier_id, email_subject, email_body }] }
+  // assignments: { [type_name]: [{ _key, verifier_id, email_subject, email_body, user_ids: [] }] }
   const [assignments, setAssignments] = useState({});
   const [sending,     setSending]     = useState(false);
   const [expandedType, setExpandedType] = useState(null);
 
   const slugToLabel = (s) => s?.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) || s;
-
-  const defaultSubject = (typeName) =>
-    `Verification Request: ${slugToLabel(typeName)}`;
+  const defaultSubject = (typeName) => `Verification Request: ${slugToLabel(typeName)}`;
   const defaultBody = (typeName) =>
     `Hi,\n\nPlease find the attached Excel file with the candidates assigned to you for ${slugToLabel(typeName)} verification.\n\nComplete the verification and upload your report using the secure link provided.\n\nRegards,\nTruMarkZ Admin`;
+
+  // Derive batch users from the already-loaded batch.records
+  const batchUsers = (batch?.records || []).map((r) => ({
+    id: r.id,
+    name: r.full_name || r.product_name || r.email || r.id,
+  }));
 
   useEffect(() => {
     if (!isOpen || !batch?.id) return;
@@ -321,7 +402,7 @@ const SmartSendModal = ({ isOpen, onClose, onSent, batch }) => {
       ...prev,
       [typeName]: [
         ...(prev[typeName] || []),
-        { _key: `${typeName}-${Date.now()}`, verifier_id: '', email_subject: defaultSubject(typeName), email_body: defaultBody(typeName) },
+        { _key: `${typeName}-${Date.now()}`, verifier_id: '', email_subject: defaultSubject(typeName), email_body: defaultBody(typeName), user_ids: [] },
       ],
     }));
   };
@@ -337,18 +418,35 @@ const SmartSendModal = ({ isOpen, onClose, onSent, batch }) => {
 
   const typeRows = (typeName) => assignments[typeName] || [];
 
-  const totalAssigned = verificationTypes.reduce(
-    (n, t) => n + (typeRows(t.verification_name).filter((v) => v.verifier_id).length), 0
-  );
-  const canSend = totalAssigned > 0;
+  // Coverage: for each active type (has at least one verifier selected), all batch users must be assigned
+  const typesCoverage = verificationTypes.map((t) => {
+    const activeRows = typeRows(t.verification_name).filter((r) => r.verifier_id);
+    const assignedIds = new Set(activeRows.flatMap((r) => r.user_ids || []));
+    const covered = batchUsers.filter((u) => assignedIds.has(u.id)).length;
+    return { typeName: t.verification_name, covered, total: batchUsers.length, hasVerifiers: activeRows.length > 0 };
+  });
+
+  const activeTypes = typesCoverage.filter((t) => t.hasVerifiers);
+  const allCovered = batchUsers.length === 0 || (activeTypes.length > 0 && activeTypes.every((t) => t.covered === t.total));
+  const totalAssigned = activeTypes.reduce((n, t) => n + typeRows(t.typeName).filter((r) => r.verifier_id).length, 0);
+  const canSend = totalAssigned > 0 && allCovered;
 
   const handleSend = async () => {
+    if (!allCovered) {
+      toast.error('All batch users must be assigned to a verifier for each verification type');
+      return;
+    }
     const verification_assignments = verificationTypes
       .map((t) => ({
         verification_type_name: t.verification_name,
         verifiers: typeRows(t.verification_name)
           .filter((v) => v.verifier_id && v.email_subject.trim() && v.email_body.trim())
-          .map(({ verifier_id, email_subject, email_body }) => ({ verifier_id, email_subject, email_body })),
+          .map(({ verifier_id, email_subject, email_body, user_ids }) => ({
+            verifier_id,
+            email_subject,
+            email_body,
+            user_ids: user_ids || [],
+          })),
       }))
       .filter((t) => t.verifiers.length > 0);
 
@@ -374,7 +472,7 @@ const SmartSendModal = ({ isOpen, onClose, onSent, batch }) => {
     <Modal isOpen={isOpen} onClose={onClose} title="Smart Send to Verifiers" size="xl">
       <div className="space-y-4">
 
-        {/* Batch chip */}
+        {/* Batch + coverage summary chip */}
         <div className="flex items-center gap-3 rounded-2xl border border-blue-100 bg-gradient-to-r from-blue-50 to-indigo-50 px-4 py-3">
           <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-brand-blue/15 text-brand-blue shrink-0">
             <Zap size={16} />
@@ -383,9 +481,15 @@ const SmartSendModal = ({ isOpen, onClose, onSent, batch }) => {
             <p className="text-[10px] font-semibold uppercase tracking-wider text-blue-500 font-inter">Smart Send</p>
             <p className="text-sm font-semibold text-brand-dark font-inter truncate">{batch?.name}</p>
           </div>
-          <div className="text-right shrink-0">
-            <p className="text-[10px] text-gray-400 font-inter">Verifiers assigned</p>
-            <p className="text-lg font-bold text-brand-blue font-sora">{totalAssigned}</p>
+          <div className="flex gap-3 shrink-0 text-right">
+            <div>
+              <p className="text-[10px] text-gray-400 font-inter">Total users</p>
+              <p className="text-lg font-bold text-brand-dark font-sora">{batchUsers.length}</p>
+            </div>
+            <div>
+              <p className="text-[10px] text-gray-400 font-inter">Verifiers</p>
+              <p className="text-lg font-bold text-brand-blue font-sora">{totalAssigned}</p>
+            </div>
           </div>
         </div>
 
@@ -393,7 +497,8 @@ const SmartSendModal = ({ isOpen, onClose, onSent, batch }) => {
         <div className="flex items-start gap-2 rounded-xl border border-amber-100 bg-amber-50 px-3 py-2.5">
           <Info size={13} className="text-amber-500 mt-0.5 shrink-0" />
           <p className="text-xs text-amber-700 font-inter leading-relaxed">
-            Verifiers are picked from your <strong>Verifiers Directory</strong>. If you assign <strong>2+ verifiers</strong> to the same type, batch users are randomly split between them — each gets an Excel of their share.
+            Manually assign <strong>each batch user</strong> to a verifier. Each verifier receives an Excel of their assigned users + a secure upload link.{' '}
+            <strong>All {batchUsers.length} users must be assigned</strong> — no user can be left out or assigned twice.
           </p>
         </div>
 
@@ -407,22 +512,24 @@ const SmartSendModal = ({ isOpen, onClose, onSent, batch }) => {
             <p className="text-sm text-gray-400 font-inter">No manual verification types found for this batch.</p>
           </div>
         ) : (
-          <div className="max-h-[55vh] space-y-2 overflow-y-auto pr-1">
+          <div className="max-h-[52vh] space-y-2 overflow-y-auto pr-1">
             {verificationTypes.map((vtype) => {
-              const rows     = typeRows(vtype.verification_name);
-              const isOpen_  = expandedType === vtype.verification_name;
+              const rows    = typeRows(vtype.verification_name);
+              const isOpen_ = expandedType === vtype.verification_name;
+              const cov     = typesCoverage.find((c) => c.typeName === vtype.verification_name);
               const assigned = rows.filter((r) => r.verifier_id).length;
+              const fullyDone = cov?.hasVerifiers && cov.covered === cov.total && cov.total > 0;
 
               return (
                 <div key={vtype.verification_name} className="overflow-hidden rounded-xl border border-gray-100 bg-white">
-                  {/* Type header — click to expand */}
+                  {/* Type header */}
                   <button
                     type="button"
                     onClick={() => setExpandedType(isOpen_ ? null : vtype.verification_name)}
                     className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-gray-50"
                   >
-                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand-blue/10 text-brand-blue">
-                      <Mail size={14} />
+                    <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${fullyDone ? 'bg-green-100 text-green-600' : 'bg-brand-blue/10 text-brand-blue'}`}>
+                      {fullyDone ? <CheckCircle size={14} /> : <Mail size={14} />}
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold text-brand-dark font-inter">{vtype.label}</p>
@@ -430,38 +537,44 @@ const SmartSendModal = ({ isOpen, onClose, onSent, batch }) => {
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
                       {assigned > 0 && (
-                        <span className="flex items-center gap-1 rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-semibold text-green-700 font-inter">
-                          <CheckCircle size={10} />{assigned} verifier{assigned !== 1 ? 's' : ''}
+                        <span className="flex items-center gap-1 rounded-full bg-green-100 px-2.5 py-0.5 text-[10px] font-semibold text-green-700 font-inter">
+                          <Users size={9} />{assigned} verifier{assigned !== 1 ? 's' : ''}
                         </span>
                       )}
-                      {assigned >= 2 && (
-                        <span className="rounded-full bg-blue-100 px-2.5 py-0.5 text-[10px] font-semibold text-brand-blue font-inter">
-                          split {Math.round(100/assigned)}%
+                      {cov?.hasVerifiers && (
+                        <span className={`rounded-full px-2.5 py-0.5 text-[10px] font-semibold font-inter ${fullyDone ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
+                          {cov.covered}/{cov.total} users
                         </span>
                       )}
                       <ChevronLeft size={14} className={`text-gray-400 transition-transform ${isOpen_ ? '-rotate-90' : 'rotate-180'}`} />
                     </div>
                   </button>
 
-                  {/* Expanded: verifier rows */}
+                  {/* Expanded */}
                   {isOpen_ && (
                     <div className="border-t border-gray-100 bg-gray-50/50 px-4 py-3 space-y-3">
                       {rows.length === 0 && (
                         <p className="text-xs text-gray-400 font-inter text-center py-2">No verifiers assigned yet. Add one below.</p>
                       )}
 
-                      {rows.map((row, ri) => (
-                        <VerifierRow
-                          key={row._key}
-                          row={row}
-                          ri={ri}
-                          rowCount={rows.length}
-                          typeName={vtype.verification_name}
-                          allVerifiers={allVerifiers}
-                          onUpdate={(key, patch) => updateVerifier(vtype.verification_name, key, patch)}
-                          onRemove={(key) => removeVerifier(vtype.verification_name, key)}
-                        />
-                      ))}
+                      {rows.map((row, ri) => {
+                        // user_ids taken by every OTHER row in this type
+                        const takenUserIds = new Set(
+                          rows.filter((r) => r._key !== row._key).flatMap((r) => r.user_ids || [])
+                        );
+                        return (
+                          <VerifierRow
+                            key={row._key}
+                            row={row}
+                            ri={ri}
+                            allVerifiers={allVerifiers}
+                            batchUsers={batchUsers}
+                            takenUserIds={takenUserIds}
+                            onUpdate={(key, patch) => updateVerifier(vtype.verification_name, key, patch)}
+                            onRemove={(key) => removeVerifier(vtype.verification_name, key)}
+                          />
+                        );
+                      })}
 
                       <button
                         type="button"
@@ -469,13 +582,26 @@ const SmartSendModal = ({ isOpen, onClose, onSent, batch }) => {
                         className="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed border-gray-200 py-2.5 text-sm font-semibold text-gray-500 font-inter transition-colors hover:border-brand-blue hover:text-brand-blue"
                       >
                         <Plus size={14} />
-                        {rows.length === 0 ? 'Assign a Verifier' : 'Add Another Verifier (split users)'}
+                        {rows.length === 0 ? 'Assign a Verifier' : 'Add Another Verifier'}
                       </button>
                     </div>
                   )}
                 </div>
               );
             })}
+          </div>
+        )}
+
+        {/* Coverage warning */}
+        {!loading && activeTypes.length > 0 && !allCovered && (
+          <div className="flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2">
+            <Info size={12} className="text-amber-500 shrink-0" />
+            <p className="text-xs text-amber-700 font-inter">
+              {activeTypes.filter((t) => t.covered < t.total).map((t) => {
+                const uncovered = t.total - t.covered;
+                return `${slugToLabel(t.typeName)}: ${uncovered} user${uncovered !== 1 ? 's' : ''} unassigned`;
+              }).join(' · ')}
+            </p>
           </div>
         )}
 
@@ -490,7 +616,7 @@ const SmartSendModal = ({ isOpen, onClose, onSent, batch }) => {
               disabled={!canSend || sending}
               onClick={handleSend}
             >
-              {sending ? 'Sending…' : `Smart Send${totalAssigned > 0 ? ` (${totalAssigned} verifier${totalAssigned !== 1 ? 's' : ''})` : ''}`}
+              {sending ? 'Sending…' : canSend ? `Smart Send (${totalAssigned} verifier${totalAssigned !== 1 ? 's' : ''})` : 'Assign all users first'}
             </Button>
           </div>
         )}
