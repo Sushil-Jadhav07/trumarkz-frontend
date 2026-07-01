@@ -536,6 +536,14 @@ export const verificationAPI = {
   },
 };
 
+export const verifiersAPI = {
+  getAll: () => api.get('/verifiers'),
+  create: (payload) => api.post('/verifiers', cleanObject(payload)),
+  getById: (id) => api.get(`/verifiers/${id}`),
+  update: (id, payload) => api.patch(`/verifiers/${id}`, cleanObject(payload)),
+  delete: (id) => api.delete(`/verifiers/${id}`),
+};
+
 export const skillsAPI = {
   addSkill: (data) => {
     const formData = new FormData();
@@ -594,8 +602,10 @@ export const skillsAPI = {
   resendVerificationLink: (requestId) =>
     api.post(`/skills/verify/resend/${requestId}`),
 
-  uploadVerifierReport: (token, files) => {
+  uploadVerifierReport: (token, files, status, reason) => {
     const formData = new FormData();
+    formData.append('status', status); // "verified" | "rejected"
+    if (reason && reason.trim()) formData.append('reason', reason.trim());
     Array.from(files).forEach((file) => formData.append('files', file));
     return axios.post(`${API_BASE_URL}/skills/verify/upload/${token}`, formData, {
       headers: { 'Content-Type': 'multipart/form-data' },

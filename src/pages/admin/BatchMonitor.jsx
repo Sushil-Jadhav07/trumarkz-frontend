@@ -15,13 +15,6 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
-// ── Verifier directory (shared with Verifiers.jsx) ───────────────────────────
-export const VERIFIER_DIRECTORY = [
-  { id: 'VRF-001', name: 'TrustCheck Verification Services', email: 'ops@trustcheck.example',        status: 'active' },
-  { id: 'VRF-002', name: 'SureProof Agencies',               email: 'verify@sureproof.example',      status: 'active' },
-  { id: 'VRF-003', name: 'Manual Audit Partner',             email: 'audit@manualpartner.example',   status: 'paused' },
-  { id: 'VRF-004', name: 'Test Verifier',                    email: 'timepasspurpose7@gmail.com',    status: 'active' },
-];
 
 const MANUAL_UPLOAD_LINK_PLACEHOLDER = '__TRUMARKZ_UPLOAD_LINK__';
 
