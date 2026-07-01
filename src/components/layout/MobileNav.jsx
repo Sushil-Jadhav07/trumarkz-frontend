@@ -3,7 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import {
   LayoutDashboard, Layers, Award, Store, BarChart2,
-  CheckSquare, AlertTriangle, GitBranch, Share2
+  CheckSquare, GitBranch, Share2
 } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -25,8 +25,6 @@ export const MobileNav = () => {
         { path: '/admin/org-approvals', label: 'Approvals', icon: CheckSquare },
         { path: '/admin/promote-super-admin', label: 'Admins', icon: CheckSquare },
         { path: '/admin/batch-monitor', label: 'Batches', icon: Layers },
-        { path: '/admin/disputes', label: 'Disputes', icon: AlertTriangle },
-        { path: '/admin/platform-health', label: 'Health', icon: BarChart2 },
       ]
     : role === 'individual'
     ? [

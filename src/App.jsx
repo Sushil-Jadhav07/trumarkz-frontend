@@ -83,8 +83,6 @@ import AdminDashboard from '@/pages/admin/AdminDashboard';
 import OrgApprovals from '@/pages/admin/OrgApprovals';
 import BatchMonitor from '@/pages/admin/BatchMonitor';
 import Verifiers from '@/pages/admin/Verifiers';
-import Disputes from '@/pages/admin/Disputes';
-import PlatformHealth from '@/pages/admin/PlatformHealth';
 import SDCVerification from '@/pages/admin/SDCVerification';
 import PromoteSuperAdmin from '@/pages/admin/PromoteSuperAdmin';
 import CreateSuperAdmin from '@/pages/admin/CreateSuperAdmin';
@@ -217,8 +215,6 @@ const AnimatedRoutes = () => {
           <Route path="/admin/batch-monitor" element={<ProtectedRoute><AdminRoute><BatchMonitor /></AdminRoute></ProtectedRoute>} />
           <Route path="/admin/verifiers" element={<ProtectedRoute><AdminRoute><Verifiers /></AdminRoute></ProtectedRoute>} />
           <Route path="/admin/sdc-verification" element={<ProtectedRoute><AdminRoute><SDCVerification /></AdminRoute></ProtectedRoute>} />
-          <Route path="/admin/disputes" element={<ProtectedRoute><AdminRoute><Disputes /></AdminRoute></ProtectedRoute>} />
-          <Route path="/admin/platform-health" element={<ProtectedRoute><AdminRoute><PlatformHealth /></AdminRoute></ProtectedRoute>} />
           <Route path="/admin/promote-super-admin" element={<ProtectedRoute><AdminRoute><PromoteSuperAdmin /></AdminRoute></ProtectedRoute>} />
           <Route path="/admin/create-super-admin" element={<ProtectedRoute><AdminRoute><CreateSuperAdmin /></AdminRoute></ProtectedRoute>} />
           <Route path="/admin/user-list" element={<ProtectedRoute><AdminRoute><AllUsersList /></AdminRoute></ProtectedRoute>} />

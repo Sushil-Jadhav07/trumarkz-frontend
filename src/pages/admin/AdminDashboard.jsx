@@ -7,9 +7,8 @@ import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { ProgressBar } from '@/components/ui/ProgressBar';
 import { verificationAPI, getApiError } from '@/services/api';
-import { mockDisputes } from '@/data/mockData';
 import {
-  AlertTriangle, ArrowRight, CheckCircle, CheckSquare,
+  ArrowRight, CheckCircle, CheckSquare,
   Clock, Layers, RefreshCw, ShieldCheck, UserPlus, Users, XCircle,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -95,11 +94,6 @@ export const AdminDashboard = () => {
     {
       label: 'Pending Verifications', value: loading ? '...' : totalPending, icon: CheckSquare,
       path: '/admin/batch-monitor', delay: 0.12,
-      tone: { card: 'bg-blue-50 border-blue-200', label: 'text-blue-600', value: 'text-blue-950', icon: 'bg-white text-brand-blue' },
-    },
-    {
-      label: 'Open Disputes', value: mockDisputes.length, icon: AlertTriangle,
-      path: '/admin/disputes', delay: 0.18,
       tone: { card: 'bg-blue-50 border-blue-200', label: 'text-blue-600', value: 'text-blue-950', icon: 'bg-white text-brand-blue' },
     },
   ];
@@ -291,44 +285,6 @@ export const AdminDashboard = () => {
               </Card>
             </motion.div>
 
-            {mockDisputes.length > 0 && (
-              <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.38 }}>
-                <Card className="p-0 overflow-hidden border border-blue-100 bg-white shadow-[0_20px_44px_-34px_rgba(37,99,235,0.25)]">
-                  <div className="flex items-center justify-between px-6 py-4 border-b border-blue-100 bg-blue-50">
-                    <div>
-                      <h3 className="font-sora font-semibold text-blue-950">Open Disputes</h3>
-                      <p className="text-xs text-blue-500 font-inter mt-0.5">{mockDisputes.length} awaiting review</p>
-                    </div>
-                    <Button variant="ghost" size="sm" icon={ArrowRight} onClick={() => navigate('/admin/disputes')}>
-                      View All
-                    </Button>
-                  </div>
-                  <div className="p-4 space-y-2">
-                    {mockDisputes.slice(0, 3).map((d, i) => (
-                      <motion.div
-                        key={d.id}
-                        initial={{ opacity: 0, x: 8 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{ delay: 0.4 + i * 0.06 }}
-                        className="flex items-center justify-between rounded-[18px] border border-blue-200 bg-blue-50 px-4 py-3"
-                      >
-                        <div className="min-w-0">
-                          <p className="text-sm font-semibold text-blue-950 font-inter truncate">
-                            {d.orgName || `Dispute #${d.id}`}
-                          </p>
-                          <p className="text-xs text-blue-500 font-inter mt-0.5">
-                            {d.issue || d.checkType || 'Pending review'}
-                          </p>
-                        </div>
-                        <span className="ml-3 shrink-0 rounded-full bg-white border border-blue-200 px-2.5 py-1 text-[11px] font-semibold font-inter text-brand-blue">
-                          Open
-                        </span>
-                      </motion.div>
-                    ))}
-                  </div>
-                </Card>
-              </motion.div>
-            )}
           </div>
         </div>
       </div>
