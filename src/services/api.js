@@ -467,6 +467,10 @@ export const verificationAPI = {
   sendBulkManualVerification: (payload) =>
     verificationApi.post('/verification/manual/send-bulk', payload),
 
+  // ── Smart Send: multiple verifiers per type, users split randomly ─────────
+  smartSendManualVerification: (payload) =>
+    verificationApi.post('/verification/manual/smart-send', payload),
+
   // ── Resend manual verification link ───────────────────────────────────────
   resendManualVerification: (requestId) =>
     verificationApi.post(`/verification/manual/resend/${requestId}`),

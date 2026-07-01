@@ -8,10 +8,10 @@ import { ProgressBar } from '@/components/ui/ProgressBar';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
 import { Input } from '@/components/ui/Input';
-import { verificationAPI, getApiError, triggerBlobDownload } from '@/services/api';
+import { verificationAPI, verifiersAPI, getApiError, triggerBlobDownload } from '@/services/api';
 import {
   ArrowRight, CheckCircle, ChevronLeft, Clock, Download, Eye, FileText, Filter, IdCard, Info,
-  Mail, MoreVertical, Package, Pencil, QrCode, RefreshCw, Send, Upload, User, Users, XCircle,
+  Mail, MoreVertical, Package, Pencil, Plus, QrCode, RefreshCw, Send, Trash2, Upload, User, Users, XCircle, Zap,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -149,6 +149,354 @@ const groupByBatch = (records) => {
     }
     return b.pending - a.pending || b.total - a.total;
   });
+};
+
+// ── Smart Send — Verifier Row (extracted to satisfy Rules of Hooks) ───────────
+const VerifierRow = ({ row, ri, rowCount, typeName, allVerifiers, onUpdate, onRemove }) => {
+  const [showTemplate, setShowTemplate] = useState(false);
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const dropdownRef = useRef(null);
+  const verifierInfo = allVerifiers.find((v) => v.id === row.verifier_id);
+
+  useEffect(() => {
+    if (!dropdownOpen) return;
+    const handler = (e) => { if (dropdownRef.current && !dropdownRef.current.contains(e.target)) setDropdownOpen(false); };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [dropdownOpen]);
+
+  return (
+    <div className="rounded-xl border border-gray-200 bg-white p-3 space-y-2.5">
+      {/* Verifier header row */}
+      <div className="flex items-center gap-2">
+        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-brand-blue text-[10px] font-bold text-white font-inter">
+          {ri + 1}
+        </span>
+        <p className="flex-1 text-xs font-semibold text-brand-dark font-inter">Verifier {ri + 1}</p>
+        {rowCount >= 2 && (
+          <span className="text-[10px] text-gray-400 font-inter">~{Math.round(100 / rowCount)}% of users</span>
+        )}
+        <button type="button" onClick={() => onRemove(row._key)}
+          className="rounded-lg p-1 text-gray-400 hover:bg-red-50 hover:text-red-500 transition-colors">
+          <Trash2 size={12} />
+        </button>
+      </div>
+
+      {/* Custom verifier dropdown */}
+      <div>
+        <label className="block text-[11px] font-medium text-gray-500 font-inter mb-1">Select Verifier *</label>
+        <div ref={dropdownRef}>
+          <button
+            type="button"
+            onClick={() => setDropdownOpen((p) => !p)}
+            className={`flex w-full items-center justify-between gap-2 px-3 py-2 text-sm font-inter text-left transition-colors focus:outline-none ${dropdownOpen ? 'rounded-t-xl border border-b-0 border-brand-blue/40 bg-white ring-2 ring-brand-blue/20' : 'rounded-xl border border-gray-200 bg-white hover:border-brand-blue/40'}`}
+          >
+            <span className={verifierInfo ? 'text-brand-dark font-medium' : 'text-gray-400'}>
+              {verifierInfo
+                ? `${verifierInfo.name || verifierInfo.email}${verifierInfo.organization ? ` — ${verifierInfo.organization}` : ''}`
+                : '— Choose a verifier —'}
+            </span>
+            <ChevronLeft size={14} className="shrink-0 text-gray-400 transition-transform" style={{ transform: dropdownOpen ? 'rotate(90deg)' : 'rotate(-90deg)' }} />
+          </button>
+
+          {dropdownOpen && (
+            <div className="rounded-b-xl border border-t-0 border-brand-blue/40 bg-white overflow-hidden">
+              <button
+                type="button"
+                onClick={() => { onUpdate(row._key, { verifier_id: '' }); setDropdownOpen(false); }}
+                className="w-full px-3 py-2 text-left text-sm font-inter text-gray-400 hover:bg-gray-50 transition-colors border-b border-gray-100"
+              >
+                — Choose a verifier —
+              </button>
+              <div className="max-h-40 overflow-y-auto">
+                {allVerifiers.map((v) => (
+                  <button
+                    key={v.id}
+                    type="button"
+                    onClick={() => { onUpdate(row._key, { verifier_id: v.id }); setDropdownOpen(false); }}
+                    className={`w-full px-3 py-2.5 text-left transition-colors hover:bg-blue-50 border-b border-gray-50 last:border-0 ${row.verifier_id === v.id ? 'bg-blue-50' : ''}`}
+                  >
+                    <p className="text-sm font-semibold text-brand-dark font-inter leading-tight">
+                      {v.name || v.email}
+                      {row.verifier_id === v.id && <span className="ml-2 text-[10px] font-bold text-brand-blue">✓</span>}
+                    </p>
+                    {(v.organization || v.specialization) && (
+                      <p className="text-[11px] text-gray-400 font-inter mt-0.5">
+                        {[v.organization, v.specialization].filter(Boolean).join(' · ')}
+                      </p>
+                    )}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+        {verifierInfo?.email && (
+          <p className="mt-1 text-[11px] text-gray-400 font-inter">{verifierInfo.email}</p>
+        )}
+      </div>
+
+      {/* Email template toggle */}
+      <button
+        type="button"
+        onClick={() => setShowTemplate((p) => !p)}
+        className="flex items-center gap-1.5 text-xs text-brand-blue font-inter hover:opacity-70"
+      >
+        <Mail size={11} />
+        {showTemplate ? 'Hide email template' : 'Customize email template'}
+      </button>
+
+      {showTemplate && (
+        <div className="space-y-2">
+          <div>
+            <label className="block text-[11px] font-medium text-gray-500 font-inter mb-1">Subject *</label>
+            <input
+              value={row.email_subject}
+              onChange={(e) => onUpdate(row._key, { email_subject: e.target.value })}
+              className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm font-inter focus:outline-none focus:ring-2 focus:ring-brand-blue/30"
+            />
+          </div>
+          <div>
+            <label className="block text-[11px] font-medium text-gray-500 font-inter mb-1">Body *</label>
+            <textarea
+              rows={4}
+              value={row.email_body}
+              onChange={(e) => onUpdate(row._key, { email_body: e.target.value })}
+              className="w-full resize-none rounded-xl border border-gray-200 px-3 py-2 text-sm font-inter focus:outline-none focus:ring-2 focus:ring-brand-blue/30"
+            />
+            <p className="mt-1 text-[10px] text-gray-400 font-inter">The Excel file and upload link are automatically appended by the system.</p>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ── Smart Send Modal ─────────────────────────────────────────────────────────
+const SmartSendModal = ({ isOpen, onClose, onSent, batch }) => {
+  const [verificationTypes, setVerificationTypes] = useState([]);
+  const [allVerifiers,      setAllVerifiers]      = useState([]);
+  const [loading,           setLoading]           = useState(false);
+  // assignments: { [type_name]: [{ _key, verifier_id, email_subject, email_body }] }
+  const [assignments, setAssignments] = useState({});
+  const [sending,     setSending]     = useState(false);
+  const [expandedType, setExpandedType] = useState(null);
+
+  const slugToLabel = (s) => s?.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) || s;
+
+  const defaultSubject = (typeName) =>
+    `Verification Request: ${slugToLabel(typeName)}`;
+  const defaultBody = (typeName) =>
+    `Hi,\n\nPlease find the attached Excel file with the candidates assigned to you for ${slugToLabel(typeName)} verification.\n\nComplete the verification and upload your report using the secure link provided.\n\nRegards,\nTruMarkZ Admin`;
+
+  useEffect(() => {
+    if (!isOpen || !batch?.id) return;
+    setAssignments({});
+    setExpandedType(null);
+    setLoading(true);
+    Promise.all([
+      verificationAPI.getThirdPartyVerifiers(batch.id),
+      verifiersAPI.getAll(),
+    ])
+      .then(([typesRes, verifiersRes]) => {
+        const raw = typesRes.data?.third_party_verifiers || [];
+        const typeMap = {};
+        raw.forEach((v) => {
+          if (!typeMap[v.verification_name]) {
+            typeMap[v.verification_name] = { verification_name: v.verification_name, label: v.label || slugToLabel(v.verification_name) };
+          }
+        });
+        const types = Object.values(typeMap);
+        setVerificationTypes(types);
+        if (types.length > 0) setExpandedType(types[0].verification_name);
+        const rawVerifiers = verifiersRes.data?.verifiers || verifiersRes.data || [];
+        setAllVerifiers(Array.isArray(rawVerifiers) ? rawVerifiers : []);
+      })
+      .catch(() => toast.error('Failed to load verification data'))
+      .finally(() => setLoading(false));
+  }, [isOpen, batch?.id]);
+
+  const addVerifier = (typeName) => {
+    setAssignments((prev) => ({
+      ...prev,
+      [typeName]: [
+        ...(prev[typeName] || []),
+        { _key: `${typeName}-${Date.now()}`, verifier_id: '', email_subject: defaultSubject(typeName), email_body: defaultBody(typeName) },
+      ],
+    }));
+  };
+
+  const removeVerifier = (typeName, key) =>
+    setAssignments((prev) => ({ ...prev, [typeName]: (prev[typeName] || []).filter((v) => v._key !== key) }));
+
+  const updateVerifier = (typeName, key, patch) =>
+    setAssignments((prev) => ({
+      ...prev,
+      [typeName]: (prev[typeName] || []).map((v) => v._key === key ? { ...v, ...patch } : v),
+    }));
+
+  const typeRows = (typeName) => assignments[typeName] || [];
+
+  const totalAssigned = verificationTypes.reduce(
+    (n, t) => n + (typeRows(t.verification_name).filter((v) => v.verifier_id).length), 0
+  );
+  const canSend = totalAssigned > 0;
+
+  const handleSend = async () => {
+    const verification_assignments = verificationTypes
+      .map((t) => ({
+        verification_type_name: t.verification_name,
+        verifiers: typeRows(t.verification_name)
+          .filter((v) => v.verifier_id && v.email_subject.trim() && v.email_body.trim())
+          .map(({ verifier_id, email_subject, email_body }) => ({ verifier_id, email_subject, email_body })),
+      }))
+      .filter((t) => t.verifiers.length > 0);
+
+    if (verification_assignments.length === 0) {
+      toast.error('Assign at least one verifier to a verification type');
+      return;
+    }
+    setSending(true);
+    try {
+      const { data } = await verificationAPI.smartSendManualVerification({ batch_id: batch.id, verification_assignments });
+      const summary = data?.results?.map((r) => `${slugToLabel(r.verification_type_name)}: ${r.verifiers?.map((v) => `${v.assigned_count} users`).join(', ')}`).join(' | ');
+      toast.success(summary ? `Smart Send done — ${summary}` : 'Smart Send complete');
+      onSent?.(data);
+      onClose();
+    } catch (err) {
+      toast.error(getApiError(err, 'Smart Send failed'));
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <Modal isOpen={isOpen} onClose={onClose} title="Smart Send to Verifiers" size="xl">
+      <div className="space-y-4">
+
+        {/* Batch chip */}
+        <div className="flex items-center gap-3 rounded-2xl border border-blue-100 bg-gradient-to-r from-blue-50 to-indigo-50 px-4 py-3">
+          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-brand-blue/15 text-brand-blue shrink-0">
+            <Zap size={16} />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-blue-500 font-inter">Smart Send</p>
+            <p className="text-sm font-semibold text-brand-dark font-inter truncate">{batch?.name}</p>
+          </div>
+          <div className="text-right shrink-0">
+            <p className="text-[10px] text-gray-400 font-inter">Verifiers assigned</p>
+            <p className="text-lg font-bold text-brand-blue font-sora">{totalAssigned}</p>
+          </div>
+        </div>
+
+        {/* Info banner */}
+        <div className="flex items-start gap-2 rounded-xl border border-amber-100 bg-amber-50 px-3 py-2.5">
+          <Info size={13} className="text-amber-500 mt-0.5 shrink-0" />
+          <p className="text-xs text-amber-700 font-inter leading-relaxed">
+            Verifiers are picked from your <strong>Verifiers Directory</strong>. If you assign <strong>2+ verifiers</strong> to the same type, batch users are randomly split between them — each gets an Excel of their share.
+          </p>
+        </div>
+
+        {loading ? (
+          <div className="flex flex-col items-center justify-center py-10 gap-3">
+            <RefreshCw size={22} className="animate-spin text-brand-blue" />
+            <p className="text-sm text-gray-400 font-inter">Loading verification types & verifiers…</p>
+          </div>
+        ) : verificationTypes.length === 0 ? (
+          <div className="py-10 text-center">
+            <p className="text-sm text-gray-400 font-inter">No manual verification types found for this batch.</p>
+          </div>
+        ) : (
+          <div className="max-h-[55vh] space-y-2 overflow-y-auto pr-1">
+            {verificationTypes.map((vtype) => {
+              const rows     = typeRows(vtype.verification_name);
+              const isOpen_  = expandedType === vtype.verification_name;
+              const assigned = rows.filter((r) => r.verifier_id).length;
+
+              return (
+                <div key={vtype.verification_name} className="overflow-hidden rounded-xl border border-gray-100 bg-white">
+                  {/* Type header — click to expand */}
+                  <button
+                    type="button"
+                    onClick={() => setExpandedType(isOpen_ ? null : vtype.verification_name)}
+                    className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-gray-50"
+                  >
+                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand-blue/10 text-brand-blue">
+                      <Mail size={14} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-brand-dark font-inter">{vtype.label}</p>
+                      <p className="text-xs text-gray-400 font-mono">{vtype.verification_name}</p>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      {assigned > 0 && (
+                        <span className="flex items-center gap-1 rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-semibold text-green-700 font-inter">
+                          <CheckCircle size={10} />{assigned} verifier{assigned !== 1 ? 's' : ''}
+                        </span>
+                      )}
+                      {assigned >= 2 && (
+                        <span className="rounded-full bg-blue-100 px-2.5 py-0.5 text-[10px] font-semibold text-brand-blue font-inter">
+                          split {Math.round(100/assigned)}%
+                        </span>
+                      )}
+                      <ChevronLeft size={14} className={`text-gray-400 transition-transform ${isOpen_ ? '-rotate-90' : 'rotate-180'}`} />
+                    </div>
+                  </button>
+
+                  {/* Expanded: verifier rows */}
+                  {isOpen_ && (
+                    <div className="border-t border-gray-100 bg-gray-50/50 px-4 py-3 space-y-3">
+                      {rows.length === 0 && (
+                        <p className="text-xs text-gray-400 font-inter text-center py-2">No verifiers assigned yet. Add one below.</p>
+                      )}
+
+                      {rows.map((row, ri) => (
+                        <VerifierRow
+                          key={row._key}
+                          row={row}
+                          ri={ri}
+                          rowCount={rows.length}
+                          typeName={vtype.verification_name}
+                          allVerifiers={allVerifiers}
+                          onUpdate={(key, patch) => updateVerifier(vtype.verification_name, key, patch)}
+                          onRemove={(key) => removeVerifier(vtype.verification_name, key)}
+                        />
+                      ))}
+
+                      <button
+                        type="button"
+                        onClick={() => addVerifier(vtype.verification_name)}
+                        className="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed border-gray-200 py-2.5 text-sm font-semibold text-gray-500 font-inter transition-colors hover:border-brand-blue hover:text-brand-blue"
+                      >
+                        <Plus size={14} />
+                        {rows.length === 0 ? 'Assign a Verifier' : 'Add Another Verifier (split users)'}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Footer */}
+        {!loading && verificationTypes.length > 0 && (
+          <div className="flex gap-2 pt-1 border-t border-gray-100">
+            <Button variant="ghost" onClick={onClose} className="flex-1" disabled={sending}>Cancel</Button>
+            <Button
+              variant="primary"
+              icon={sending ? RefreshCw : Zap}
+              className="flex-1"
+              disabled={!canSend || sending}
+              onClick={handleSend}
+            >
+              {sending ? 'Sending…' : `Smart Send${totalAssigned > 0 ? ` (${totalAssigned} verifier${totalAssigned !== 1 ? 's' : ''})` : ''}`}
+            </Button>
+          </div>
+        )}
+      </div>
+    </Modal>
+  );
 };
 
 // ── Select-Verifier sub-modal (multi-step wizard) ────────────────────────────
@@ -597,8 +945,10 @@ export const BatchMonitor = () => {
   const [downloadingReport, setDownloadingReport] = useState(false);
 
   // Sub-modal states
-  const [verifierModalOpen, setVerifierModalOpen] = useState(false);
-  const [verifierModalBatch, setVerifierModalBatch] = useState(null);
+  const [verifierModalOpen,   setVerifierModalOpen]   = useState(false);
+  const [verifierModalBatch,  setVerifierModalBatch]  = useState(null);
+  const [smartSendOpen,       setSmartSendOpen]       = useState(false);
+  const [smartSendBatch,      setSmartSendBatch]      = useState(null);
   const [uploadModalOpen, setUploadModalOpen] = useState(false);
   const [uploadModalBatch, setUploadModalBatch] = useState(null);
   const [actionMenuBatchId, setActionMenuBatchId] = useState(null);
@@ -1056,13 +1406,17 @@ export const BatchMonitor = () => {
                                   type="button"
                                   onClick={() => {
                                     setActionMenuBatchId(null);
-                                    if (batch.status === 'pending') openMailVerifierModal(batch);
-                                    else toast('Mail Verifier is available in Pending stage only');
+                                    if (batch.status === 'pending' || batch.status === 'send_to_verifier') {
+                                      setSmartSendBatch(batch);
+                                      setSmartSendOpen(true);
+                                    } else {
+                                      toast('Smart Send is available for Pending / Send to Verifier batches only');
+                                    }
                                   }}
                                   className="w-full px-3 py-2 text-left text-sm font-inter text-gray-700 rounded-lg hover:bg-gray-50 flex items-center gap-2"
                                 >
-                                  <Mail size={14} />
-                                  Mail Verifier
+                                  <Zap size={14} />
+                                  Smart Send
                                 </button>
                                 <button
                                   type="button"
@@ -1196,11 +1550,19 @@ export const BatchMonitor = () => {
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-1 gap-2">
 
-                  {/* Mail verifier — pending or resend from send_to_verifier */}
+                  {/* Smart Send — assign multiple verifiers per type with random split */}
+                  {(selectedBatch.status === 'pending' || selectedBatch.status === 'send_to_verifier') && (
+                    <Button variant="primary" size="sm" icon={Zap} className="justify-start"
+                      onClick={() => { setSmartSendBatch(selectedBatch); setSmartSendOpen(true); }}>
+                      Smart Send to Verifiers
+                    </Button>
+                  )}
+
+                  {/* Mail verifier — legacy single-verifier-per-type flow */}
                   {(selectedBatch.status === 'pending' || selectedBatch.status === 'send_to_verifier') && (
                     <Button variant="outline" size="sm" icon={Mail} className="justify-start"
                       onClick={() => openMailVerifierModal(selectedBatch)}>
-                      {selectedBatch.status === 'send_to_verifier' ? 'Send More Verifiers' : 'Mail to Third-Party Verifier'}
+                      {selectedBatch.status === 'send_to_verifier' ? 'Send More Verifiers' : 'Mail to Verifier (Basic)'}
                     </Button>
                   )}
                   <Button variant="outline" size="sm" icon={Pencil} className="justify-start" onClick={() => openEditBatchModal(selectedBatch)}>
@@ -1365,6 +1727,14 @@ export const BatchMonitor = () => {
           </div>
         )}
       </Modal>
+
+      {/* ── Smart Send Modal ────────────────────────────────────────────── */}
+      <SmartSendModal
+        isOpen={smartSendOpen}
+        onClose={() => { setSmartSendOpen(false); setSmartSendBatch(null); }}
+        onSent={(result) => { handleBulkSent(smartSendBatch, result); setSmartSendOpen(false); setSmartSendBatch(null); }}
+        batch={smartSendBatch}
+      />
 
       {/* ── Select Verifier Sub-Modal ────────────────────────────────────── */}
       <SelectVerifierModal
