@@ -126,7 +126,7 @@ export const AdminDashboard = () => {
           </button>
         </div>
 
-        <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           {statCards.map((s) => (
             <Stat key={s.label} {...s} onClick={() => navigate(s.path)} />
           ))}
