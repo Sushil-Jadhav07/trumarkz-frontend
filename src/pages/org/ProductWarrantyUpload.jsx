@@ -1,6 +1,12 @@
-import React from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import { motion } from 'framer-motion';
 import { AuthLayout } from '@/components/layout/AuthLayout';
 import { PageHeader } from '@/components/shared/PageHeader';
+import { Card } from '@/components/ui/Card';
+import { Input } from '@/components/ui/Input';
+import { verificationAPI, getApiError } from '@/services/api';
+import { Clock, CheckCircle, XCircle, RefreshCw, Package, Search } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 // ── Status helpers ─────────────────────────────────────────────────────────────
@@ -66,7 +72,7 @@ const StatusViewer = ({ batchId }) => {
     }
   }, [batchId]);
 
-  React.useEffect(() => { fetch(); }, [fetch]);
+  useEffect(() => { fetch(); }, [fetch]);
 
   const products = data?.products || [];
   const summary = data?.summary || null;
@@ -172,12 +178,28 @@ const StatusViewer = ({ batchId }) => {
 
 // ── Main Page ──────────────────────────────────────────────────────────────────
 export const ProductWarrantyUpload = () => {
+  const [searchParams] = useSearchParams();
+  const batchId = searchParams.get('batch_id');
+
   return (
     <AuthLayout title="Product Warranty">
-      <PageHeader
-        title="Product Warranty"
-        subtitle="Track warranty approval status for your products"
-      />
+      <div className="w-full px-2 sm:px-4 lg:px-1">
+        <PageHeader
+          title="Product Warranty"
+          subtitle="Track warranty approval status for your products"
+        />
+
+        {batchId ? (
+          <StatusViewer batchId={batchId} />
+        ) : (
+          <Card className="p-12 text-center">
+            <Package size={40} className="text-gray-200 mx-auto mb-3" />
+            <p className="text-gray-400 font-inter text-sm">
+              No batch selected. Open this page from a batch's certificate preview to view its warranty status.
+            </p>
+          </Card>
+        )}
+      </div>
     </AuthLayout>
   );
 };

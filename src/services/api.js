@@ -475,6 +475,18 @@ export const verificationAPI = {
   resendManualVerification: (requestId) =>
     verificationApi.post(`/verification/manual/resend/${requestId}`),
 
+  // ── Submitted verifier reports for a batch ─────────────────────────────────
+  getSubmittedReports: (batchId, submittedOnly = false) =>
+    verificationApi.get(`/verification/batches/${batchId}/submitted-reports`, {
+      params: submittedOnly ? { submitted_only: true } : undefined,
+    }),
+
+  // ── Download one report file from a verifier's submission (binary stream) ──
+  downloadManualReport: (requestId, fileIndex) =>
+    verificationApi.get(`/verification/manual/reports/${requestId}/download/${fileIndex}`, {
+      responseType: 'blob',
+    }),
+
   // ── Email Drafts ──────────────────────────────────────────────────────────
   createEmailDraft: (payload) =>
     verificationApi.post('/verification/email-drafts', cleanObject({
@@ -538,6 +550,35 @@ export const verificationAPI = {
     if (reason) payload.reason = reason;
     return verificationApi.patch(`/verification/products/warranty/${productId}/status`, payload);
   },
+};
+
+export const sdcAPI = {
+  // POST /sdc/batches/{batch_id}/generate — backend builds the recordArray from the
+  // batch's users; org_id/space_id/schema_id are Dhiway identifiers (which change
+  // per SDC template) so the caller must supply them.
+  generateBatchSDC: (batchId, payload = {}) =>
+    verificationApi.post(
+      `/sdc/batches/${batchId}/generate`,
+      cleanObject({
+        org_id: payload.org_id?.trim(),
+        space_id: payload.space_id?.trim(),
+        schema_id: payload.schema_id?.trim(),
+        publish: !!payload.publish,
+        active: !!payload.active,
+      })
+    ),
+
+  // GET /sdc/records — Dhiway's paginated record list, passed through as-is.
+  getRecords: ({ org_id, space_id, active = 1, page = 1, pageSize = 30, search = '' } = {}) =>
+    verificationApi.get('/sdc/records', {
+      params: cleanObject({ org_id, space_id, active, page, pageSize, search }),
+    }),
+
+  // GET /sdc/records/{public_id} — must use the record's publicId, not its id.
+  getRecord: (publicId, instanceKey = 'de') =>
+    verificationApi.get(`/sdc/records/${publicId}`, {
+      params: { instance_key: instanceKey },
+    }),
 };
 
 export const verifiersAPI = {

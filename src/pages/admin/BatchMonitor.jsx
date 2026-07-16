@@ -10,8 +10,8 @@ import { Modal } from '@/components/ui/Modal';
 import { Input } from '@/components/ui/Input';
 import { verificationAPI, verifiersAPI, getApiError, triggerBlobDownload } from '@/services/api';
 import {
-  ArrowRight, CheckCircle, ChevronLeft, Clock, Download, Eye, FileText, Filter, IdCard, Info,
-  Mail, MoreVertical, Package, Pencil, Plus, QrCode, RefreshCw, Send, Trash2, Upload, User, Users, X, XCircle, Zap,
+  ArrowRight, Building2, CheckCircle, ChevronLeft, Clock, Copy, Download, Eye, FileText, Filter, IdCard, Info,
+  Link2, Mail, MoreVertical, Package, Pencil, Plus, QrCode, RefreshCw, Send, ShieldCheck, Trash2, Upload, User, Users, X, XCircle, Zap,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -97,10 +97,10 @@ const batchStatusMeta = {
 };
 
 const WORKFLOW_STEPS = [
-  { id: 'pending',              label: 'Review' },
-  { id: 'send_to_verifier',     label: 'Verifier' },
-  { id: 'verified',             label: 'Verified' },
-  { id: 'send_to_organization', label: 'Org Shared' },
+  { id: 'pending',              label: 'Review',    icon: Eye },
+  { id: 'send_to_verifier',     label: 'Verifier',  icon: Mail },
+  { id: 'verified',             label: 'Verified',  icon: ShieldCheck },
+  { id: 'send_to_organization', label: 'Org Shared', icon: Send },
 ];
 
 const getStoredWorkflow = () => {
@@ -113,6 +113,11 @@ const isProductRecord = (record) =>
 
 const recordTitle = (record) =>
   record.product_name || record.full_name || record.email || record.id || 'Verification record';
+
+const formatVerifTypeLabel = (report) =>
+  report.verification_type_label ||
+  report.verification_type_name?.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) ||
+  'Manual Verification';
 
 const formatLastAction = (value) => {
   if (!value) return 'No batch action yet';
@@ -294,6 +299,11 @@ const VerifierRow = ({ row, ri, allVerifiers, batchTotal, countBefore, onUpdate,
               className="w-full resize-none rounded-xl border border-gray-200 px-3 py-2 text-sm font-inter focus:outline-none focus:ring-2 focus:ring-brand-blue/30" />
             <p className="mt-1 text-[10px] text-gray-400 font-inter">The Excel file and upload link are automatically appended by the system.</p>
           </div>
+          <label className="flex items-center gap-2.5 cursor-pointer select-none group">
+            <input type="checkbox" checked={row.saveAsDraft || false} onChange={(e) => onUpdate(row._key, { saveAsDraft: e.target.checked })}
+              className="w-4 h-4 rounded border-gray-300 accent-brand-blue cursor-pointer" />
+            <span className="text-xs font-inter text-gray-600 group-hover:text-brand-dark">Save this template as a draft</span>
+          </label>
         </div>
       )}
     </div>
@@ -353,7 +363,7 @@ const SmartSendModal = ({ isOpen, onClose, onSent, batch }) => {
       ...prev,
       [typeName]: [
         ...(prev[typeName] || []),
-        { _key: `${typeName}-${Date.now()}`, verifier_id: '', email_subject: defaultSubject(typeName), email_body: defaultBody(typeName), count: '' },
+        { _key: `${typeName}-${Date.now()}`, verifier_id: '', email_subject: defaultSubject(typeName), email_body: defaultBody(typeName), count: '', saveAsDraft: false },
       ],
     }));
   };
@@ -424,9 +434,23 @@ const SmartSendModal = ({ isOpen, onClose, onSent, batch }) => {
       toast.error('Assign at least one verifier to a verification type');
       return;
     }
+
+    // Collect any per-verifier templates marked "save as draft" before we send
+    const draftsToSave = [];
+    verificationTypes.forEach((t) => {
+      typeRows(t.verification_name).forEach((row) => {
+        if (row.verifier_id && parseInt(row.count) > 0 && row.saveAsDraft && row.email_subject.trim() && row.email_body.trim()) {
+          draftsToSave.push({ verification_type: t.verification_name, subject: row.email_subject, body: row.email_body });
+        }
+      });
+    });
+
     setSending(true);
     try {
       const { data } = await verificationAPI.smartSendManualVerification({ batch_id: batch.id, verification_assignments });
+      if (draftsToSave.length > 0) {
+        await Promise.allSettled(draftsToSave.map((d) => verificationAPI.createEmailDraft(d)));
+      }
       const summary = data?.results?.map((r) => `${slugToLabel(r.verification_type_name)}: ${r.verifiers?.map((v) => `${v.assigned_count} users`).join(', ')}`).join(' | ');
       toast.success(summary ? `Smart Send done — ${summary}` : 'Smart Send complete');
       onSent?.(data);
@@ -439,7 +463,7 @@ const SmartSendModal = ({ isOpen, onClose, onSent, batch }) => {
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Smart Send to Verifiers" size="xl">
+    <Modal isOpen={isOpen} onClose={onClose} title="Bulk Send to Verifiers" size="xl">
       <div className="space-y-4">
 
         {/* Batch + coverage summary chip */}
@@ -1052,6 +1076,11 @@ export const BatchMonitor = () => {
   const [downloadingDoc, setDownloadingDoc] = useState(false);
   const [downloadingReport, setDownloadingReport] = useState(false);
 
+  // Submitted verifier reports (real backend data)
+  const [submittedReports, setSubmittedReports] = useState(null);
+  const [loadingReports, setLoadingReports] = useState(false);
+  const [downloadingFileKey, setDownloadingFileKey] = useState(null);
+
   // Sub-modal states
   const [verifierModalOpen,   setVerifierModalOpen]   = useState(false);
   const [verifierModalBatch,  setVerifierModalBatch]  = useState(null);
@@ -1089,6 +1118,15 @@ export const BatchMonitor = () => {
       .then(({ data }) => setBatchDetail(data))
       .catch(() => toast.error('Failed to load batch details'))
       .finally(() => setLoadingDetail(false));
+  }, [selectedBatchId]);
+
+  useEffect(() => {
+    if (!selectedBatchId) { setSubmittedReports(null); return; }
+    setLoadingReports(true);
+    verificationAPI.getSubmittedReports(selectedBatchId)
+      .then(({ data }) => setSubmittedReports(data))
+      .catch(() => setSubmittedReports(null))
+      .finally(() => setLoadingReports(false));
   }, [selectedBatchId]);
 
   const records = data?.users || [];
@@ -1174,6 +1212,20 @@ export const BatchMonitor = () => {
       toast.error(getApiError(err, 'Failed to resend verification link'));
     } finally {
       setResending(null);
+    }
+  };
+
+  // ── Action: Download an individual verifier-submitted report file ────────
+  const handleDownloadReportFile = async (requestId, fileIndex, filename) => {
+    const key = `${requestId}-${fileIndex}`;
+    setDownloadingFileKey(key);
+    try {
+      const { data } = await verificationAPI.downloadManualReport(requestId, fileIndex);
+      triggerBlobDownload(data, filename || `report-${fileIndex}`);
+    } catch (err) {
+      toast.error(getApiError(err, 'Failed to download report file'));
+    } finally {
+      setDownloadingFileKey(null);
     }
   };
 
@@ -1561,87 +1613,131 @@ export const BatchMonitor = () => {
         {selectedBatch && (
           <div className="space-y-5">
             {/* Stage header */}
-            <div className="rounded-2xl border border-gray-100 bg-gray-50 p-4">
-              <div className="grid grid-cols-1 lg:grid-cols-[1.4fr_1fr] gap-4 items-stretch">
-                <div className={`min-w-0 rounded-xl border p-5 ${selectedBatch.statusMeta.tone}`}>
-                  <div className="flex items-start justify-between gap-4">
-                    <div>
-                      <p className="text-xs font-semibold uppercase tracking-wide opacity-80 font-inter">Current stage</p>
-                      <h3 className="font-sora font-bold text-2xl mt-1">{selectedBatch.statusMeta.label}</h3>
-                      <p className="text-xs opacity-80 font-inter mt-2">{selectedBatch.orgName}</p>
+            <div className="rounded-2xl border border-gray-100 bg-white shadow-sm overflow-hidden">
+              <div className="grid grid-cols-1 lg:grid-cols-[1.4fr_1fr]">
+                {/* Left: stage hero */}
+                <div className={`relative min-w-0 p-6 overflow-hidden ${selectedBatch.statusMeta.tone}`}>
+                  <div className="pointer-events-none absolute -right-10 -top-10 w-40 h-40 rounded-full bg-white/25" />
+                  <div className="relative flex items-start justify-between gap-4">
+                    <div className="min-w-0">
+                      <span className="inline-flex items-center gap-1.5 rounded-full bg-white/70 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider font-inter">
+                        Stage {(WORKFLOW_STEPS.findIndex((s) => s.id === selectedBatch.status) + 1) || 1} of {WORKFLOW_STEPS.length}
+                      </span>
+                      <h3 className="font-sora font-bold text-3xl mt-3 leading-tight">{selectedBatch.statusMeta.label}</h3>
+                      <p className="text-xs opacity-80 font-inter mt-2 flex items-center gap-1.5">
+                        <Building2 size={13} /> {selectedBatch.orgName}
+                      </p>
                     </div>
-                    <div className="w-12 h-12 rounded-2xl bg-white/70 flex items-center justify-center shrink-0">
-                      <Package size={22} />
+                    <div className="w-14 h-14 rounded-2xl bg-white/80 flex items-center justify-center shrink-0 shadow-sm">
+                      <Package size={24} />
                     </div>
                   </div>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-5">
+                  <div className="relative grid grid-cols-2 sm:grid-cols-4 gap-2.5 mt-6">
                     {[
-                      { label: 'Records', value: selectedBatch.total,    className: 'text-brand-blue' },
-                      { label: 'Pending', value: selectedBatch.pending,  className: 'text-brand-blue' },
-                      { label: 'Verified', value: selectedBatch.verified, className: 'text-brand-blue' },
-                      { label: 'Failed',  value: selectedBatch.failed,   className: 'text-brand-blue' },
+                      { label: 'Records',  value: selectedBatch.total,    icon: Users },
+                      { label: 'Pending',  value: selectedBatch.pending,  icon: Clock },
+                      { label: 'Verified', value: selectedBatch.verified, icon: CheckCircle },
+                      { label: 'Failed',   value: selectedBatch.failed,   icon: XCircle },
                     ].map((item) => (
-                      <div key={item.label} className="rounded-xl bg-white/75 border border-white/80 p-3">
-                        <p className={`font-sora font-bold text-xl ${item.className}`}>{item.value}</p>
-                        <p className="text-[11px] opacity-75 font-inter">{item.label}</p>
+                      <div key={item.label} className="rounded-xl bg-white/80 border border-white/90 p-3">
+                        <div className="flex items-center gap-1.5 mb-1">
+                          <item.icon size={11} className="opacity-60" />
+                          <p className="text-[10px] uppercase tracking-wide opacity-70 font-inter">{item.label}</p>
+                        </div>
+                        <p className="font-sora font-bold text-xl">{item.value}</p>
                       </div>
                     ))}
                   </div>
                 </div>
 
-                <div className="min-w-0 rounded-xl border border-gray-100 bg-white p-5">
-                  <p className="text-xs text-gray-400 font-inter">Last action</p>
-                      <p className="font-sora font-semibold text-brand-dark mt-1">{formatCreatedAt(selectedBatch.createdAt)}</p>
-                  <div className="mt-4 space-y-3">
-                    <div className="flex items-center justify-between text-xs font-inter">
-                      <span className="text-gray-500">Verified document</span>
-                      <Badge status={selectedBatch.verifiedDocument ? 'success' : 'default'}>{selectedBatch.verifiedDocument ? 'Ready' : 'Pending'}</Badge>
-                    </div>
-                    <div className="flex items-center justify-between text-xs font-inter">
-                      <span className="text-gray-500">Generated assets</span>
-                      <Badge status={selectedBatch.assets.length ? 'success' : 'default'}>{selectedBatch.assets.length || 0}</Badge>
-                    </div>
-                    <div className="flex items-center justify-between text-xs font-inter">
-                      <span className="text-gray-500">Organization share</span>
-                      <Badge status={selectedBatch.sharedWithOrganization ? 'success' : 'default'}>{selectedBatch.sharedWithOrganization ? 'Shared' : 'Not sent'}</Badge>
-                    </div>
-                    {selectedBatch.uploadLink && (
-                      <div className="pt-2 border-t border-gray-100">
-                        <p className="text-xs text-gray-500 font-inter mb-1.5">Verifier upload link</p>
-                        <div className="flex min-w-0 items-start gap-2 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2">
-                          <p className="min-w-0 flex-1 break-all text-[11px] text-brand-blue font-mono">{selectedBatch.uploadLink}</p>
-                          <button
-                            type="button"
-                            onClick={() => { navigator.clipboard.writeText(selectedBatch.uploadLink); toast.success('Link copied'); }}
-                            className="shrink-0 text-[10px] font-semibold font-inter text-brand-blue hover:text-blue-800"
-                          >
-                            Copy
-                          </button>
-                        </div>
-                      </div>
-                    )}
+                {/* Right: last action + share status */}
+                <div className="min-w-0 border-t lg:border-t-0 lg:border-l border-gray-100 bg-gray-50/60 p-6">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Clock size={13} className="text-gray-400" />
+                    <p className="text-xs text-gray-400 font-inter">Last action</p>
                   </div>
+                  <p className="font-sora font-semibold text-brand-dark">{formatCreatedAt(selectedBatch.createdAt)}</p>
+
+                  <div className="mt-5 space-y-2.5">
+                    {[
+                      { label: 'Verified document', icon: FileText, done: selectedBatch.verifiedDocument, doneLabel: 'Ready' },
+                      { label: 'Generated assets',   icon: IdCard,   done: selectedBatch.assets.length > 0, doneLabel: `${selectedBatch.assets.length || 0}` },
+                      { label: 'Organization share', icon: Send,     done: selectedBatch.sharedWithOrganization, doneLabel: 'Shared' },
+                    ].map((row) => (
+                      <div key={row.label} className="flex items-center justify-between gap-3 rounded-xl bg-white border border-gray-100 px-3 py-2.5">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${row.done ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-400'}`}>
+                            <row.icon size={13} />
+                          </div>
+                          <span className="text-xs font-inter text-gray-600 truncate">{row.label}</span>
+                        </div>
+                        <Badge status={row.done ? 'success' : 'default'}>{row.done ? row.doneLabel : 'Pending'}</Badge>
+                      </div>
+                    ))}
+                  </div>
+
+                  {selectedBatch.uploadLink && (
+                    <div className="mt-4 pt-4 border-t border-gray-200/70">
+                      <div className="flex items-center gap-1.5 mb-1.5">
+                        <Link2 size={12} className="text-brand-blue" />
+                        <p className="text-xs font-semibold text-gray-600 font-inter">Verifier upload link</p>
+                      </div>
+                      <div className="flex min-w-0 items-center gap-2 rounded-xl border border-blue-100 bg-blue-50 px-3 py-2.5">
+                        <p className="min-w-0 flex-1 break-all text-[11px] text-brand-blue font-mono leading-relaxed">{selectedBatch.uploadLink}</p>
+                        <button
+                          type="button"
+                          onClick={() => { navigator.clipboard.writeText(selectedBatch.uploadLink); toast.success('Link copied'); }}
+                          className="shrink-0 flex items-center gap-1 rounded-lg bg-white border border-blue-200 px-2.5 py-1.5 text-[10px] font-semibold font-inter text-brand-blue hover:bg-blue-100 transition-colors"
+                        >
+                          <Copy size={11} /> Copy
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
 
             {/* Workflow + Actions */}
             <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)] gap-4">
-              {/* Workflow steps */}
-              <div className="min-w-0 rounded-2xl border border-gray-100 bg-white p-5">
-                <div className="mb-4">
-                  <p className="font-sora font-semibold text-brand-dark">Batch Workflow</p>
-                  <p className="text-xs text-gray-400 font-inter mt-1">Review → Verifier → Verified → Org Shared</p>
+              {/* Workflow steps — driven by the backend's workflow_step when available */}
+              <div className="min-w-0 rounded-2xl border border-gray-100 bg-white shadow-sm p-5">
+                <div className="mb-6 flex items-center justify-between gap-3">
+                  <div>
+                    <p className="font-sora font-semibold text-brand-dark">Batch Workflow</p>
+                    <p className="text-xs text-gray-400 font-inter mt-1">Review → Verifier → Verified → Org Shared</p>
+                  </div>
+                  {typeof batchDetail?.verifiers_total === 'number' && batchDetail.verifiers_total > 0 && (
+                    <Badge status={batchDetail.all_verifiers_submitted ? 'success' : 'default'}>
+                      {batchDetail.verifiers_submitted ?? 0}/{batchDetail.verifiers_total} verifiers submitted
+                    </Badge>
+                  )}
                 </div>
-                <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
+                <div className="flex items-start">
                   {WORKFLOW_STEPS.map((step, index) => {
-                    const activeIndex = WORKFLOW_STEPS.findIndex((item) => item.id === selectedBatch.status);
-                    const active = index <= activeIndex;
+                    const activeIndex = batchDetail?.workflow_step
+                      ? batchDetail.workflow_step - 1
+                      : WORKFLOW_STEPS.findIndex((item) => item.id === selectedBatch.status);
+                    const completed = index < activeIndex;
+                    const active    = index === activeIndex;
+                    const reached   = index <= activeIndex;
+                    const StepIcon  = step.icon;
                     return (
-                      <div key={step.id} className={`rounded-xl px-3 py-4 text-center text-xs font-semibold font-inter border ${active ? 'bg-brand-blue text-white border-brand-blue shadow-sm' : 'bg-gray-50 text-gray-400 border-gray-100'}`}>
-                        <span className={`block w-7 h-7 rounded-full mx-auto mb-2 leading-7 ${active ? 'bg-white/20' : 'bg-white border border-gray-100'}`}>{index + 1}</span>
-                        {step.label}
-                      </div>
+                      <React.Fragment key={step.id}>
+                        <div className="flex flex-col items-center gap-2 shrink-0 w-16">
+                          <div className={`w-10 h-10 rounded-2xl flex items-center justify-center border-2 transition-colors ${
+                            reached ? 'bg-brand-blue border-brand-blue text-white shadow-sm' : 'bg-white border-gray-200 text-gray-300'
+                          } ${active ? 'ring-4 ring-brand-blue/15' : ''}`}>
+                            {completed ? <CheckCircle size={16} /> : <StepIcon size={16} />}
+                          </div>
+                          <span className={`text-[11px] text-center font-semibold font-inter leading-tight ${reached ? 'text-brand-dark' : 'text-gray-400'}`}>
+                            {step.label}
+                          </span>
+                        </div>
+                        {index < WORKFLOW_STEPS.length - 1 && (
+                          <div className={`flex-1 h-0.5 mt-5 rounded-full transition-colors ${index < activeIndex ? 'bg-brand-blue' : 'bg-gray-200'}`} />
+                        )}
+                      </React.Fragment>
                     );
                   })}
                 </div>
@@ -1749,6 +1845,72 @@ export const BatchMonitor = () => {
                     </div>
                   ))}
                 </div>
+              </div>
+            )}
+
+            {/* ── Submitted Reports panel — real verifier uploads ────────── */}
+            {(loadingReports || submittedReports?.reports?.length > 0) && (
+              <div className="rounded-2xl border border-gray-100 bg-white p-5">
+                <div className="mb-4 flex items-center justify-between gap-3">
+                  <div>
+                    <p className="font-sora font-semibold text-brand-dark">Submitted Reports</p>
+                    <p className="text-xs text-gray-400 font-inter mt-1">Files uploaded by each verifier for this batch.</p>
+                  </div>
+                  {submittedReports && (
+                    <Badge status={submittedReports.total_submitted === submittedReports.total_requests ? 'success' : 'default'}>
+                      {submittedReports.total_submitted}/{submittedReports.total_requests} submitted
+                    </Badge>
+                  )}
+                </div>
+
+                {loadingReports ? (
+                  <div className="flex items-center justify-center gap-2 py-8">
+                    <RefreshCw size={16} className="animate-spin text-brand-blue" />
+                    <p className="text-sm text-gray-400 font-inter">Loading submitted reports…</p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {submittedReports.reports.map((report) => (
+                      <div key={report.request_id} className={`rounded-xl border px-4 py-3 ${report.submitted ? 'border-green-100 bg-green-50/40' : 'border-gray-100 bg-gray-50'}`}>
+                        <div className="flex items-center justify-between gap-3 flex-wrap">
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${report.submitted ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-400'}`}>
+                              {report.submitted ? <CheckCircle size={14} /> : <Clock size={14} />}
+                            </div>
+                            <div className="min-w-0">
+                              <p className="text-sm font-semibold text-brand-dark font-inter truncate">{formatVerifTypeLabel(report)}</p>
+                              <p className="text-xs text-gray-500 font-inter truncate">{report.verifier_email}</p>
+                            </div>
+                          </div>
+                          <Badge status={report.submitted ? 'success' : 'default'}>
+                            {report.submitted ? `${report.report_count} file${report.report_count !== 1 ? 's' : ''}` : 'Pending'}
+                          </Badge>
+                        </div>
+
+                        {report.submitted && report.report_files?.length > 0 && (
+                          <div className="mt-3 flex flex-wrap gap-2 pl-11">
+                            {report.report_files.map((file, fileIndex) => {
+                              const key = `${report.request_id}-${fileIndex}`;
+                              const isDownloading = downloadingFileKey === key;
+                              return (
+                                <button
+                                  key={key}
+                                  type="button"
+                                  disabled={isDownloading}
+                                  onClick={() => handleDownloadReportFile(report.request_id, fileIndex, file.filename)}
+                                  className="flex items-center gap-1.5 rounded-lg border border-blue-200 bg-white px-3 py-1.5 text-xs font-semibold font-inter text-brand-blue hover:bg-blue-50 disabled:opacity-50 transition-colors"
+                                >
+                                  {isDownloading ? <RefreshCw size={12} className="animate-spin" /> : <Download size={12} />}
+                                  {file.filename}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
 

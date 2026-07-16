@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useParams, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { verificationAPI, getApiError } from '@/services/api';
 import { Logo } from '@/components/ui/Logo';
@@ -21,8 +21,9 @@ const isUsedOrExpiredError = (err) => {
 };
 
 export const DocumentUpload = () => {
+  const { token: pathToken } = useParams();
   const [searchParams] = useSearchParams();
-  const token = searchParams.get('token');
+  const token = pathToken || searchParams.get('token');
   const batchName = searchParams.get('batch') || 'Verification Batch';
   const fileInputRef = useRef(null);
 

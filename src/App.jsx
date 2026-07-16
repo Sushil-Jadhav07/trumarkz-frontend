@@ -89,6 +89,7 @@ import CreateSuperAdmin from '@/pages/admin/CreateSuperAdmin';
 import AllUsersList from '@/pages/admin/AllUsersList';
 import EmailDrafts from '@/pages/admin/EmailDrafts';
 import ProductWarrantyAdmin from '@/pages/admin/ProductWarrantyAdmin';
+import ProductWarrantyUpload from '@/pages/org/ProductWarrantyUpload';
 import SkillsManagement from '@/pages/admin/SkillsManagement';
 import SkillVerifierUpload from '@/pages/public/SkillVerifierUpload';
 
@@ -144,6 +145,7 @@ const AnimatedRoutes = () => {
           <Route path="/auth/error" element={<AuthError />} />
           <Route path="/auth/google/callback" element={<GoogleCallback />} />
           <Route path="/upload" element={<DocumentUpload />} />
+          <Route path="/verification/manual/upload/:token" element={<DocumentUpload />} />
           <Route path="/skills/verify/upload/:token" element={<SkillVerifierUpload />} />
 
           {/* ── Registration routes ── */}
@@ -178,6 +180,7 @@ const AnimatedRoutes = () => {
           <Route path="/org/product/template" element={<ProductTemplate />} />
           <Route path="/org/product/costing" element={<ProductCostBreakdown />} />
           <Route path="/org/product/certificate-preview" element={<ProductCertificatePreview />} />
+          <Route path="/org/product/warranty" element={<ProtectedRoute><ProductWarrantyUpload /></ProtectedRoute>} />
           {/* ── QR routes ── */}
           <Route path="/qr/scan" element={<QRScanner />} />
           <Route path="/qr/result" element={<VerificationResult />} />
