@@ -141,6 +141,7 @@ export const authAPI = {
       email: data.email.trim(),
       phone_number: data.phoneNumber ? data.phoneNumber.trim() : undefined,
       password: data.password,
+      dhiway_space_id: data.dhiwaySpaceId ? data.dhiwaySpaceId.trim() : undefined,
     }),
 
   signupIndividual: (data) =>
@@ -553,9 +554,10 @@ export const verificationAPI = {
 };
 
 export const sdcAPI = {
-  // POST /sdc/batches/{batch_id}/generate — backend builds the recordArray from the
-  // batch's users; org_id/space_id/schema_id are Dhiway identifiers (which change
-  // per SDC template) so the caller must supply them.
+  // POST /sdc/batches/{batch_id}/generate — create + auto-issue in one call.
+  // Body is optional; org_id/space_id/schema_id are resolved server-side
+  // (override > org's dhiway_space_id > config default) unless explicitly
+  // supplied here to override that resolution for this one run.
   generateBatchSDC: (batchId, payload = {}) =>
     verificationApi.post(
       `/sdc/batches/${batchId}/generate`,
@@ -568,6 +570,12 @@ export const sdcAPI = {
       })
     ),
 
+  // GET /sdc/batches/{batch_id}/status — poll until done:true. Reports exact
+  // ready/pending/total counts for this batch (unlike /sdc/records, which
+  // lists the whole space and has to be filtered client-side by email).
+  getBatchStatus: (batchId) =>
+    verificationApi.get(`/sdc/batches/${batchId}/status`),
+
   // GET /sdc/records — Dhiway's paginated record list, passed through as-is.
   getRecords: ({ org_id, space_id, active = 1, page = 1, pageSize = 30, search = '' } = {}) =>
     verificationApi.get('/sdc/records', {
@@ -579,6 +587,21 @@ export const sdcAPI = {
     verificationApi.get(`/sdc/records/${publicId}`, {
       params: { instance_key: instanceKey },
     }),
+
+  // POST /sdc/batches/{batch_id}/issue — fallback only. Call this ONLY when a
+  // prior generateBatchSDC() response had issue_pending: true (Dhiway hadn't
+  // finished creating drafts inside generate's own ~24s wait window).
+  // 409 = drafts still not ready — safe to retry after a short delay.
+  // 400 = generate was never called for this batch first.
+  issueBatchSDC: (batchId, payload = {}) =>
+    verificationApi.post(
+      `/sdc/batches/${batchId}/issue`,
+      cleanObject({
+        send_email: !!payload.send_email,
+        issuer_message: payload.issuer_message?.trim(),
+        reply_to_email: payload.reply_to_email?.trim(),
+      })
+    ),
 };
 
 export const verifiersAPI = {

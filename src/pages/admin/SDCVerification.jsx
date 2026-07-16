@@ -105,8 +105,27 @@ const GenerateSDCModal = ({ batch, onClose, onGenerated }) => {
   const [publish, setPublish] = useState(!!initial.publish);
   const [active, setActive] = useState(initial.active !== undefined ? !!initial.active : true);
   const [submitting, setSubmitting] = useState(false);
+  const [retrying, setRetrying] = useState(false);
   const [result, setResult] = useState(null); // raw API response, shown for reference after submit
   const [sentPayload, setSentPayload] = useState(null);
+
+  // Fallback issue call — only used when generate comes back with issue_pending.
+  // 409 = Dhiway drafts not ready yet, retry with backoff. Large batches can take
+  // Dhiway well over a minute to finish drafting, so this window is generous
+  // (8 attempts, 5s/10s/.../40s — ~3 minutes worst case) rather than giving up fast.
+  // 400 = generate wasn't called first (shouldn't happen from this code path).
+  const issueWithRetry = async (batchId, attempt = 1, maxAttempts = 8) => {
+    try {
+      const { data } = await sdcAPI.issueBatchSDC(batchId);
+      return data;
+    } catch (err) {
+      if (err?.response?.status === 409 && attempt < maxAttempts) {
+        await new Promise((resolve) => setTimeout(resolve, attempt * 5000));
+        return issueWithRetry(batchId, attempt + 1, maxAttempts);
+      }
+      throw err;
+    }
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -120,17 +139,48 @@ const GenerateSDCModal = ({ batch, onClose, onGenerated }) => {
         active,
       };
       const { data } = await sdcAPI.generateBatchSDC(batch.id, payload);
+
+      // generate is now create+issue in one call. issue_pending: true means Dhiway
+      // hadn't finished within generate's own wait window — finish it ourselves.
+      let finalData = data;
+      if (data.issue_pending) {
+        toast('Finishing certificate issuance…', { icon: '⏳' });
+        try {
+          finalData = await issueWithRetry(batch.id);
+        } catch (issueErr) {
+          // Drafts were created but Dhiway still hasn't finished issuing after our
+          // retry window — don't hard-fail the whole flow. Drafts exist and can be
+          // finished later with the "Retry Issuance" button below.
+          finalData = { ...data, issue_pending: true };
+          toast.error('Drafts created, but issuance is taking longer than usual — use "Retry Issuance" below.');
+        }
+      }
+
       if (showAdvanced && (payload.org_id || payload.space_id || payload.schema_id)) {
         saveSdcConfig(batch.id, payload);
       }
-      toast.success('SDC created');
-      onGenerated(payload, data);
+      if (!finalData.issue_pending) toast.success('SDC created');
+      onGenerated(payload, finalData);
       setSentPayload(payload);
-      setResult(data);
+      setResult(finalData);
     } catch (err) {
       toast.error(getApiError(err, 'Failed to start SDC generation'));
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleRetryIssue = async () => {
+    setRetrying(true);
+    try {
+      const data = await issueWithRetry(batch.id);
+      toast.success('Certificates issued');
+      setResult(data);
+      onGenerated(sentPayload, data);
+    } catch (err) {
+      toast.error(getApiError(err, 'Still not ready — try again in a bit'));
+    } finally {
+      setRetrying(false);
     }
   };
 
@@ -139,15 +189,24 @@ const GenerateSDCModal = ({ batch, onClose, onGenerated }) => {
     return (
       <Modal isOpen onClose={onClose} title="SDC Generation Started" size="lg">
         <div className="space-y-4">
-          <div className="flex items-center gap-2 px-4 py-3 rounded-xl border bg-green-50 border-green-100">
-            <Badge status="success">SDC Created</Badge>
-            <span className="text-xs text-green-700 font-inter">Dhiway status {result.dhiway_status ?? '—'}</span>
-          </div>
+          {result.issue_pending ? (
+            <div className="flex items-center gap-2 px-4 py-3 rounded-xl border bg-orange-50 border-orange-100">
+              <Badge status="pending">Issuance Pending</Badge>
+              <span className="text-xs text-orange-700 font-inter">Drafts created — issuance still in progress on Dhiway's side</span>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 px-4 py-3 rounded-xl border bg-green-50 border-green-100">
+              <Badge status="success">SDC Created</Badge>
+              <span className="text-xs text-green-700 font-inter">Dhiway status {result.dhiway_status ?? '—'}</span>
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-4">
             <Detail label="Batch ID" value={result.batch_id} mono />
             <Detail label="Records Sent" value={result.records_sent} />
             <Detail label="SDC Status" value={result.sdc_status} />
+            <Detail label="Issued Count" value={result.issued_count} />
+            <Detail label="Created At" value={result.created_at} />
             <Detail label="Dhiway Status Code" value={result.dhiway_status} />
           </div>
 
@@ -181,7 +240,14 @@ const GenerateSDCModal = ({ batch, onClose, onGenerated }) => {
             </p>
           </div>
 
-          <Button onClick={onClose}>Done</Button>
+          <div className="flex gap-3">
+            {result.issue_pending && (
+              <Button variant="secondary" loading={retrying} onClick={handleRetryIssue}>
+                <RefreshCw size={14} /> Retry Issuance
+              </Button>
+            )}
+            <Button onClick={onClose}>Done</Button>
+          </div>
         </div>
       </Modal>
     );
@@ -326,6 +392,7 @@ const BatchDetail = ({ batchSummary, onBack, onBatchUpdated }) => {
   const [sdcRecordsByEmail, setSdcRecordsByEmail] = useState({});
   const [certsLoading, setCertsLoading] = useState(false);
   const [autoChecking, setAutoChecking] = useState(false);
+  const [statusProgress, setStatusProgress] = useState(null); // { total, ready, pending }
   const [pdfLoadingId, setPdfLoadingId] = useState(null);
   const pollRef = useRef(null);
   const instanceKey = 'de';
@@ -368,30 +435,44 @@ const BatchDetail = ({ batchSummary, onBack, onBatchUpdated }) => {
     }
   }, [batchSummary.id]);
 
-  // Generation is async on Dhiway's side (202 Processing) — poll a few times
-  // after a successful generate so the PDF shows up without manual refreshing.
+  // Poll GET /sdc/batches/{id}/status until done:true, then do one getRecords
+  // pass to link up publicId/pdf/verify for the UI.
   const startAutoCheckForCertificates = useCallback(() => {
     if (pollRef.current) clearInterval(pollRef.current);
     let attempts = 0;
-    const maxAttempts = 6; // ~60s total at 10s intervals
+    const maxAttempts = 10; // ~80s worst case at 8s intervals
     setAutoChecking(true);
+    setStatusProgress(null);
+
     const tick = async () => {
       attempts += 1;
-      const found = await refreshCertificates(true);
-      if (found > 0 || attempts >= maxAttempts) {
+      try {
+        const { data } = await sdcAPI.getBatchStatus(batchSummary.id);
+        setStatusProgress({ total: data.total, ready: data.ready, pending: data.pending });
+
+        if (data.done) {
+          clearInterval(pollRef.current);
+          pollRef.current = null;
+          setAutoChecking(false);
+          const found = await refreshCertificates(true);
+          toast.success(`Certificates ready — ${found} record${found === 1 ? '' : 's'} linked`);
+          return;
+        }
+      } catch {
+        // transient error — keep polling, only give up after maxAttempts
+      }
+
+      if (attempts >= maxAttempts) {
         clearInterval(pollRef.current);
         pollRef.current = null;
         setAutoChecking(false);
-        if (found > 0) {
-          toast.success(`Certificate${found === 1 ? '' : 's'} ready — ${found} record${found === 1 ? '' : 's'} found`);
-        } else {
-          toast.error('Still not ready after 60s — use "Refresh Certificates" to check again later');
-        }
+        toast.error('Still processing — use "Refresh Certificates" to check again later');
       }
     };
+
     tick();
-    pollRef.current = setInterval(tick, 10000);
-  }, [refreshCertificates]);
+    pollRef.current = setInterval(tick, 8000);
+  }, [batchSummary.id, refreshCertificates]);
 
   const filtered = useMemo(() => {
     if (!batch) return [];
@@ -424,7 +505,9 @@ const BatchDetail = ({ batchSummary, onBack, onBatchUpdated }) => {
         <div className="ml-auto flex items-center gap-2">
           {autoChecking && (
             <span className="flex items-center gap-1.5 text-xs text-brand-blue font-inter">
-              <RefreshCw size={12} className="animate-spin" /> Checking for certificates…
+              <RefreshCw size={12} className="animate-spin" />
+              Checking for certificates…
+              {statusProgress && ` (${statusProgress.ready}/${statusProgress.total} ready)`}
             </span>
           )}
           {batch.sdcStatus === 'generated' ? (

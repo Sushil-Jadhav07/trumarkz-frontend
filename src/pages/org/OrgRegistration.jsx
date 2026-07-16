@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { StepWizard } from '@/components/ui/StepWizard';
 import { Card } from '@/components/ui/Card';
-import { Building2, Mail, Phone, Lock, ArrowLeft, ArrowRight } from 'lucide-react';
+import { Building2, Mail, Phone, Lock, ArrowLeft, ArrowRight, ChevronDown } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 export const OrgRegistration = () => {
@@ -19,9 +19,11 @@ export const OrgRegistration = () => {
     phoneNumber: '',
     password: '',
     confirmPassword: '',
+    dhiwaySpaceId: '', // optional, only for orgs that already have a Dhiway space
   });
   const [errors, setErrors] = useState({});
   const [submitting, setSubmitting] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   const validate = () => {
     const newErrors = {};
@@ -123,6 +125,24 @@ export const OrgRegistration = () => {
               error={errors.confirmPassword}
               icon={Lock}
             />
+
+            <button
+              type="button"
+              onClick={() => setShowAdvanced((v) => !v)}
+              className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-brand-dark font-inter"
+            >
+              <ChevronDown size={14} className={`transition-transform ${showAdvanced ? 'rotate-180' : ''}`} />
+              Advanced (optional)
+            </button>
+
+            {showAdvanced && (
+              <Input
+                label="Dhiway Space ID (optional)"
+                placeholder="Leave blank unless your organization already has one"
+                value={form.dhiwaySpaceId}
+                onChange={e => updateField('dhiwaySpaceId', e.target.value)}
+              />
+            )}
 
             <Button type="submit" variant="primary" size="lg" className="w-full" disabled={submitting}>
               {submitting ? 'Sending OTP...' : 'Create Account & Send OTP'} <ArrowRight size={18} />

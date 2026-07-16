@@ -11,7 +11,7 @@ import { verificationAPI, getApiError } from '@/services/api';
 import {
   ChevronLeft, ChevronRight, CheckCircle, Clock, Download,
   Eye, FileText, Layers, Package, QrCode, RefreshCw, Upload,
-  User, XCircle, Play, BarChart3, Building2, ShieldCheck, Globe,
+  User, XCircle, Play, BarChart3, Building2, ShieldCheck, Globe, Award,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -40,6 +40,12 @@ const recordStatusBadge = (status) => {
   if (status === 'verified') return { variant: 'success', label: 'Verified' };
   if (status === 'failed')   return { variant: 'error',   label: 'Failed' };
   return                            { variant: 'pending',  label: 'Pending' };
+};
+
+const sdcStatusLabel = (status) => {
+  if (status === 'sdc_created')   return 'Certificates Issued';
+  if (status === 'draft_created') return 'Certificates Drafted';
+  return 'Certificate Pending';
 };
 
 const BATCH_STATUS_META = {
@@ -198,6 +204,7 @@ const BatchDetailModal = ({ batchId, batchName, onClose }) => {
 
   const meta = detail?.statusMeta || BATCH_STATUS_META.pending_verification;
   const StatusIcon = meta.icon;
+  const sdc = detail?.verificationProgress?.sdc || null;
   const pct = detail && detail.total > 0
     ? Math.round(((detail.verified + detail.failed) / detail.total) * 100)
     : 0;
@@ -245,11 +252,26 @@ const BatchDetailModal = ({ batchId, batchName, onClose }) => {
                       {detail.description}
                     </p>
                   )}
+                  {sdc && (
+                    <p className="mt-2 font-inter text-[11px] text-gray-400">
+                      {sdcStatusLabel(sdc.status)}
+                      {sdc.created_at ? ` · ${sdc.created_at}` : ''}
+                      {sdc.issued_count ? ` · ${sdc.issued_count} issued` : ''}
+                    </p>
+                  )}
                 </div>
               </div>
-              <div className={`flex shrink-0 items-center gap-1.5 rounded-xl border px-3 py-2 ${meta.tone}`}>
-                <div className={`h-1.5 w-1.5 rounded-full ${meta.dot}`} />
-                <span className="font-inter text-xs font-semibold">{meta.label}</span>
+              <div className="flex shrink-0 flex-col items-end gap-1.5">
+                <div className={`flex items-center gap-1.5 rounded-xl border px-3 py-2 ${meta.tone}`}>
+                  <div className={`h-1.5 w-1.5 rounded-full ${meta.dot}`} />
+                  <span className="font-inter text-xs font-semibold">{meta.label}</span>
+                </div>
+                {sdc && (
+                  <div className="flex items-center gap-1.5 rounded-xl border border-blue-100 bg-blue-50 px-3 py-2 text-brand-blue">
+                    <Award size={12} />
+                    <span className="font-inter text-xs font-semibold">{sdcStatusLabel(sdc.status)}</span>
+                  </div>
+                )}
               </div>
             </div>
           </div>

@@ -10,9 +10,33 @@ import { authAPI } from '@/services/api';
 import {
   User, Camera, Mail, Phone, Building2, Save,
   CheckCircle, FileText, MapPin, RefreshCw, Shield,
-  Calendar, Hash, Briefcase, Edit3, X,
+  Calendar, Hash, Briefcase, Edit3, X, Database,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
+
+// Dhiway Space ID currently has no dedicated update endpoint — the backend
+// only accepts it at org signup. Persist locally per-account so the field
+// survives refreshes; swap this for a real PATCH call once one exists.
+const SPACE_ID_PREFIX = 'dhiway_space_id_';
+
+const loadLocalSpaceId = (userId) => {
+  if (!userId) return '';
+  try {
+    return localStorage.getItem(`${SPACE_ID_PREFIX}${userId}`) || '';
+  } catch {
+    return '';
+  }
+};
+
+const saveLocalSpaceId = (userId, value) => {
+  if (!userId) return;
+  try {
+    if (value) localStorage.setItem(`${SPACE_ID_PREFIX}${userId}`, value);
+    else localStorage.removeItem(`${SPACE_ID_PREFIX}${userId}`);
+  } catch {
+    // localStorage unavailable — field simply won't persist across reloads
+  }
+};
 
 const roleLabels = {
   organization: 'Organization',
@@ -33,6 +57,7 @@ const normalizeForm = (user) => ({
   email: user?.email || '',
   phoneNumber: user?.phoneNumber || '',
   avatarUrl: user?.avatarUrl || '',
+  dhiwaySpaceId: user?.dhiwaySpaceId || loadLocalSpaceId(user?.id) || '',
 });
 
 const normalizeIndustryList = (value) => {
@@ -113,7 +138,14 @@ export const Profile = () => {
   const handleSave = () => {
     if (!form.name.trim()) { toast.error('Full name is required'); return; }
     setSaving(true);
-    updateUserProfile({ name: form.name.trim(), phoneNumber: form.phoneNumber.trim(), avatarUrl: form.avatarUrl });
+    const dhiwaySpaceId = form.dhiwaySpaceId.trim();
+    if (isOrg) saveLocalSpaceId(user?.id, dhiwaySpaceId);
+    updateUserProfile({
+      name: form.name.trim(),
+      phoneNumber: form.phoneNumber.trim(),
+      avatarUrl: form.avatarUrl,
+      ...(isOrg ? { dhiwaySpaceId } : {}),
+    });
     setSaving(false);
     setEditing(false);
     toast.success('Profile updated');
@@ -280,6 +312,29 @@ export const Profile = () => {
                 <div className="space-y-4">
                   <DetailRow icon={Building2} label="Organization Name" value={user?.organization} />
                   <div className="border-t border-gray-50" />
+
+                  {editing ? (
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 font-inter mb-1">Dhiway Space ID</label>
+                      <div className="relative">
+                        <Database size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                        <input
+                          value={form.dhiwaySpaceId}
+                          onChange={(e) => setField('dhiwaySpaceId', e.target.value)}
+                          disabled={loading || refreshing}
+                          placeholder="Leave blank unless your organization already has one"
+                          className="w-full h-9 rounded-lg border border-gray-200 pl-8 pr-3 text-sm font-inter text-brand-dark bg-white disabled:bg-gray-50 disabled:text-gray-500 focus:outline-none focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/10 transition-all"
+                        />
+                      </div>
+                      <p className="text-[11px] text-gray-400 font-inter mt-0.5">
+                        Scopes this organization's SDC certificates on Dhiway. Optional.
+                      </p>
+                    </div>
+                  ) : (
+                    <DetailRow icon={Database} label="Dhiway Space ID" value={form.dhiwaySpaceId || 'Not set'} />
+                  )}
+                  <div className="border-t border-gray-50" />
+
                   <DetailRow icon={FileText} label="GSTIN" value={user?.gstin} />
                   <div className="border-t border-gray-50" />
                   <DetailRow icon={Hash} label="Business Registration No." value={user?.businessRegNumber} />
