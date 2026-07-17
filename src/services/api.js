@@ -144,6 +144,11 @@ export const authAPI = {
       dhiway_space_id: data.dhiwaySpaceId ? data.dhiwaySpaceId.trim() : undefined,
     }),
 
+  // PATCH /auth/me/dhiway-space — org saves/updates its own Dhiway space id.
+  // Repeatable: call again any time to change it. Pass '' or null to clear.
+  updateDhiwaySpaceId: (spaceId) =>
+    api.patch('/auth/me/dhiway-space', { dhiway_space_id: spaceId ? spaceId.trim() : null }),
+
   signupIndividual: (data) =>
     api.post('/auth/signup/individual', {
       full_name: data.fullName.trim(),
@@ -555,18 +560,20 @@ export const verificationAPI = {
 
 export const sdcAPI = {
   // POST /sdc/batches/{batch_id}/generate — create + auto-issue in one call.
-  // Body is optional; org_id/space_id/schema_id are resolved server-side
-  // (override > org's dhiway_space_id > config default) unless explicitly
-  // supplied here to override that resolution for this one run.
+  // Body is normally just {publish, active}. org_id is fixed backend-side and
+  // must NEVER be sent. space_id normally comes from the org's own
+  // dhiway_space_id (set via authAPI.updateDhiwaySpaceId, falling back to a
+  // config default) and schema_id resolves from the batch's industry — both
+  // can optionally be passed here to override that resolution, but that's a
+  // testing-only escape hatch, not part of the normal admin flow.
   generateBatchSDC: (batchId, payload = {}) =>
     verificationApi.post(
       `/sdc/batches/${batchId}/generate`,
       cleanObject({
-        org_id: payload.org_id?.trim(),
-        space_id: payload.space_id?.trim(),
-        schema_id: payload.schema_id?.trim(),
         publish: !!payload.publish,
         active: !!payload.active,
+        space_id: payload.space_id?.trim(),
+        schema_id: payload.schema_id?.trim(),
       })
     ),
 
@@ -590,16 +597,21 @@ export const sdcAPI = {
 
   // POST /sdc/batches/{batch_id}/issue — fallback only. Call this ONLY when a
   // prior generateBatchSDC() response had issue_pending: true (Dhiway hadn't
-  // finished creating drafts inside generate's own ~24s wait window).
-  // 409 = drafts still not ready — safe to retry after a short delay.
-  // 400 = generate was never called for this batch first.
+  // finished creating drafts inside generate's own ~24s wait window). Safe to
+  // retry — already-issued records are never re-issued.
+  // 409 = drafts still not ready — retry. 400 = generate wasn't called first.
+  // 502 = Dhiway issue failed — not retried automatically.
   issueBatchSDC: (batchId, payload = {}) =>
     verificationApi.post(
       `/sdc/batches/${batchId}/issue`,
       cleanObject({
         send_email: !!payload.send_email,
         issuer_message: payload.issuer_message?.trim(),
+        need_cc: !!payload.need_cc,
+        need_admin_cc: !!payload.need_admin_cc,
+        partner_name: payload.partner_name?.trim(),
         reply_to_email: payload.reply_to_email?.trim(),
+        cc_email: payload.cc_email?.trim(),
       })
     ),
 };

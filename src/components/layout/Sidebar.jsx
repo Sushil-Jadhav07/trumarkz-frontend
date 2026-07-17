@@ -3,7 +3,7 @@ import { useAuth } from '@/context/AuthContext';
 import { Logo } from '@/components/ui/Logo';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
-  LayoutDashboard, Layers, Award, Store, BarChart2,
+  LayoutDashboard, Layers, Award, Store,
   Wallet, HelpCircle, User, LogOut, ChevronLeft, ChevronRight,
   GitBranch, Share2, CheckSquare, Building2,
   ShieldCheck, UserCog, UserSearch,
@@ -29,7 +29,7 @@ export const Sidebar = ({ collapsed, onToggle, mobileOpen = false, onMobileClose
         { path: '/org/dashboard', label: 'Dashboard', icon: LayoutDashboard },
         { path: '/org/batch-status', label: 'Batches', icon: Layers },
         { path: '/marketplace', label: 'Registry', icon: Store },
-        { path: '/qr/reports', label: 'Reports', icon: BarChart2 },
+        { path: '/qr/reports', label: 'Certificates', icon: Award },
         { path: '/account/wallet', label: 'Wallet', icon: Wallet },
         { path: '/account/support', label: 'Support', icon: HelpCircle },
         { path: '/account/profile', label: 'Profile', icon: User }

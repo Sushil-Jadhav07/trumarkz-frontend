@@ -6,37 +6,13 @@ import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
 import { Badge } from '@/components/ui/Badge';
 import { useAuth } from '@/context/AuthContext';
-import { authAPI } from '@/services/api';
+import { authAPI, getApiError } from '@/services/api';
 import {
   User, Camera, Mail, Phone, Building2, Save,
   CheckCircle, FileText, MapPin, RefreshCw, Shield,
   Calendar, Hash, Briefcase, Edit3, X, Database,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-
-// Dhiway Space ID currently has no dedicated update endpoint — the backend
-// only accepts it at org signup. Persist locally per-account so the field
-// survives refreshes; swap this for a real PATCH call once one exists.
-const SPACE_ID_PREFIX = 'dhiway_space_id_';
-
-const loadLocalSpaceId = (userId) => {
-  if (!userId) return '';
-  try {
-    return localStorage.getItem(`${SPACE_ID_PREFIX}${userId}`) || '';
-  } catch {
-    return '';
-  }
-};
-
-const saveLocalSpaceId = (userId, value) => {
-  if (!userId) return;
-  try {
-    if (value) localStorage.setItem(`${SPACE_ID_PREFIX}${userId}`, value);
-    else localStorage.removeItem(`${SPACE_ID_PREFIX}${userId}`);
-  } catch {
-    // localStorage unavailable — field simply won't persist across reloads
-  }
-};
 
 const roleLabels = {
   organization: 'Organization',
@@ -57,7 +33,7 @@ const normalizeForm = (user) => ({
   email: user?.email || '',
   phoneNumber: user?.phoneNumber || '',
   avatarUrl: user?.avatarUrl || '',
-  dhiwaySpaceId: user?.dhiwaySpaceId || loadLocalSpaceId(user?.id) || '',
+  dhiwaySpaceId: user?.dhiwaySpaceId || '',
 });
 
 const normalizeIndustryList = (value) => {
@@ -135,20 +111,27 @@ export const Profile = () => {
     e.target.value = '';
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!form.name.trim()) { toast.error('Full name is required'); return; }
     setSaving(true);
-    const dhiwaySpaceId = form.dhiwaySpaceId.trim();
-    if (isOrg) saveLocalSpaceId(user?.id, dhiwaySpaceId);
-    updateUserProfile({
-      name: form.name.trim(),
-      phoneNumber: form.phoneNumber.trim(),
-      avatarUrl: form.avatarUrl,
-      ...(isOrg ? { dhiwaySpaceId } : {}),
-    });
-    setSaving(false);
-    setEditing(false);
-    toast.success('Profile updated');
+    try {
+      const dhiwaySpaceId = form.dhiwaySpaceId.trim();
+      if (isOrg && dhiwaySpaceId !== (user?.dhiwaySpaceId || '')) {
+        await authAPI.updateDhiwaySpaceId(dhiwaySpaceId);
+      }
+      updateUserProfile({
+        name: form.name.trim(),
+        phoneNumber: form.phoneNumber.trim(),
+        avatarUrl: form.avatarUrl,
+        ...(isOrg ? { dhiwaySpaceId } : {}),
+      });
+      setEditing(false);
+      toast.success('Profile updated');
+    } catch (err) {
+      toast.error(getApiError(err, 'Failed to update Dhiway Space ID'));
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleCancel = () => {

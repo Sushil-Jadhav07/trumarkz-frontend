@@ -364,6 +364,7 @@ const EditUserModal = ({ isOpen, onClose, user, onSuccess }) => {
     full_name: '',
     phone_number: '',
     organization_name: '',
+    dhiway_space_id: '',
     is_active: true,
     email_verified: true,
   });
@@ -375,6 +376,7 @@ const EditUserModal = ({ isOpen, onClose, user, onSuccess }) => {
         full_name: user.full_name || '',
         phone_number: user.phone_number || '',
         organization_name: user.organization_name || '',
+        dhiway_space_id: user.dhiway_space_id || '',
         is_active: user.is_active ?? true,
         email_verified: user.email_verified ?? true,
       });
@@ -395,6 +397,7 @@ const EditUserModal = ({ isOpen, onClose, user, onSuccess }) => {
       if (form.full_name.trim()) payload.full_name = form.full_name.trim();
       if (form.phone_number.trim()) payload.phone_number = form.phone_number.trim();
       if (form.organization_name.trim()) payload.organization_name = form.organization_name.trim();
+      if (isOrg) payload.dhiway_space_id = form.dhiway_space_id.trim();
       await adminAPI.updateUser(user.id, payload);
       toast.success('User updated');
       onSuccess();
@@ -449,6 +452,15 @@ const EditUserModal = ({ isOpen, onClose, user, onSuccess }) => {
             onChange={set('phone_number')}
             placeholder="+91 98765 43210"
           />
+
+          {isOrg && (
+            <Input
+              label="Dhiway Space ID"
+              value={form.dhiway_space_id}
+              onChange={set('dhiway_space_id')}
+              placeholder="Leave blank to use the config default"
+            />
+          )}
 
           {/* Status toggles */}
           <div className="space-y-3 p-4 bg-brand-bg rounded-xl">

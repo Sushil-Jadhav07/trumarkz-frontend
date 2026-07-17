@@ -16,20 +16,6 @@ import {
 import toast from 'react-hot-toast';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
-const SDC_CONFIG_PREFIX = 'sdc_config_';
-
-const loadSdcConfig = (batchId) => {
-  try {
-    return JSON.parse(localStorage.getItem(`${SDC_CONFIG_PREFIX}${batchId}`)) || {};
-  } catch {
-    return {};
-  }
-};
-
-const saveSdcConfig = (batchId, config) => {
-  localStorage.setItem(`${SDC_CONFIG_PREFIX}${batchId}`, JSON.stringify(config));
-};
-
 const statusBadge = (status) => {
   if (status === 'verified') return { variant: 'success', label: 'Verified' };
   if (status === 'failed') return { variant: 'error', label: 'Failed' };
@@ -92,18 +78,12 @@ const Detail = ({ label, value, mono }) => (
 );
 
 // ── Generate SDC modal ───────────────────────────────────────────────────────
-// org_id/space_id/schema_id are resolved server-side from the batch's industry/
-// entity type — the caller does NOT need to supply them. The advanced section
-// below only exists as an escape hatch to override the backend's default
-// Dhiway template for this one generation run.
+// org_id is fixed backend-side, space_id comes from the org's own Dhiway
+// Space ID (set on the Profile page), and schema_id resolves from the
+// batch's industry — none of these are supplied by the caller anymore.
 const GenerateSDCModal = ({ batch, onClose, onGenerated }) => {
-  const initial = loadSdcConfig(batch.id);
-  const [showAdvanced, setShowAdvanced] = useState(false);
-  const [orgId, setOrgId] = useState(initial.org_id || '');
-  const [spaceId, setSpaceId] = useState(initial.space_id || '');
-  const [schemaId, setSchemaId] = useState(initial.schema_id || '');
-  const [publish, setPublish] = useState(!!initial.publish);
-  const [active, setActive] = useState(initial.active !== undefined ? !!initial.active : true);
+  const [publish, setPublish] = useState(false);
+  const [active, setActive] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [retrying, setRetrying] = useState(false);
   const [result, setResult] = useState(null); // raw API response, shown for reference after submit
@@ -127,42 +107,19 @@ const GenerateSDCModal = ({ batch, onClose, onGenerated }) => {
     }
   };
 
+  // Only calls /generate — never auto-calls /issue. If Dhiway comes back with
+  // issue_pending: true, the result panel below surfaces an "Issue Now" button
+  // so the admin triggers /issue explicitly instead of it firing silently.
   const handleSubmit = async (e) => {
     e.preventDefault();
     setSubmitting(true);
     try {
-      const payload = {
-        org_id: showAdvanced ? orgId.trim() : undefined,
-        space_id: showAdvanced ? spaceId.trim() : undefined,
-        schema_id: showAdvanced ? schemaId.trim() : undefined,
-        publish,
-        active,
-      };
+      const payload = { publish, active };
       const { data } = await sdcAPI.generateBatchSDC(batch.id, payload);
-
-      // generate is now create+issue in one call. issue_pending: true means Dhiway
-      // hadn't finished within generate's own wait window — finish it ourselves.
-      let finalData = data;
-      if (data.issue_pending) {
-        toast('Finishing certificate issuance…', { icon: '⏳' });
-        try {
-          finalData = await issueWithRetry(batch.id);
-        } catch (issueErr) {
-          // Drafts were created but Dhiway still hasn't finished issuing after our
-          // retry window — don't hard-fail the whole flow. Drafts exist and can be
-          // finished later with the "Retry Issuance" button below.
-          finalData = { ...data, issue_pending: true };
-          toast.error('Drafts created, but issuance is taking longer than usual — use "Retry Issuance" below.');
-        }
-      }
-
-      if (showAdvanced && (payload.org_id || payload.space_id || payload.schema_id)) {
-        saveSdcConfig(batch.id, payload);
-      }
-      if (!finalData.issue_pending) toast.success('SDC created');
-      onGenerated(payload, finalData);
+      if (!data.issue_pending) toast.success('SDC created');
+      onGenerated(payload, data);
       setSentPayload(payload);
-      setResult(finalData);
+      setResult(data);
     } catch (err) {
       toast.error(getApiError(err, 'Failed to start SDC generation'));
     } finally {
@@ -170,7 +127,9 @@ const GenerateSDCModal = ({ batch, onClose, onGenerated }) => {
     }
   };
 
-  const handleRetryIssue = async () => {
+  // Manual trigger for the /issue fallback — only ever called by the admin
+  // clicking "Issue Certificates Now" below, never automatically.
+  const handleIssueNow = async () => {
     setRetrying(true);
     try {
       const data = await issueWithRetry(batch.id);
@@ -192,7 +151,7 @@ const GenerateSDCModal = ({ batch, onClose, onGenerated }) => {
           {result.issue_pending ? (
             <div className="flex items-center gap-2 px-4 py-3 rounded-xl border bg-orange-50 border-orange-100">
               <Badge status="pending">Issuance Pending</Badge>
-              <span className="text-xs text-orange-700 font-inter">Drafts created — issuance still in progress on Dhiway's side</span>
+              <span className="text-xs text-orange-700 font-inter">Drafts created — click "Issue Certificates Now" below to finish</span>
             </div>
           ) : (
             <div className="flex items-center gap-2 px-4 py-3 rounded-xl border bg-green-50 border-green-100">
@@ -227,23 +186,25 @@ const GenerateSDCModal = ({ batch, onClose, onGenerated }) => {
               {JSON.stringify({ batch_id: batch.id, ...sentPayload }, null, 2)}
             </pre>
             <p className="text-xs text-gray-400 font-inter mt-1.5">
-              org_id/space_id/schema_id were left {showAdvanced ? 'overridden above' : 'unset — the backend resolved its own default'};
-              the API response doesn't echo back which values it actually used.
+              Org, space, and schema are all resolved by the backend (space from your organization's Dhiway Space ID in
+              Profile) — the API response doesn't echo back which values it actually used.
             </p>
           </div>
 
-          <div className="flex items-start gap-2 bg-blue-50 border border-blue-100 rounded-xl px-3 py-2.5">
-            <RefreshCw size={14} className="text-brand-blue mt-0.5 shrink-0 animate-spin" />
-            <p className="text-xs text-brand-blue/90 font-inter">
-              Checking for the PDF automatically in the background (Dhiway needs a moment to finish processing) —
-              close this and watch the batch table, or use "Refresh Certificates" any time.
-            </p>
-          </div>
+          {!result.issue_pending && (
+            <div className="flex items-start gap-2 bg-blue-50 border border-blue-100 rounded-xl px-3 py-2.5">
+              <RefreshCw size={14} className="text-brand-blue mt-0.5 shrink-0 animate-spin" />
+              <p className="text-xs text-brand-blue/90 font-inter">
+                Checking for the PDF automatically in the background (Dhiway needs a moment to finish processing) —
+                close this and watch the batch table, or use "Refresh Certificates" any time.
+              </p>
+            </div>
+          )}
 
           <div className="flex gap-3">
             {result.issue_pending && (
-              <Button variant="secondary" loading={retrying} onClick={handleRetryIssue}>
-                <RefreshCw size={14} /> Retry Issuance
+              <Button variant="secondary" loading={retrying} onClick={handleIssueNow}>
+                <Sparkles size={14} /> Issue Certificates Now
               </Button>
             )}
             <Button onClick={onClose}>Done</Button>
@@ -258,8 +219,8 @@ const GenerateSDCModal = ({ batch, onClose, onGenerated }) => {
       <form onSubmit={handleSubmit} className="space-y-4">
         <p className="text-xs text-gray-500 font-inter">
           Generates signed digital certificates for every user in <span className="font-semibold text-brand-dark">{batch.name}</span> via
-          Dhiway Studio. The Dhiway account/space/template are resolved automatically from this batch's industry and
-          entity type — nothing else to fill in.
+          Dhiway Studio. The Dhiway org is fixed, the space comes from this organization's Dhiway Space ID (set on the
+          Profile page), and the schema resolves from this batch's industry — nothing else to fill in.
         </p>
 
         <div className="flex items-center gap-6 pt-1">
@@ -280,23 +241,6 @@ const GenerateSDCModal = ({ batch, onClose, onGenerated }) => {
             after this completes — use "Refresh Certificates" in the batch view to check.
           </p>
         </div>
-
-        <button
-          type="button"
-          onClick={() => setShowAdvanced((v) => !v)}
-          className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-brand-dark font-inter"
-        >
-          <ChevronDown size={14} className={`transition-transform ${showAdvanced ? 'rotate-180' : ''}`} />
-          Advanced — override the Dhiway template for this run
-        </button>
-
-        {showAdvanced && (
-          <div className="space-y-3 pt-1">
-            <Input label="Org ID (override)" placeholder="Leave blank to use backend default" value={orgId} onChange={(e) => setOrgId(e.target.value)} />
-            <Input label="Space ID (override)" placeholder="Leave blank to use backend default" value={spaceId} onChange={(e) => setSpaceId(e.target.value)} />
-            <Input label="Schema ID (override)" placeholder="Leave blank to use backend default" value={schemaId} onChange={(e) => setSchemaId(e.target.value)} />
-          </div>
-        )}
 
         <div className="flex gap-3 pt-2">
           <Button type="submit" loading={submitting}>
@@ -338,8 +282,10 @@ const RecordCertModal = ({ record, sdcMatch, instanceKey, onClose }) => {
           'bg-orange-50 border-orange-100'
         }`}>
           <Badge status={variant}>{label}</Badge>
-          {sdcMatch ? (
-            <Badge status="info">SDC generated</Badge>
+          {sdcMatch?.issued ? (
+            <Badge status="info">SDC issued</Badge>
+          ) : sdcMatch ? (
+            <Badge status="pending">Draft on Dhiway — not yet issued</Badge>
           ) : (
             <span className="text-xs text-gray-400 font-inter">SDC not generated for this record yet</span>
           )}
@@ -362,7 +308,7 @@ const RecordCertModal = ({ record, sdcMatch, instanceKey, onClose }) => {
           {sdcMatch && <Detail label="Dhiway Public ID" value={sdcMatch.publicId} mono />}
         </div>
 
-        {sdcMatch ? (
+        {sdcMatch?.issued ? (
           <div className="flex gap-3 pt-2">
             <Button variant="secondary" size="sm" loading={loading} onClick={() => openCertificate('pdf')}>
               <FileText size={14} /> Download PDF
@@ -371,6 +317,10 @@ const RecordCertModal = ({ record, sdcMatch, instanceKey, onClose }) => {
               <QrCode size={14} /> Verify Certificate
             </Button>
           </div>
+        ) : sdcMatch ? (
+          <p className="text-xs text-gray-400 font-inter">
+            This record's draft was created on Dhiway but hasn't been issued yet — refresh certificates again shortly.
+          </p>
         ) : (
           <p className="text-xs text-gray-400 font-inter">
             Generate SDCs for this batch, then refresh certificates to link this record to its Dhiway credential.
@@ -388,7 +338,6 @@ const BatchDetail = ({ batchSummary, onBack, onBatchUpdated }) => {
   const [search, setSearch] = useState('');
   const [selectedRecord, setSelectedRecord] = useState(null);
   const [showGenerateModal, setShowGenerateModal] = useState(false);
-  const [sdcConfig, setSdcConfig] = useState(loadSdcConfig(batchSummary.id));
   const [sdcRecordsByEmail, setSdcRecordsByEmail] = useState({});
   const [certsLoading, setCertsLoading] = useState(false);
   const [autoChecking, setAutoChecking] = useState(false);
@@ -409,24 +358,29 @@ const BatchDetail = ({ batchSummary, onBack, onBatchUpdated }) => {
   useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
 
   const refreshCertificates = useCallback(async (silent = false) => {
-    const config = loadSdcConfig(batchSummary.id);
-    setSdcConfig(config);
     setCertsLoading(true);
     try {
-      // org_id/space_id are optional — the backend falls back to its configured
-      // SDC template default when they're omitted.
-      const { data } = await sdcAPI.getRecords({ org_id: config.org_id, space_id: config.space_id, active: 1, pageSize: 100 });
+      // org_id/space_id are omitted — the backend resolves the org's space
+      // (via its Dhiway Space ID) automatically, same as generate does.
+      const { data } = await sdcAPI.getRecords({ active: 1, pageSize: 100 });
       const map = {};
       (data?.records || []).forEach((r) => {
+        // anchorTime is the source of truth for issued-vs-draft: set = issued,
+        // null = still a draft on Dhiway's side (no PDF yet).
+        const issued = !!r.anchorTime && !r.revoked;
         (r.recipients || []).forEach((email) => {
-          if (email) map[email.toLowerCase()] = { id: r.id, publicId: r.publicId, updatedAt: r.updatedAt, title: r.title };
+          if (email) map[email.toLowerCase()] = {
+            id: r.id, publicId: r.publicId, updatedAt: r.updatedAt, title: r.title,
+            anchorTime: r.anchorTime || null, revoked: !!r.revoked, issued,
+          };
         });
       });
       setSdcRecordsByEmail(map);
+      const issuedCount = Object.values(map).filter((m) => m.issued).length;
       if (!silent) {
         toast.success(`Loaded ${data?.count ?? Object.keys(map).length} certificate${data?.count === 1 ? '' : 's'}`);
       }
-      return Object.keys(map).length;
+      return issuedCount;
     } catch (err) {
       if (!silent) toast.error(getApiError(err, 'Failed to fetch SDC records'));
       return 0;
@@ -569,7 +523,7 @@ const BatchDetail = ({ batchSummary, onBack, onBatchUpdated }) => {
                     <td className="px-4 py-3 text-xs text-gray-500 font-inter max-w-[240px] truncate">{record.email || record.id}</td>
                     <td className="px-4 py-3"><Badge status={variant}>{label}</Badge></td>
                     <td className="px-4 py-3">
-                      {match ? (
+                      {match?.issued ? (
                         <div className="flex items-center gap-2">
                           <Badge status="info">Ready</Badge>
                           <Button
@@ -590,6 +544,8 @@ const BatchDetail = ({ batchSummary, onBack, onBatchUpdated }) => {
                             <FileText size={12} /> PDF
                           </Button>
                         </div>
+                      ) : match ? (
+                        <Badge status="pending">Draft</Badge>
                       ) : (
                         <span className="text-xs text-gray-300 font-inter">-</span>
                       )}
@@ -623,8 +579,7 @@ const BatchDetail = ({ batchSummary, onBack, onBatchUpdated }) => {
         <GenerateSDCModal
           batch={batch}
           onClose={() => setShowGenerateModal(false)}
-          onGenerated={(config) => {
-            setSdcConfig(config);
+          onGenerated={() => {
             setBatch((prev) => (prev ? { ...prev, sdcStatus: 'generated' } : prev));
             onBatchUpdated?.({ sdcStatus: 'generated' });
             startAutoCheckForCertificates();

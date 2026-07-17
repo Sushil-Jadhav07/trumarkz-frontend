@@ -2,7 +2,7 @@ import React from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import {
-  LayoutDashboard, Layers, Award, Store, BarChart2,
+  LayoutDashboard, Layers, Award, Store,
   CheckSquare, GitBranch, Share2
 } from 'lucide-react';
 import clsx from 'clsx';
@@ -17,7 +17,7 @@ export const MobileNav = () => {
         { path: '/org/dashboard', label: 'Home', icon: LayoutDashboard },
         { path: '/org/batch-status', label: 'Batches', icon: Layers },
         { path: '/marketplace', label: 'Market', icon: Store },
-        { path: '/qr/reports', label: 'Reports', icon: BarChart2 },
+        { path: '/qr/reports', label: 'Certs', icon: Award },
       ]
     : role === 'super-admin'
     ? [
@@ -36,7 +36,7 @@ export const MobileNav = () => {
       ]
     : [
         { path: '/marketplace', label: 'Market', icon: Store },
-        { path: '/qr/reports', label: 'Reports', icon: BarChart2 },
+        { path: '/qr/reports', label: 'Certs', icon: Award },
       ];
 
   return (

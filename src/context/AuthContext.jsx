@@ -81,8 +81,6 @@ export const AuthProvider = ({ children }) => {
       addressLine3: data.address_line3,
       useCases: data.use_cases,
       createdAt: data.created_at,
-      // Not yet returned by /auth/me — falls back to the locally-saved value
-      // (see Profile.jsx) until the backend starts including it here.
       dhiwaySpaceId: data.dhiway_space_id || '',
     };
   }, []);
