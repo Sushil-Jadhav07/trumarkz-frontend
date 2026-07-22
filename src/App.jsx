@@ -80,7 +80,6 @@ import SkillTreeForm from '@/pages/individual/SkillTreeForm';
 import IndividualCredentials from '@/pages/individual/IndividualCredentials';
 import ShareProfile from '@/pages/individual/ShareProfile';
 import AdminDashboard from '@/pages/admin/AdminDashboard';
-import OrgApprovals from '@/pages/admin/OrgApprovals';
 import BatchMonitor from '@/pages/admin/BatchMonitor';
 import Verifiers from '@/pages/admin/Verifiers';
 import SDCVerification from '@/pages/admin/SDCVerification';
@@ -214,7 +213,6 @@ const AnimatedRoutes = () => {
 
           {/* ── Admin routes ── */}
           <Route path="/admin/dashboard" element={<ProtectedRoute><AdminRoute><AdminDashboard /></AdminRoute></ProtectedRoute>} />
-          <Route path="/admin/org-approvals" element={<ProtectedRoute><AdminRoute><OrgApprovals /></AdminRoute></ProtectedRoute>} />
           <Route path="/admin/batch-monitor" element={<ProtectedRoute><AdminRoute><BatchMonitor /></AdminRoute></ProtectedRoute>} />
           <Route path="/admin/verifiers" element={<ProtectedRoute><AdminRoute><Verifiers /></AdminRoute></ProtectedRoute>} />
           <Route path="/admin/sdc-verification" element={<ProtectedRoute><AdminRoute><SDCVerification /></AdminRoute></ProtectedRoute>} />

@@ -25,8 +25,8 @@ const groupByBatch = (users = []) => {
       };
     }
     acc[id].total += 1;
-    if (item.verification_status === 'verified') acc[id].verified += 1;
-    else if (item.verification_status === 'failed') acc[id].failed += 1;
+    if (item.verification_status === 'approved') acc[id].verified += 1;
+    else if (item.verification_status === 'rejected') acc[id].failed += 1;
     else acc[id].pending += 1;
     return acc;
   }, {});
@@ -70,9 +70,9 @@ export const AdminDashboard = () => {
 
   const users = verData?.users || [];
   const totalRecords = verData?.total ?? users.length;
-  const totalPending = verData?.pending ?? users.filter((u) => u.verification_status === 'pending_verification').length;
-  const totalVerified = verData?.verified ?? users.filter((u) => u.verification_status === 'verified').length;
-  const totalFailed = verData?.failed ?? users.filter((u) => u.verification_status === 'failed').length;
+  const totalPending = verData?.pending ?? users.filter((u) => u.verification_status === 'pending').length;
+  const totalVerified = verData?.approved ?? users.filter((u) => u.verification_status === 'approved').length;
+  const totalFailed = verData?.rejected ?? users.filter((u) => u.verification_status === 'rejected').length;
 
   const batches = groupByBatch(users);
   const activeBatches = batches.filter((b) => b.pending > 0).length;

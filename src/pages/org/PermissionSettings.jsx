@@ -101,8 +101,11 @@ export const PermissionSettings = () => {
           })}
         </div>
 
-        <div className="mt-8 flex justify-end">
-          <Button variant="primary" size="lg" onClick={handleContinue} icon={ArrowRight}>
+        <div className="mt-8 flex flex-col-reverse sm:flex-row justify-end gap-3">
+          <Button variant="outline" size="lg" className="w-full sm:w-auto" onClick={() => navigate('/org/verifications')}>
+            Back
+          </Button>
+          <Button variant="primary" size="lg" className="w-full sm:w-auto" onClick={handleContinue} icon={ArrowRight}>
             Continue
           </Button>
         </div>

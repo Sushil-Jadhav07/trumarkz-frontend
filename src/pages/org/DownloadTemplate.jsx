@@ -17,9 +17,13 @@ import { getVerificationApiTypes } from '@/utils/verificationFlow';
 
 // photo is appended automatically by the API — never pass it in headers
 const BASE_FIELDS = [
-  { key: 'full_name',    label: 'Full Name',    fixed: true  },
-  { key: 'email',        label: 'Email',        fixed: false },
-  { key: 'phone_number', label: 'Phone Number', fixed: false },
+  { key: 'full_name',     label: 'Full Name' },
+  { key: 'email',         label: 'Email' },
+  { key: 'phone_number',  label: 'Phone Number' },
+  { key: 'dob',           label: 'Date of Birth', hint: 'YYYY-MM-DD' },
+  { key: 'aadhar_number', label: 'Aadhar Number' },
+  { key: 'pan_number',    label: 'PAN Number' },
+  { key: 'gender',        label: 'Gender' },
 ];
 
 const sanitizeKey = (value) =>
@@ -39,7 +43,10 @@ export const DownloadTemplate = () => {
   const [fieldInput,     setFieldInput]     = useState('');
   const [modalOpen,      setModalOpen]      = useState(false);
   const [downloading,    setDownloading]    = useState(false);
-  const [baseToggles,    setBaseToggles]    = useState({ email: true, phone_number: true });
+  const [baseToggles,    setBaseToggles]    = useState({
+    full_name: true, email: true, phone_number: true,
+    dob: true, aadhar_number: true, pan_number: true, gender: true,
+  });
   const [batchNameValue, setBatchNameValue] = useState(() => {
     const d = new Date();
     return `Human Verification Batch ${String(d.getDate()).padStart(2,'0')}-${String(d.getMonth()+1).padStart(2,'0')}-${d.getFullYear()}`;
@@ -50,7 +57,7 @@ export const DownloadTemplate = () => {
   const selectedVerificationTypes = getVerificationApiTypes(selectedVerifications);
   const templateHeaders = useMemo(
     () => [
-      ...BASE_FIELDS.filter((f) => f.fixed || baseToggles[f.key]).map((f) => f.key),
+      ...BASE_FIELDS.filter((f) => baseToggles[f.key]).map((f) => f.key),
       ...customFields,
     ],
     [baseToggles, customFields]
@@ -89,6 +96,23 @@ export const DownloadTemplate = () => {
       const workbook   = XLSX.read(arrayBuffer, { type: 'array' });
       const worksheet  = workbook.Sheets[workbook.SheetNames[0]];
       const rows       = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+
+      // Validate columns right here — the backend only checks this at final
+      // submit (Preview step), which is too late to be useful; catching it
+      // immediately on upload lets the org fix the file before going any
+      // further through Costing/Preview.
+      // Some headers carry a format hint from the generated template (e.g.
+      // "DOB (YYYY-MM-DD)" sanitizes to "dob_yyyy_mm_dd") — match by prefix,
+      // not exact equality, so those still count as present.
+      const uploadedHeaders = (Array.isArray(rows[0]) ? rows[0] : []).map(sanitizeKey).filter(Boolean);
+      const missingHeaders = templateHeaders.filter(
+        (h) => !uploadedHeaders.some((u) => u === h || u.startsWith(`${h}_`))
+      );
+      if (missingHeaders.length > 0) {
+        toast.error(`Missing required columns: ${missingHeaders.join(', ')}`);
+        return;
+      }
+
       const recordCount = rows
         .slice(1)
         .filter((row) => Array.isArray(row) && row.some((cell) => String(cell ?? '').trim() !== ''))
@@ -180,10 +204,15 @@ export const DownloadTemplate = () => {
               </div>
             </div>
 
-            {/* Continue */}
-            <Button variant="primary" size="lg" className="w-full" onClick={handleContinue} icon={ArrowRight}>
-              Continue
-            </Button>
+            {/* Back / Continue */}
+            <div className="flex flex-col-reverse sm:flex-row gap-3">
+              <Button variant="outline" size="lg" className="w-full sm:flex-1" onClick={() => navigate('/org/permissions')}>
+                Back
+              </Button>
+              <Button variant="primary" size="lg" className="w-full sm:flex-1" onClick={handleContinue} icon={ArrowRight}>
+                Continue
+              </Button>
+            </div>
           </Card>
         </div>
       </div>
@@ -197,40 +226,36 @@ export const DownloadTemplate = () => {
             Add any custom columns you need. Base fields are always included. Click Download when ready.
           </p>
 
-          {/* Base fields — full_name fixed, rest toggleable */}
+          {/* Base fields — all toggleable */}
           <div>
             <p className="font-inter text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
               Base Fields
             </p>
-            <div className="space-y-2">
+            <div className="grid grid-cols-2 gap-2">
               {BASE_FIELDS.map((field) => (
                 <div
                   key={field.key}
-                  className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5"
+                  className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2"
                 >
-                  <div>
-                    <p className="font-inter text-sm font-medium text-slate-800">{field.label}</p>
-                    <p className="font-mono text-[11px] text-slate-400">{field.key}</p>
+                  <div className="min-w-0">
+                    <p className="font-inter text-xs font-medium text-slate-800 truncate">{field.label}</p>
+                    <p className="font-mono text-[10px] text-slate-400 truncate">
+                      {field.key}{field.hint ? ` · ${field.hint}` : ''}
+                    </p>
                   </div>
-                  {field.fixed ? (
-                    <span className="rounded-full bg-brand-blue/10 px-2.5 py-1 font-inter text-[10px] font-semibold uppercase text-brand-blue">
-                      Fixed
-                    </span>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => toggleBase(field.key)}
-                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                        baseToggles[field.key] ? 'bg-brand-blue' : 'bg-slate-200'
+                  <button
+                    type="button"
+                    onClick={() => toggleBase(field.key)}
+                    className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${
+                      baseToggles[field.key] ? 'bg-brand-blue' : 'bg-slate-200'
+                    }`}
+                  >
+                    <span
+                      className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${
+                        baseToggles[field.key] ? 'translate-x-[18px]' : 'translate-x-1'
                       }`}
-                    >
-                      <span
-                        className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
-                          baseToggles[field.key] ? 'translate-x-6' : 'translate-x-1'
-                        }`}
-                      />
-                    </button>
-                  )}
+                    />
+                  </button>
                 </div>
               ))}
             </div>

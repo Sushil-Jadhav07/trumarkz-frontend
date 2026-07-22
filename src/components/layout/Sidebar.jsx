@@ -5,7 +5,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, Layers, Award, Store,
   Wallet, HelpCircle, User, LogOut, ChevronLeft, ChevronRight,
-  GitBranch, Share2, CheckSquare, Building2,
+  GitBranch, Share2, Building2,
   ShieldCheck, UserCog, UserSearch,
   Mail, Package, Star,
 } from 'lucide-react';
@@ -50,7 +50,6 @@ export const Sidebar = ({ collapsed, onToggle, mobileOpen = false, onMobileClose
     if (role === 'super-admin') {
       return [
         { path: '/admin/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-        { path: '/admin/org-approvals', label: 'Org Approvals', icon: CheckSquare },
         { path: '/admin/batch-monitor', label: 'Batch Monitor', icon: Layers },
         { path: '/admin/sdc-verification', label: 'SDC Verification', icon: ShieldCheck },
         { path: '/admin/user-list', label: 'User List', icon: UserSearch },

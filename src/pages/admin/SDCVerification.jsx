@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AuthLayout } from '@/components/layout/AuthLayout';
 import { PageHeader } from '@/components/shared/PageHeader';
@@ -8,24 +8,25 @@ import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
 import { Input } from '@/components/ui/Input';
 import { ProgressBar } from '@/components/ui/ProgressBar';
-import { authAPI, verificationAPI, sdcAPI, getApiError } from '@/services/api';
+import { authAPI, verificationAPI, sdcAPI, adminAPI, getApiError } from '@/services/api';
 import {
   Search, ShieldCheck, Users, ChevronRight, CheckCircle, Clock, XCircle,
   ArrowLeft, FileText, QrCode, Eye, ChevronDown, Sparkles, RefreshCw, AlertCircle, Building2,
+  Copy, Anchor, Star,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 const statusBadge = (status) => {
-  if (status === 'verified') return { variant: 'success', label: 'Verified' };
-  if (status === 'failed') return { variant: 'error', label: 'Failed' };
+  if (status === 'approved') return { variant: 'success', label: 'Approved' };
+  if (status === 'rejected') return { variant: 'error', label: 'Rejected' };
   return { variant: 'pending', label: 'Pending' };
 };
 
 const isProductRecord = (r) =>
   r?.entity_type === 'product' || !!r?.product_name || !!r?.category_name;
 
-const recordTitle = (r) => r?.product_name || r?.full_name || r?.email || r?.id || 'Record';
+const recordTitle = (r) => r?.product_name || r?.full_name || r?.email || r?.id || r?.user_id || r?.entity_id || 'Record';
 
 const formatDate = (value) => {
   if (!value) return '-';
@@ -38,28 +39,68 @@ const normaliseBatch = (b) => {
   if (!b || typeof b !== 'object') return null;
   const id = b.batch_id || b.id || '';
   const total = Number(b.total_users ?? b.total ?? 0);
-  const verified = Number(b.verified ?? b.verified_count ?? 0);
-  const failed = Number(b.failed ?? b.failed_count ?? 0);
+  const verified = Number(b.approved ?? b.approved_count ?? 0);
+  const failed = Number(b.rejected ?? b.rejected_count ?? 0);
   const pending = Math.max(0, total - verified - failed);
   const rawTypes = Array.isArray(b.industry_type) ? b.industry_type : [];
+  // Backend stores SDC state in verification_progress.sdc (status, created_at,
+  // issued_count, etc.) — not a flat sdc_status field. Any status present here
+  // (draft_created or sdc_created) means generation has been kicked off.
+  const sdcInfo = b.verification_progress?.sdc || null;
   return {
     id,
     name: b.batch_name || b.name || `Batch ${String(id).slice(0, 8)}`,
     total, verified, failed, pending,
     createdAt: b.created_at || b.createdAt,
     industryType: rawTypes,
-    sdcStatus: b.sdc_status || null,
+    sdcStatus: sdcInfo?.status ? 'generated' : null,
+    sdcInfo,
     users: Array.isArray(b.users) ? b.users : [],
   };
 };
 
 // Fetches a single Dhiway record (API 3) and opens its pdf/verify link directly.
+// The tab must be opened synchronously, in the same tick as the click, or
+// browsers silently block it once we `await` the fetch first — redirecting an
+// already-open blank tab once the URL arrives avoids that.
 const fetchAndOpenCertificate = async (publicId, instanceKey, kind) => {
-  const { data } = await sdcAPI.getRecord(publicId, instanceKey);
-  const url = kind === 'pdf' ? data?.pdf : data?.verify;
-  if (url) window.open(url, '_blank', 'noopener,noreferrer');
-  else toast.error(`No ${kind === 'pdf' ? 'PDF' : 'verify'} link on this certificate yet`);
-  return data;
+  const win = window.open('', '_blank');
+  if (win) win.opener = null;
+  try {
+    const { data } = await sdcAPI.getRecord(publicId, instanceKey);
+    const url = kind === 'pdf' ? data?.pdf : data?.verify;
+    if (url) {
+      if (win) win.location.href = url;
+    } else {
+      win?.close();
+      toast.error(`No ${kind === 'pdf' ? 'PDF' : 'verify'} link on this certificate yet`);
+    }
+    return data;
+  } catch (err) {
+    win?.close();
+    throw err;
+  }
+};
+
+// Maps org_id -> that org's own Dhiway Space ID (set on the Profile page).
+// /sdc/records silently falls back to a single global "config default" space
+// when space_id is omitted — any org that has configured its own space
+// issues certificates there instead, so omitting space_id returns 0 matches
+// for those orgs even though the certificates genuinely exist on Dhiway.
+const fetchOrgSpaceMap = async () => {
+  const map = {};
+  let offset = 0;
+  const limit = 200;
+  let total = Infinity;
+  while (offset < total) {
+    const { data } = await adminAPI.getAllUsers({ user_type: 'organization', limit, offset });
+    const users = Array.isArray(data?.users) ? data.users : [];
+    users.forEach((u) => { if (u.id && u.dhiway_space_id) map[u.id] = u.dhiway_space_id; });
+    total = typeof data?.total === 'number' ? data.total : users.length;
+    offset += limit;
+    if (users.length === 0) break;
+  }
+  return map;
 };
 
 const ALL_INDUSTRIES_FALLBACK = [
@@ -81,13 +122,77 @@ const Detail = ({ label, value, mono }) => (
 // org_id is fixed backend-side, space_id comes from the org's own Dhiway
 // Space ID (set on the Profile page), and schema_id resolves from the
 // batch's industry — none of these are supplied by the caller anymore.
-const GenerateSDCModal = ({ batch, onClose, onGenerated }) => {
-  const [publish, setPublish] = useState(false);
+export const GenerateSDCModal = ({ batch, onClose, onGenerated, liveStatus, polling, records = [] }) => {
   const [active, setActive] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [retrying, setRetrying] = useState(false);
   const [result, setResult] = useState(null); // raw API response, shown for reference after submit
   const [sentPayload, setSentPayload] = useState(null);
+  const [certMatches, setCertMatches] = useState([]);
+  const [certLoading, setCertLoading] = useState(false);
+  const [openingId, setOpeningId] = useState(null);
+
+  // Matches this batch's records against the org's Dhiway record list by
+  // email/title (same approach BatchMonitor's refreshSdcCertificates uses) so
+  // the success panel can offer a direct "View" link instead of sending the
+  // admin elsewhere to find it.
+  const matchCertificates = useCallback(async () => {
+    if (!records.length) return;
+    setCertLoading(true);
+    try {
+      const allRecords = [];
+      let page = 1;
+      let hasMore = true;
+      while (hasMore) {
+        const { data } = await sdcAPI.getRecords({
+          active: 1, page, pageSize: 100,
+          org_id: batch?.sdcInfo?.org_id || undefined,
+          space_id: batch?.sdcInfo?.space_id || batch?.spaceId || undefined,
+        });
+        const pageRecords = Array.isArray(data?.records) ? data.records : [];
+        allRecords.push(...pageRecords);
+        const totalPages = Number(data?.totalPages || data?.total_pages || 0);
+        hasMore = totalPages > 0 ? page < totalPages : pageRecords.length === 100;
+        page += 1;
+      }
+      const matches = [];
+      records.forEach((r) => {
+        const email = r?.email?.trim().toLowerCase();
+        const title = recordTitle(r)?.trim().toLowerCase();
+        const match = allRecords.find((item) => {
+          const recipients = (item?.recipients || []).map((v) => v?.trim().toLowerCase()).filter(Boolean);
+          const itemTitle = item?.title?.trim().toLowerCase();
+          return (email && recipients.includes(email)) || (title && itemTitle === title);
+        });
+        if (match?.publicId) {
+          matches.push({ publicId: match.publicId, title: recordTitle(r) });
+        }
+      });
+      setCertMatches(matches);
+    } catch {
+      setCertMatches([]);
+    } finally {
+      setCertLoading(false);
+    }
+  }, [records, batch?.spaceId, batch?.sdcInfo]);
+
+  useEffect(() => {
+    if (result && !(result.issue_pending && !liveStatus)) {
+      matchCertificates();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [result, liveStatus]);
+
+  const handleViewCertificate = async (publicId) => {
+    setOpeningId(publicId);
+    try {
+      await fetchAndOpenCertificate(publicId, 'de', 'pdf');
+    } catch (err) {
+      toast.error(getApiError(err, 'Failed to open certificate'));
+    } finally {
+      setOpeningId(null);
+    }
+  };
 
   // Fallback issue call — only used when generate comes back with issue_pending.
   // 409 = Dhiway drafts not ready yet, retry with backoff. Large batches can take
@@ -114,7 +219,7 @@ const GenerateSDCModal = ({ batch, onClose, onGenerated }) => {
     e.preventDefault();
     setSubmitting(true);
     try {
-      const payload = { publish, active };
+      const payload = { publish: false, active };
       const { data } = await sdcAPI.generateBatchSDC(batch.id, payload);
       if (!data.issue_pending) toast.success('SDC created');
       onGenerated(payload, data);
@@ -143,72 +248,129 @@ const GenerateSDCModal = ({ batch, onClose, onGenerated }) => {
     }
   };
 
-  // ── Post-submit: show exactly what the backend sent back, for reference ──
+  // ── Post-submit ──────────────────────────────────────────────────────────
   if (result) {
+    // liveStatus arrives from the background /status poll started right after
+    // generate — if it's present, Dhiway finished issuing after our synchronous
+    // response came back "pending", so treat this as done regardless of the
+    // stale result.issue_pending snapshot.
+    const isPending = result.issue_pending && !liveStatus;
+
+    // Pending state — just a loader, nothing else, while Dhiway finishes issuing.
+    if (isPending) {
+      return (
+        <Modal isOpen onClose={onClose} title="SDC Generation Started" size="sm">
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.35, ease: 'easeOut' }}
+            className="flex flex-col items-center justify-center gap-4 py-8 text-center"
+          >
+            <div className="relative flex items-center justify-center w-16 h-16">
+              <AnimatePresence>
+                {polling && (
+                  <>
+                    <motion.span
+                      key="ring-1"
+                      className="absolute inset-0 rounded-full bg-brand-blue/15"
+                      initial={{ scale: 1, opacity: 0.6 }}
+                      animate={{ scale: 1.7, opacity: 0 }}
+                      exit={{ opacity: 0 }}
+                      transition={{ duration: 1.8, repeat: Infinity, ease: 'easeOut' }}
+                    />
+                    <motion.span
+                      key="ring-2"
+                      className="absolute inset-0 rounded-full bg-brand-blue/10"
+                      initial={{ scale: 1, opacity: 0.5 }}
+                      animate={{ scale: 2, opacity: 0 }}
+                      exit={{ opacity: 0 }}
+                      transition={{ duration: 1.8, repeat: Infinity, ease: 'easeOut', delay: 0.4 }}
+                    />
+                  </>
+                )}
+              </AnimatePresence>
+              {polling ? (
+                <motion.div
+                  animate={{ rotate: 360 }}
+                  transition={{ duration: 0.8, repeat: Infinity, ease: 'linear' }}
+                  className="relative w-11 h-11 rounded-full border-[3px] border-brand-blue/15 border-t-brand-blue"
+                />
+              ) : (
+                <div className="relative flex items-center justify-center w-11 h-11 rounded-full bg-brand-blue/10">
+                  <Clock size={20} className="text-brand-blue" />
+                </div>
+              )}
+            </div>
+
+            <motion.div
+              initial={{ opacity: 0, y: 4 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.15, duration: 0.3 }}
+            >
+              <p className="text-sm font-semibold text-brand-dark font-inter">
+                {polling ? 'Finishing certificate issuance…' : 'Issuance still pending'}
+              </p>
+              <p className="text-xs text-gray-400 font-inter mt-1">
+                {polling
+                  ? 'Checking Dhiway automatically — this can take up to a minute.'
+                  : 'Click "Issue Certificates Now" to finish.'}
+              </p>
+            </motion.div>
+
+            <motion.div
+              initial={{ opacity: 0, y: 4 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.28, duration: 0.3 }}
+              className="flex gap-3 pt-1"
+            >
+              {!polling && (
+                <Button variant="secondary" loading={retrying} onClick={handleIssueNow}>
+                  <Sparkles size={14} /> Issue Certificates Now
+                </Button>
+              )}
+              <Button onClick={onClose}>Done</Button>
+            </motion.div>
+          </motion.div>
+        </Modal>
+      );
+    }
+
+    // Done — minimal summary + a direct way to actually view the certificate.
     return (
-      <Modal isOpen onClose={onClose} title="SDC Generation Started" size="lg">
+      <Modal isOpen onClose={onClose} title="Certificates Issued" size="md">
         <div className="space-y-4">
-          {result.issue_pending ? (
-            <div className="flex items-center gap-2 px-4 py-3 rounded-xl border bg-orange-50 border-orange-100">
-              <Badge status="pending">Issuance Pending</Badge>
-              <span className="text-xs text-orange-700 font-inter">Drafts created — click "Issue Certificates Now" below to finish</span>
-            </div>
-          ) : (
-            <div className="flex items-center gap-2 px-4 py-3 rounded-xl border bg-green-50 border-green-100">
-              <Badge status="success">SDC Created</Badge>
-              <span className="text-xs text-green-700 font-inter">Dhiway status {result.dhiway_status ?? '—'}</span>
-            </div>
-          )}
-
-          <div className="grid grid-cols-2 gap-4">
-            <Detail label="Batch ID" value={result.batch_id} mono />
-            <Detail label="Records Sent" value={result.records_sent} />
-            <Detail label="SDC Status" value={result.sdc_status} />
-            <Detail label="Issued Count" value={result.issued_count} />
-            <Detail label="Created At" value={result.created_at} />
-            <Detail label="Dhiway Status Code" value={result.dhiway_status} />
+          <div className="flex items-center gap-2 px-4 py-3 rounded-xl border bg-green-50 border-green-100">
+            <Badge status="success">SDC Created</Badge>
+            <span className="text-xs text-green-700 font-inter">
+              {liveStatus ? `${liveStatus.ready}/${liveStatus.total} issued` : `${result.issued_count ?? 0}/${result.records_sent ?? '—'} issued`}
+            </span>
           </div>
-
-          {result.dhiway_response && (
-            <div>
-              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 font-inter">Dhiway Response (raw)</p>
-              <pre className="text-xs bg-gray-50 border border-gray-100 rounded-xl p-3 overflow-x-auto font-mono text-gray-600">
-                {typeof result.dhiway_response === 'string'
-                  ? result.dhiway_response
-                  : JSON.stringify(result.dhiway_response, null, 2)}
-              </pre>
-            </div>
-          )}
 
           <div>
-            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 font-inter">What we sent</p>
-            <pre className="text-xs bg-gray-50 border border-gray-100 rounded-xl p-3 overflow-x-auto font-mono text-gray-600">
-              {JSON.stringify({ batch_id: batch.id, ...sentPayload }, null, 2)}
-            </pre>
-            <p className="text-xs text-gray-400 font-inter mt-1.5">
-              Org, space, and schema are all resolved by the backend (space from your organization's Dhiway Space ID in
-              Profile) — the API response doesn't echo back which values it actually used.
-            </p>
-          </div>
-
-          {!result.issue_pending && (
-            <div className="flex items-start gap-2 bg-blue-50 border border-blue-100 rounded-xl px-3 py-2.5">
-              <RefreshCw size={14} className="text-brand-blue mt-0.5 shrink-0 animate-spin" />
-              <p className="text-xs text-brand-blue/90 font-inter">
-                Checking for the PDF automatically in the background (Dhiway needs a moment to finish processing) —
-                close this and watch the batch table, or use "Refresh Certificates" any time.
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 font-inter">Certificates</p>
+            {certLoading ? (
+              <div className="flex items-center justify-center gap-2 py-6 text-sm text-gray-400 font-inter">
+                <RefreshCw size={14} className="animate-spin" /> Fetching issued certificates…
+              </div>
+            ) : certMatches.length > 0 ? (
+              <div className="space-y-2">
+                {certMatches.map((m) => (
+                  <div key={m.publicId} className="flex items-center justify-between gap-3 rounded-xl border border-gray-100 bg-gray-50 px-3 py-2.5">
+                    <span className="min-w-0 flex-1 truncate text-sm font-medium text-brand-dark font-inter">{m.title}</span>
+                    <Button variant="ghost" size="sm" loading={openingId === m.publicId} onClick={() => handleViewCertificate(m.publicId)}>
+                      <Eye size={13} /> View
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs text-gray-400 font-inter">
+                Not matched yet — Dhiway can take a minute to index new certificates. Reopen "Generate SDC" or use "Refresh Certificates" shortly.
               </p>
-            </div>
-          )}
-
-          <div className="flex gap-3">
-            {result.issue_pending && (
-              <Button variant="secondary" loading={retrying} onClick={handleIssueNow}>
-                <Sparkles size={14} /> Issue Certificates Now
-              </Button>
             )}
-            <Button onClick={onClose}>Done</Button>
           </div>
+
+          <Button onClick={onClose} className="w-full">Done</Button>
         </div>
       </Modal>
     );
@@ -223,15 +385,28 @@ const GenerateSDCModal = ({ batch, onClose, onGenerated }) => {
           Profile page), and the schema resolves from this batch's industry — nothing else to fill in.
         </p>
 
-        <div className="flex items-center gap-6 pt-1">
-          <label className="flex items-center gap-2 text-sm font-inter text-gray-700 cursor-pointer">
-            <input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} className="w-4 h-4 accent-brand-blue" />
-            Active (visible via active=1 record lookups)
-          </label>
-          <label className="flex items-center gap-2 text-sm font-inter text-gray-700 cursor-pointer">
-            <input type="checkbox" checked={publish} onChange={(e) => setPublish(e.target.checked)} className="w-4 h-4 accent-brand-blue" />
-            Publish
-          </label>
+        <div className="rounded-xl border border-gray-100 bg-brand-bg p-4">
+          <div className="flex items-center justify-between">
+            <div className="min-w-0 mr-4">
+              <p className="text-sm font-medium text-brand-dark font-inter">Active</p>
+              <p className="text-xs text-gray-400 font-inter mt-0.5">Visible via active=1 record lookups on Dhiway</p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={active}
+              onClick={() => setActive((v) => !v)}
+              className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none ${
+                active ? 'bg-brand-blue' : 'bg-gray-200'
+              }`}
+            >
+              <span
+                className={`pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow-sm transition-transform duration-200 ${
+                  active ? 'translate-x-5' : 'translate-x-0'
+                }`}
+              />
+            </button>
+          </div>
         </div>
 
         <div className="flex items-start gap-2 bg-blue-50 border border-blue-100 rounded-xl px-3 py-2.5">
@@ -304,7 +479,7 @@ const RecordCertModal = ({ record, sdcMatch, instanceKey, onClose }) => {
               <Detail label="Phone" value={record.phone_number} />
             </>
           )}
-          <Detail label="Record ID" value={record.id} mono />
+          <Detail label="Record ID" value={record.id || record.user_id || record.entity_id} mono />
           {sdcMatch && <Detail label="Dhiway Public ID" value={sdcMatch.publicId} mono />}
         </div>
 
@@ -331,19 +506,168 @@ const RecordCertModal = ({ record, sdcMatch, instanceKey, onClose }) => {
   );
 };
 
+const formatDetailDate = (value) => {
+  if (!value) return '—';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return String(value);
+  return d.toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+};
+
+const CopyField = ({ label, value, icon: Icon }) => {
+  if (!value) return null;
+  return (
+    <div className="flex items-center justify-between gap-3 py-3 border-b border-gray-50 last:border-0">
+      <div className="flex items-center gap-3 min-w-0">
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gray-50 text-gray-400">
+          <Icon size={14} />
+        </div>
+        <div className="min-w-0">
+          <p className="text-xs text-gray-400 font-inter">{label}</p>
+          <p className="text-sm font-medium text-brand-dark font-mono break-all">{value}</p>
+        </div>
+      </div>
+      <button
+        type="button"
+        onClick={() => { navigator.clipboard.writeText(value); toast.success('Copied'); }}
+        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-gray-200 text-gray-400 transition-colors hover:border-brand-blue hover:bg-blue-50 hover:text-brand-blue"
+      >
+        <Copy size={13} />
+      </button>
+    </div>
+  );
+};
+
+// ── Certificate detail modal — mirrors Dhiway's own record-detail screen:
+// identity block, issuance timeline, recipients, and a direct download.
+export const CertificateDetailModal = ({ record, sdcMatch, instanceKey, onClose }) => {
+  const [downloading, setDownloading] = useState(false);
+
+  if (!record || !sdcMatch) return null;
+  const recipients = Array.isArray(sdcMatch.recipients) ? sdcMatch.recipients : [];
+
+  const handleDownload = async () => {
+    setDownloading(true);
+    try {
+      await fetchAndOpenCertificate(sdcMatch.publicId, instanceKey, 'pdf');
+    } catch (err) {
+      toast.error(getApiError(err, 'Failed to fetch certificate'));
+    } finally {
+      setDownloading(false);
+    }
+  };
+
+  const timeline = [
+    { key: 'created', label: 'Created', value: sdcMatch.createdAt, desc: 'Record created', icon: FileText, tone: 'bg-green-100 text-green-600' },
+    { key: 'anchored', label: 'Anchored', value: sdcMatch.anchorTime, desc: 'Record anchored on blockchain', icon: Anchor, tone: 'bg-blue-100 text-blue-600' },
+    { key: 'latest', label: 'Latest Version', value: sdcMatch.latest ? (sdcMatch.updatedAt || sdcMatch.anchorTime) : null, desc: 'This is the latest version', icon: Star, tone: 'bg-purple-100 text-purple-600' },
+    { key: 'active', label: 'Active', value: sdcMatch.active ? (sdcMatch.updatedAt || sdcMatch.anchorTime) : null, desc: 'Record is active and valid', icon: CheckCircle, tone: 'bg-green-100 text-green-600' },
+  ].filter((step) => step.value);
+
+  return (
+    <Modal isOpen={!!record} onClose={onClose} title="Certificate Detail" size="md">
+      <div className="space-y-5">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl ${sdcMatch.revoked ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-600'}`}>
+              <CheckCircle size={22} />
+            </div>
+            <div className="min-w-0">
+              <h3 className="font-sora text-lg font-bold text-brand-dark truncate">{recordTitle(record)}</h3>
+              <p className="text-xs text-gray-400 font-inter mt-0.5 flex items-center gap-1.5 flex-wrap">
+                <span className="flex items-center gap-1"><Clock size={11} /> {formatDetailDate(sdcMatch.anchorTime || sdcMatch.createdAt)}</span>
+                <span>·</span>
+                <span className="flex items-center gap-1"><Users size={11} /> {recipients.length} recipient{recipients.length === 1 ? '' : 's'}</span>
+              </p>
+            </div>
+          </div>
+          <Badge status={sdcMatch.revoked ? 'error' : 'success'}>{sdcMatch.revoked ? 'Revoked' : 'Active'}</Badge>
+        </div>
+
+        <div className="flex flex-wrap gap-1.5">
+          {sdcMatch.latest && <Badge status="info">Latest Version</Badge>}
+          {!sdcMatch.edited && <Badge status="default">Original</Badge>}
+        </div>
+
+        <Button variant="primary" className="w-full" loading={downloading} onClick={handleDownload}>
+          <FileText size={14} /> Download Certificate
+        </Button>
+
+        <div>
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1 font-inter">Identity</p>
+          <div className="rounded-xl border border-gray-100 px-3">
+            <CopyField label="Public ID" value={sdcMatch.publicId} icon={ShieldCheck} />
+            <CopyField label="Record ID" value={sdcMatch.id} icon={FileText} />
+            <CopyField label="Date" value={formatDetailDate(sdcMatch.createdAt)} icon={Clock} />
+          </div>
+        </div>
+
+        {timeline.length > 0 && (
+          <div>
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 font-inter">Timeline</p>
+            <div>
+              {timeline.map((step, i) => (
+                <div key={step.key} className="flex gap-3">
+                  <div className="flex flex-col items-center">
+                    <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${step.tone}`}>
+                      <step.icon size={14} />
+                    </div>
+                    {i < timeline.length - 1 && <div className="w-px flex-1 bg-gray-200 my-1" />}
+                  </div>
+                  <div className="pb-4">
+                    <p className="text-sm font-semibold text-brand-dark font-inter">{step.label}</p>
+                    <p className="text-xs text-gray-400 font-inter">{formatDetailDate(step.value)}</p>
+                    <p className="text-xs text-gray-400 font-inter mt-0.5">{step.desc}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {recipients.length > 0 && (
+          <div>
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 font-inter">Recipients</p>
+            <div className="space-y-2">
+              {recipients.map((email) => (
+                <div key={email} className="flex items-center gap-3 rounded-xl border border-gray-100 px-3 py-2.5">
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gray-100 text-gray-400">
+                    <Users size={14} />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-brand-dark font-inter truncate">{email}</p>
+                    <p className="text-xs text-green-600 font-inter">Verified recipient</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="flex items-start gap-2 rounded-xl bg-blue-50 border border-blue-100 px-3 py-3">
+          <AlertCircle size={14} className="text-brand-blue mt-0.5 shrink-0" />
+          <p className="text-xs text-brand-blue/90 font-inter leading-relaxed">
+            This record is secured on the blockchain and can't be tampered with. You can share this certificate as
+            proof of authenticity.
+          </p>
+        </div>
+      </div>
+    </Modal>
+  );
+};
+
 // ── Batch detail view ───────────────────────────────────────────────────────
-const BatchDetail = ({ batchSummary, onBack, onBatchUpdated }) => {
+// Generation only happens from the batch card in the org list view (with its
+// own status polling) — this view is read-only: view records, refresh
+// certificates, and open PDFs for whatever's already been generated.
+const BatchDetail = ({ batchSummary, onBack }) => {
   const [batch, setBatch] = useState(null);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [selectedRecord, setSelectedRecord] = useState(null);
-  const [showGenerateModal, setShowGenerateModal] = useState(false);
   const [sdcRecordsByEmail, setSdcRecordsByEmail] = useState({});
+  const [sdcRecordsByName, setSdcRecordsByName] = useState({});
   const [certsLoading, setCertsLoading] = useState(false);
-  const [autoChecking, setAutoChecking] = useState(false);
-  const [statusProgress, setStatusProgress] = useState(null); // { total, ready, pending }
   const [pdfLoadingId, setPdfLoadingId] = useState(null);
-  const pollRef = useRef(null);
   const instanceKey = 'de';
 
   const loadBatch = useCallback(() => {
@@ -355,30 +679,57 @@ const BatchDetail = ({ batchSummary, onBack, onBatchUpdated }) => {
   }, [batchSummary.id]);
 
   useEffect(() => { loadBatch(); }, [loadBatch]);
-  useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
 
+  // Dhiway records are matched to batch users "by email or name" per the
+  // backend docs — email alone isn't enough (test/dummy records often have
+  // empty or non-matching email fields), so also index by title as a fallback.
   const refreshCertificates = useCallback(async (silent = false) => {
     setCertsLoading(true);
     try {
-      // org_id/space_id are omitted — the backend resolves the org's space
-      // (via its Dhiway Space ID) automatically, same as generate does.
-      const { data } = await sdcAPI.getRecords({ active: 1, pageSize: 100 });
+      // org_id/space_id come straight from THIS batch's own recorded
+      // verification_progress.sdc — that's exactly what was used to generate
+      // its certificates, and is more reliable than the org's *current*
+      // profile setting (space_id from fetchOrgSpaceMap is only a fallback
+      // for older batches that predate this field being recorded).
+      // Paginate through the whole record list — a single page silently hides
+      // any certificate that falls outside the first 100 once an org
+      // accumulates more than that many issued records.
+      const orgId   = batchSummary.sdcInfo?.org_id || undefined;
+      const spaceId = batchSummary.sdcInfo?.space_id || batchSummary.spaceId || undefined;
+      const allRecords = [];
+      let page = 1;
+      let hasMore = true;
+      while (hasMore) {
+        const { data } = await sdcAPI.getRecords({ active: 1, page, pageSize: 100, org_id: orgId, space_id: spaceId });
+        const pageRecords = Array.isArray(data?.records) ? data.records : [];
+        allRecords.push(...pageRecords);
+        const totalPages = Number(data?.totalPages || data?.total_pages || 0);
+        hasMore = totalPages > 0 ? page < totalPages : pageRecords.length === 100;
+        page += 1;
+      }
       const map = {};
-      (data?.records || []).forEach((r) => {
+      const byName = {};
+      allRecords.forEach((r) => {
         // anchorTime is the source of truth for issued-vs-draft: set = issued,
         // null = still a draft on Dhiway's side (no PDF yet).
         const issued = !!r.anchorTime && !r.revoked;
+        const entry = {
+          id: r.id, publicId: r.publicId, updatedAt: r.updatedAt, title: r.title,
+          anchorTime: r.anchorTime || null, revoked: !!r.revoked, issued,
+          active: !!r.active, latest: !!r.latest, edited: !!r.edited,
+          createdAt: r.createdAt || null,
+          recipients: Array.isArray(r.recipients) ? r.recipients : [],
+        };
         (r.recipients || []).forEach((email) => {
-          if (email) map[email.toLowerCase()] = {
-            id: r.id, publicId: r.publicId, updatedAt: r.updatedAt, title: r.title,
-            anchorTime: r.anchorTime || null, revoked: !!r.revoked, issued,
-          };
+          if (email) map[email.toLowerCase()] = entry;
         });
+        if (r.title?.trim()) byName[r.title.trim().toLowerCase()] = entry;
       });
       setSdcRecordsByEmail(map);
+      setSdcRecordsByName(byName);
       const issuedCount = Object.values(map).filter((m) => m.issued).length;
       if (!silent) {
-        toast.success(`Loaded ${data?.count ?? Object.keys(map).length} certificate${data?.count === 1 ? '' : 's'}`);
+        toast.success(`Loaded ${allRecords.length} certificate${allRecords.length === 1 ? '' : 's'}`);
       }
       return issuedCount;
     } catch (err) {
@@ -387,46 +738,22 @@ const BatchDetail = ({ batchSummary, onBack, onBatchUpdated }) => {
     } finally {
       setCertsLoading(false);
     }
-  }, [batchSummary.id]);
+  }, [batchSummary.id, batchSummary.spaceId, batchSummary.sdcInfo]);
 
-  // Poll GET /sdc/batches/{id}/status until done:true, then do one getRecords
-  // pass to link up publicId/pdf/verify for the UI.
-  const startAutoCheckForCertificates = useCallback(() => {
-    if (pollRef.current) clearInterval(pollRef.current);
-    let attempts = 0;
-    const maxAttempts = 10; // ~80s worst case at 8s intervals
-    setAutoChecking(true);
-    setStatusProgress(null);
+  const matchSdcRecord = useCallback((record) => {
+    const byEmail = record?.email ? sdcRecordsByEmail[record.email.toLowerCase()] : null;
+    if (byEmail) return byEmail;
+    const title = recordTitle(record)?.trim().toLowerCase();
+    return title ? sdcRecordsByName[title] || null : null;
+  }, [sdcRecordsByEmail, sdcRecordsByName]);
 
-    const tick = async () => {
-      attempts += 1;
-      try {
-        const { data } = await sdcAPI.getBatchStatus(batchSummary.id);
-        setStatusProgress({ total: data.total, ready: data.ready, pending: data.pending });
-
-        if (data.done) {
-          clearInterval(pollRef.current);
-          pollRef.current = null;
-          setAutoChecking(false);
-          const found = await refreshCertificates(true);
-          toast.success(`Certificates ready — ${found} record${found === 1 ? '' : 's'} linked`);
-          return;
-        }
-      } catch {
-        // transient error — keep polling, only give up after maxAttempts
-      }
-
-      if (attempts >= maxAttempts) {
-        clearInterval(pollRef.current);
-        pollRef.current = null;
-        setAutoChecking(false);
-        toast.error('Still processing — use "Refresh Certificates" to check again later');
-      }
-    };
-
-    tick();
-    pollRef.current = setInterval(tick, 8000);
-  }, [batchSummary.id, refreshCertificates]);
+  // Auto-pull certificate links once, as soon as we know this batch has SDCs
+  // generated — otherwise the Certificate column stays blank until the admin
+  // remembers to click "Refresh Certificates" manually.
+  useEffect(() => {
+    if (batch?.sdcStatus === 'generated') refreshCertificates(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [batch?.id, batch?.sdcStatus]);
 
   const filtered = useMemo(() => {
     if (!batch) return [];
@@ -457,13 +784,6 @@ const BatchDetail = ({ batchSummary, onBack, onBatchUpdated }) => {
           <p className="text-xs text-gray-500 font-inter font-mono">{batch.id}</p>
         </div>
         <div className="ml-auto flex items-center gap-2">
-          {autoChecking && (
-            <span className="flex items-center gap-1.5 text-xs text-brand-blue font-inter">
-              <RefreshCw size={12} className="animate-spin" />
-              Checking for certificates…
-              {statusProgress && ` (${statusProgress.ready}/${statusProgress.total} ready)`}
-            </span>
-          )}
           {batch.sdcStatus === 'generated' ? (
             <Badge status="success">SDC Generated</Badge>
           ) : (
@@ -471,9 +791,6 @@ const BatchDetail = ({ batchSummary, onBack, onBatchUpdated }) => {
           )}
           <Button size="sm" variant="outline" onClick={() => refreshCertificates(false)} loading={certsLoading}>
             <RefreshCw size={14} /> Refresh Certificates
-          </Button>
-          <Button size="sm" onClick={() => setShowGenerateModal(true)}>
-            <Sparkles size={14} /> Generate SDCs
           </Button>
         </div>
       </div>
@@ -516,11 +833,12 @@ const BatchDetail = ({ batchSummary, onBack, onBatchUpdated }) => {
             <tbody className="divide-y divide-gray-50">
               {filtered.map((record) => {
                 const { variant, label } = statusBadge(record.verification_status);
-                const match = record.email ? sdcRecordsByEmail[record.email.toLowerCase()] : null;
+                const match = matchSdcRecord(record);
+                const recordId = record.id || record.user_id || record.entity_id;
                 return (
-                  <tr key={record.id} className="hover:bg-gray-50 transition-colors">
+                  <tr key={recordId} className="hover:bg-gray-50 transition-colors">
                     <td className="px-4 py-3 text-sm font-medium text-brand-dark font-inter max-w-[260px] truncate">{recordTitle(record)}</td>
-                    <td className="px-4 py-3 text-xs text-gray-500 font-inter max-w-[240px] truncate">{record.email || record.id}</td>
+                    <td className="px-4 py-3 text-xs text-gray-500 font-inter max-w-[240px] truncate">{record.email || recordId}</td>
                     <td className="px-4 py-3"><Badge status={variant}>{label}</Badge></td>
                     <td className="px-4 py-3">
                       {match?.issued ? (
@@ -529,9 +847,9 @@ const BatchDetail = ({ batchSummary, onBack, onBatchUpdated }) => {
                           <Button
                             variant="ghost"
                             size="sm"
-                            loading={pdfLoadingId === record.id}
+                            loading={pdfLoadingId === recordId}
                             onClick={async () => {
-                              setPdfLoadingId(record.id);
+                              setPdfLoadingId(recordId);
                               try {
                                 await fetchAndOpenCertificate(match.publicId, instanceKey, 'pdf');
                               } catch (err) {
@@ -570,22 +888,10 @@ const BatchDetail = ({ batchSummary, onBack, onBatchUpdated }) => {
 
       <RecordCertModal
         record={selectedRecord}
-        sdcMatch={selectedRecord?.email ? sdcRecordsByEmail[selectedRecord.email.toLowerCase()] : null}
+        sdcMatch={selectedRecord ? matchSdcRecord(selectedRecord) : null}
         instanceKey={instanceKey}
         onClose={() => setSelectedRecord(null)}
       />
-
-      {showGenerateModal && (
-        <GenerateSDCModal
-          batch={batch}
-          onClose={() => setShowGenerateModal(false)}
-          onGenerated={() => {
-            setBatch((prev) => (prev ? { ...prev, sdcStatus: 'generated' } : prev));
-            onBatchUpdated?.({ sdcStatus: 'generated' });
-            startAutoCheckForCertificates();
-          }}
-        />
-      )}
     </motion.div>
   );
 };
@@ -637,6 +943,8 @@ const BatchCard = ({ batch, onClick, onGenerateClick }) => {
           size="sm"
           variant={batch.sdcStatus === 'generated' ? 'outline' : 'primary'}
           className="w-full"
+          disabled={batch.verified === 0}
+          title={batch.verified === 0 ? 'No approved users in this batch yet' : undefined}
           onClick={(e) => { e.stopPropagation(); onGenerateClick(); }}
         >
           <Sparkles size={14} /> {batch.sdcStatus === 'generated' ? 'Regenerate SDCs' : 'Generate SDCs'}
@@ -748,6 +1056,8 @@ const SDCVerification = () => {
 
   const [selectedBatch, setSelectedBatch] = useState(null);
   const [generateBatch, setGenerateBatch] = useState(null);
+  const [liveBatchStatus, setLiveBatchStatus] = useState(null); // { batchId, ready, total } once a poll confirms done:true
+  const [pollingBatchId, setPollingBatchId] = useState(null); // batchId while the background poll is still actively running
 
   // Orgs and their batches aren't linked by any single API — batches/verification
   // records are scoped to the caller's own JWT and never carry an org_id/org_name.
@@ -757,13 +1067,17 @@ const SDCVerification = () => {
   const fetchOrgsAndBatches = useCallback(async () => {
     setLoading(true);
     try {
-      const { data: orgList } = await authAPI.getUsersGrouped();
+      const [{ data: orgList }, spaceMap] = await Promise.all([
+        authAPI.getUsersGrouped(),
+        fetchOrgSpaceMap().catch(() => ({})),
+      ]);
       const rawOrgs = Array.isArray(orgList) ? orgList : [];
 
       const results = await Promise.all(
         rawOrgs.map(async (org) => {
           const orgId = org.org_id || org.id;
           const orgName = org.organization_name || org.org_name || org.name || 'Organization';
+          const spaceId = spaceMap[orgId] || null;
           try {
             const { data } = await verificationAPI.getAllVerifications({ orgId, limit: 500 });
             const batchIds = Array.from(
@@ -776,9 +1090,9 @@ const SDCVerification = () => {
                   .catch(() => null)
               )
             );
-            return { orgId, orgName, batches: batchDetails.filter(Boolean) };
+            return { orgId, orgName, spaceId, batches: batchDetails.filter(Boolean) };
           } catch {
-            return { orgId, orgName, batches: [] };
+            return { orgId, orgName, spaceId, batches: [] };
           }
         })
       );
@@ -838,6 +1152,39 @@ const SDCVerification = () => {
     })));
   };
 
+  // Poll GET /sdc/batches/{id}/status after a card-level generate, until
+  // done:true (or timeout) — gates the "certificates ready" confirmation on
+  // that, same as the flow used to live inside batch detail. Also feeds
+  // liveBatchStatus so the still-open GenerateSDCModal (which only has the
+  // stale snapshot from the moment generate returned) can update itself
+  // instead of showing "Issuance Pending" after certificates already issued.
+  const pollBatchStatusUntilDone = useCallback((batchId) => {
+    let attempts = 0;
+    const maxAttempts = 10; // ~80s worst case at 8s intervals
+    setPollingBatchId(batchId);
+    const tick = async () => {
+      attempts += 1;
+      try {
+        const { data } = await sdcAPI.getBatchStatus(batchId);
+        if (data.done) {
+          setLiveBatchStatus({ batchId, ready: data.ready, total: data.total });
+          setPollingBatchId((current) => (current === batchId ? null : current));
+          toast.success(`Certificates ready — ${data.ready}/${data.total} issued`);
+          return;
+        }
+      } catch {
+        // transient error — keep polling, only give up after maxAttempts
+      }
+      if (attempts < maxAttempts) {
+        setTimeout(tick, 8000);
+      } else {
+        setPollingBatchId((current) => (current === batchId ? null : current));
+        toast.error('Still processing — check the batch again shortly');
+      }
+    };
+    tick();
+  }, []);
+
   // ── Level 3: batch detail (records table, generate/refresh certificates) ──
   if (selectedBatch) {
     return (
@@ -846,7 +1193,6 @@ const SDCVerification = () => {
           <BatchDetail
             batchSummary={selectedBatch}
             onBack={() => setSelectedBatch(null)}
-            onBatchUpdated={(patch) => patchBatchInState(selectedBatch.id, patch)}
           />
         </div>
       </AuthLayout>
@@ -909,8 +1255,8 @@ const SDCVerification = () => {
                   >
                     <BatchCard
                       batch={batch}
-                      onClick={() => setSelectedBatch({ ...batch, orgName: selectedOrg.orgName })}
-                      onGenerateClick={() => setGenerateBatch(batch)}
+                      onClick={() => setSelectedBatch({ ...batch, orgName: selectedOrg.orgName, orgId: selectedOrg.orgId, spaceId: selectedOrg.spaceId })}
+                      onGenerateClick={() => setGenerateBatch({ ...batch, orgId: selectedOrg.orgId, spaceId: selectedOrg.spaceId })}
                     />
                   </motion.div>
                 ))}
@@ -922,9 +1268,12 @@ const SDCVerification = () => {
         {generateBatch && (
           <GenerateSDCModal
             batch={generateBatch}
-            onClose={() => setGenerateBatch(null)}
+            liveStatus={liveBatchStatus?.batchId === generateBatch.id ? liveBatchStatus : null}
+            polling={pollingBatchId === generateBatch.id}
+            onClose={() => { setGenerateBatch(null); setLiveBatchStatus(null); }}
             onGenerated={() => {
               patchBatchInState(generateBatch.id, { sdcStatus: 'generated' });
+              pollBatchStatusUntilDone(generateBatch.id);
             }}
           />
         )}

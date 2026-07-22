@@ -23,26 +23,21 @@ export const StepWizard = ({ steps, currentStep, stepRoutes }) => {
           </p>
         </div>
 
-        <div className="relative">
-          <div className="absolute left-[18px] right-[18px] top-[16px] h-[3px] rounded-full bg-slate-200 sm:left-[20px] sm:right-[20px]" />
-          <motion.div
-            className="absolute left-[18px] top-[16px] h-[3px] rounded-full bg-brand-blue sm:left-[20px]"
-            initial={{ width: 0 }}
-            animate={{ width: `calc((100% - ${steps.length > 1 ? '36px' : '0px'}) * ${Math.min(Math.max(progress, 0), 100) / 100})` }}
-            transition={{ duration: 0.35, ease: 'easeOut' }}
-          />
+        {/* Connector segments sit between each circle as flex siblings, so they
+            always span exactly circle-center to circle-center — no guessing
+            pixel offsets for where the outer circles land. */}
+        <div className="flex items-start">
+          {steps.map((step, index) => {
+            const isActive     = index === currentStep;
+            const isCompleted  = index < currentStep;
+            const isClickable  = isCompleted && !!stepRoutes?.[index];
+            const isLineFilled = index < currentStep;
 
-          <div className="relative flex items-start justify-between gap-5 sm:gap-7">
-            {steps.map((step, index) => {
-              const isActive    = index === currentStep;
-              const isCompleted = index < currentStep;
-              const isClickable = isCompleted && !!stepRoutes?.[index];
-
-              return (
+            return (
+              <React.Fragment key={step}>
                 <div
-                  key={step}
                   className={clsx(
-                    'flex min-w-[84px] shrink-0 flex-col items-center text-center sm:min-w-[104px]',
+                    'flex shrink-0 flex-col items-center text-center px-1',
                     isClickable && 'group'
                   )}
                   onClick={() => handleStepClick(index)}
@@ -57,7 +52,7 @@ export const StepWizard = ({ steps, currentStep, stepRoutes }) => {
                     }}
                     whileHover={isClickable ? { scale: 1.12, boxShadow: '0 0 0 4px rgba(37,99,235,0.18)' } : {}}
                     transition={{ duration: 0.2 }}
-                    className="relative z-10 flex h-8 w-8 items-center justify-center rounded-full border bg-white text-sm font-semibold font-sora sm:h-9 sm:w-9"
+                    className="relative z-10 flex h-8 w-8 shrink-0 items-center justify-center rounded-full border bg-white text-sm font-semibold font-sora sm:h-9 sm:w-9"
                   >
                     {isCompleted ? (
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
@@ -79,9 +74,17 @@ export const StepWizard = ({ steps, currentStep, stepRoutes }) => {
                     {step}
                   </span>
                 </div>
-              );
-            })}
-          </div>
+
+                {index < steps.length - 1 && (
+                  <motion.div
+                    className="mt-4 h-[3px] min-w-[24px] flex-1 rounded-full sm:mt-[18px]"
+                    animate={{ backgroundColor: isLineFilled ? '#2563EB' : '#E2E8F0' }}
+                    transition={{ duration: 0.3, ease: 'easeOut' }}
+                  />
+                )}
+              </React.Fragment>
+            );
+          })}
         </div>
       </div>
     </div>

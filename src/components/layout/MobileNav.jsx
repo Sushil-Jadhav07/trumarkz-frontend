@@ -22,7 +22,6 @@ export const MobileNav = () => {
     : role === 'super-admin'
     ? [
         { path: '/admin/dashboard', label: 'Home', icon: LayoutDashboard },
-        { path: '/admin/org-approvals', label: 'Approvals', icon: CheckSquare },
         { path: '/admin/promote-super-admin', label: 'Admins', icon: CheckSquare },
         { path: '/admin/batch-monitor', label: 'Batches', icon: Layers },
       ]

@@ -1,12 +1,14 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
+  AlertTriangle,
   ArrowRight,
   BadgeCheck,
   CheckCircle,
   Eye,
   FileBadge2,
   ShieldCheck,
+  XCircle,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { AuthLayout } from '@/components/layout/AuthLayout';
@@ -16,7 +18,6 @@ import { Card } from '@/components/ui/Card';
 import { StepWizard } from '@/components/ui/StepWizard';
 import { useApp } from '@/context/AppContext';
 import { HUMAN_VERIFICATION_STEPS, HUMAN_VERIFICATION_STEP_META, HUMAN_VERIFICATION_STEP_ROUTES } from '@/data/humanVerificationFlow';
-import { verificationTypes } from '@/data/mockData';
 import { verificationAPI, getApiError } from '@/services/api';
 import { getIndustryTypeList } from '@/utils/verificationFlow';
 
@@ -43,6 +44,7 @@ const formatCurrency = (value) => `Rs ${value}`;
 export const CertificatePreview = () => {
   const navigate = useNavigate();
   const {
+    batchEntityType,
     selectedIndustry,
     selectedPermission,
     selectedVerifications,
@@ -52,6 +54,7 @@ export const CertificatePreview = () => {
     setBatchData,
   } = useApp();
   const [submitting, setSubmitting] = useState(false);
+  const [allTypes, setAllTypes] = useState([]);
 
   useEffect(() => {
     if (!batchData?.file || !batchData?.recordCount || !batchData?.costConfirmed) {
@@ -60,12 +63,40 @@ export const CertificatePreview = () => {
     }
   }, [batchData?.costConfirmed, batchData?.file, batchData?.recordCount, navigate]);
 
+  // Same real verification-type fetch used by SelectVerifications/CostBreakdown
+  // — this page previously looked selectedVerifications' real backend UUIDs up
+  // against the static mock list in @/data/mockData, which never matched, so
+  // "Selected checks" and "Total cost" always came out as 0 regardless of what
+  // was actually picked.
+  const industryKey = (() => {
+    if (!selectedIndustry) return '';
+    const list = Array.isArray(selectedIndustry) ? selectedIndustry : [selectedIndustry];
+    return list.map((ind) => ind?.name).filter(Boolean).sort().join(',');
+  })();
+
+  const fetchTypes = useCallback(async () => {
+    try {
+      const names = industryKey ? industryKey.split(',') : [];
+      const { data } = await verificationAPI.getVerificationTypes({
+        category:      batchEntityType || 'human',
+        industry_type: names.length > 0 ? names : undefined,
+      });
+      const list = Array.isArray(data) ? data : (data?.verification_types || data?.types || data?.items || []);
+      setAllTypes(list);
+    } catch (err) {
+      toast.error(getApiError(err, 'Failed to load verification types'));
+      setAllTypes([]);
+    }
+  }, [batchEntityType, industryKey]);
+
+  useEffect(() => { fetchTypes(); }, [fetchTypes]);
+
   const selectedChecks = useMemo(
     () =>
       selectedVerifications
-        .map((id) => verificationTypes.find((item) => item.id === id))
+        .map((id) => allTypes.find((item) => item.id === id))
         .filter(Boolean),
-    [selectedVerifications]
+    [selectedVerifications, allTypes]
   );
 
   const recordCount = batchData?.recordCount || 0;
@@ -160,7 +191,7 @@ export const CertificatePreview = () => {
                   {CERTIFICATE_TEMPLATES.find((item) => item.id === (batchData?.selectedHumanTemplate || activeTemplate))?.name}
                 </span>
                 <span className="rounded-full bg-white px-3 py-1.5 text-sm font-medium text-slate-700">
-                  {recordCount} Users
+                  {uploadResult.total_uploaded ?? 0} Users
                 </span>
               </div>
 
@@ -168,6 +199,40 @@ export const CertificatePreview = () => {
                 View Batch Status
               </Button>
             </div>
+
+            {uploadResult.skipped_users?.length > 0 && (
+              <div className="mt-5 rounded-2xl border border-amber-100 bg-amber-50/60 p-4">
+                <h4 className="flex items-center gap-2 text-sm font-semibold text-amber-700">
+                  <AlertTriangle size={14} /> Skipped Rows ({uploadResult.skipped_users.length})
+                </h4>
+                <div className="mt-3 space-y-2">
+                  {uploadResult.skipped_users.map((s, i) => (
+                    <div key={i} className="rounded-xl border border-amber-100 bg-white px-3 py-2.5">
+                      <p className="text-xs font-medium text-amber-800">
+                        Row {s.row}: {s.reason}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {uploadResult.errors?.length > 0 && (
+              <div className="mt-3 rounded-2xl border border-red-100 bg-red-50/60 p-4">
+                <h4 className="flex items-center gap-2 text-sm font-semibold text-red-600">
+                  <XCircle size={14} /> Errors ({uploadResult.errors.length})
+                </h4>
+                <div className="mt-3 space-y-2">
+                  {uploadResult.errors.map((e, i) => (
+                    <div key={i} className="rounded-xl border border-red-100 bg-white px-3 py-2.5">
+                      <p className="text-xs font-medium text-red-700">
+                        Row {e.row} — {e.field}: {e.error}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </Card>
         </div>
       </AuthLayout>

@@ -193,8 +193,11 @@ export const SelectVerifications = () => {
           )}
         </Card>
 
-        <div className="mt-6 flex justify-end">
-          <Button variant="primary" size="lg" onClick={handleContinue} icon={ArrowRight}>
+        <div className="mt-6 flex flex-col-reverse sm:flex-row justify-end gap-3">
+          <Button variant="outline" size="lg" className="w-full sm:w-auto" onClick={() => navigate('/org/industry')}>
+            Back
+          </Button>
+          <Button variant="primary" size="lg" className="w-full sm:w-auto" onClick={handleContinue} icon={ArrowRight}>
             Continue
           </Button>
         </div>

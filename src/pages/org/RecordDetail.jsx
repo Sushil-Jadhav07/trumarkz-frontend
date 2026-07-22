@@ -7,11 +7,9 @@ import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { verificationAPI, getApiError } from '@/services/api';
-import { useAuth } from '@/context/AuthContext';
 import {
   AlertTriangle,
   ArrowLeft,
-  CheckCircle,
   Download,
   ExternalLink,
   FileText,
@@ -19,13 +17,12 @@ import {
   QrCode,
   RefreshCw,
   User,
-  XCircle,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 const StatusBadge = ({ status }) => {
-  if (status === 'verified') return <Badge status="success">Verified</Badge>;
-  if (status === 'failed') return <Badge status="error">Failed</Badge>;
+  if (status === 'approved') return <Badge status="success">Approved</Badge>;
+  if (status === 'rejected') return <Badge status="error">Rejected</Badge>;
   return <Badge status="pending">Pending</Badge>;
 };
 
@@ -49,17 +46,11 @@ const readable = (value) => {
 export const RecordDetail = () => {
   const navigate = useNavigate();
   const { id } = useParams();
-  const { role } = useAuth();
 
   const [record, setRecord] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [actionLoading, setActionLoading] = useState(false);
   const [certLoading, setCertLoading] = useState(false);
   const [certificate, setCertificate] = useState(null);
-  const [rejectReason, setRejectReason] = useState('');
-  const [showRejectForm, setShowRejectForm] = useState(false);
-
-  const isSuperAdmin = role === 'super-admin' || role === 'super_admin';
 
   useEffect(() => {
     if (!id) return;
@@ -81,35 +72,8 @@ export const RecordDetail = () => {
     return () => { mounted = false; };
   }, [id]);
 
-  const updateStatus = async (status, reason = null) => {
-    setActionLoading(true);
-    try {
-      await verificationAPI.updateVerificationStatus(id, status, reason);
-      setRecord((current) => ({
-        ...current,
-        verification_status: status,
-        verification_reason: reason,
-      }));
-      setShowRejectForm(false);
-      setRejectReason('');
-      toast.success(status === 'verified' ? 'Record verified successfully.' : 'Record rejected.');
-    } catch (err) {
-      toast.error(getApiError(err, 'Failed to update status'));
-    } finally {
-      setActionLoading(false);
-    }
-  };
-
-  const handleReject = () => {
-    if (!rejectReason.trim()) {
-      toast.error('Please provide a reason for rejection');
-      return;
-    }
-    updateStatus('failed', rejectReason.trim());
-  };
-
   const handleGenerateCert = async () => {
-    if (record?.verification_status !== 'verified') {
+    if (record?.verification_status !== 'approved') {
       toast.error('Certificate can only be generated for verified records');
       return;
     }
@@ -283,7 +247,7 @@ export const RecordDetail = () => {
           </Card>
         )}
 
-        {record.verification_status === 'verified' && (
+        {record.verification_status === 'approved' && (
           <Card className="p-5 mb-4">
             <h3 className="font-sora font-semibold text-brand-dark mb-3 flex items-center gap-2">
               <QrCode size={16} className="text-green-600" />
@@ -317,56 +281,6 @@ export const RecordDetail = () => {
                 {certLoading ? 'Generating...' : 'Generate QR & PDF Certificate'}
               </Button>
             )}
-          </Card>
-        )}
-
-        {isSuperAdmin && record.verification_status !== 'verified' && (
-          <Card className="p-5 mb-4">
-            <h3 className="font-sora font-semibold text-brand-dark mb-3">Admin Actions</h3>
-            <div className="space-y-3">
-              <Button
-                variant="success"
-                className="w-full"
-                onClick={() => updateStatus('verified')}
-                disabled={actionLoading}
-                icon={CheckCircle}
-              >
-                {actionLoading ? 'Processing...' : 'Approve Verification'}
-              </Button>
-
-              {!showRejectForm ? (
-                <Button
-                  variant="danger"
-                  className="w-full"
-                  onClick={() => setShowRejectForm(true)}
-                  icon={XCircle}
-                >
-                  Reject Verification
-                </Button>
-              ) : (
-                <motion.div
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: 'auto' }}
-                  className="space-y-2"
-                >
-                  <textarea
-                    className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm font-inter focus:outline-none focus:ring-2 focus:ring-red-300 resize-none"
-                    rows={3}
-                    placeholder="Reason for rejection (required)"
-                    value={rejectReason}
-                    onChange={(e) => setRejectReason(e.target.value)}
-                  />
-                  <div className="flex gap-2">
-                    <Button variant="danger" className="flex-1" onClick={handleReject} disabled={actionLoading}>
-                      Confirm Reject
-                    </Button>
-                    <Button variant="outline" onClick={() => { setShowRejectForm(false); setRejectReason(''); }}>
-                      Cancel
-                    </Button>
-                  </div>
-                </motion.div>
-              )}
-            </div>
           </Card>
         )}
       </div>

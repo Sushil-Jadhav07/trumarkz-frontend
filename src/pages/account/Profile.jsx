@@ -1,16 +1,15 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { AuthLayout } from '@/components/layout/AuthLayout';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
-import { Input } from '@/components/ui/Input';
 import { Badge } from '@/components/ui/Badge';
 import { useAuth } from '@/context/AuthContext';
 import { authAPI, getApiError } from '@/services/api';
 import {
-  User, Camera, Mail, Phone, Building2, Save,
+  Mail, Phone, Building2, Save,
   CheckCircle, FileText, MapPin, RefreshCw, Shield,
-  Calendar, Hash, Briefcase, Edit3, X, Database,
+  Calendar, Hash, Briefcase, Pencil, X, Database,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -28,21 +27,13 @@ const roleColors = {
   'super-admin': 'bg-purple-50 text-purple-600',
 };
 
-const normalizeForm = (user) => ({
-  name: user?.name || '',
-  email: user?.email || '',
-  phoneNumber: user?.phoneNumber || '',
-  avatarUrl: user?.avatarUrl || '',
-  dhiwaySpaceId: user?.dhiwaySpaceId || '',
-});
-
 const normalizeIndustryList = (value) => {
   if (Array.isArray(value)) return value.filter(Boolean);
   if (typeof value === 'string' && value.trim()) return [value.trim()];
   return [];
 };
 
-const DetailRow = ({ icon: Icon, label, value }) => (
+const DetailRow = ({ icon: Icon, label, value, hint }) => (
   <div className="flex items-start gap-3">
     <div className="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center shrink-0 mt-0.5">
       <Icon size={14} className="text-gray-400" />
@@ -50,20 +41,25 @@ const DetailRow = ({ icon: Icon, label, value }) => (
     <div className="min-w-0 flex-1">
       <p className="text-[11px] text-gray-400 font-inter uppercase tracking-wide mb-0.5">{label}</p>
       <p className="text-sm font-medium text-brand-dark font-inter break-words">{value || '—'}</p>
+      {hint && <p className="text-[11px] text-gray-400 font-inter mt-0.5">{hint}</p>}
     </div>
   </div>
 );
 
 export const Profile = () => {
   const { user, loading, updateUserProfile, refreshUser, role } = useAuth();
-  const fileInputRef = useRef(null);
-  const [form, setForm] = useState(normalizeForm(user));
-  const [saving, setSaving] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [editing, setEditing] = useState(false);
   const [organizationIndustry, setOrganizationIndustry] = useState(() => normalizeIndustryList(user?.industryType));
 
-  useEffect(() => { setForm(normalizeForm(user)); }, [user]);
+  // Dhiway Space ID is the only profile field with a real backend endpoint
+  // (PATCH /auth/me/dhiway-space) — it gets its own small scoped edit control
+  // rather than a whole-page edit mode, since nothing else here can actually
+  // be saved (there's no endpoint to update name/phone/avatar).
+  const [spaceIdEditing, setSpaceIdEditing] = useState(false);
+  const [spaceIdDraft, setSpaceIdDraft] = useState(user?.dhiwaySpaceId || '');
+  const [savingSpaceId, setSavingSpaceId] = useState(false);
+
+  const isOrg = role === 'organization';
 
   useEffect(() => {
     let mounted = true;
@@ -92,51 +88,31 @@ export const Profile = () => {
     return () => { mounted = false; };
   }, []);
 
-  const displayName = form.name.trim() || 'User';
+  const displayName = user?.name?.trim() || 'User';
   const avatarInitial = displayName[0]?.toUpperCase() || 'U';
   const roleLabel = roleLabels[user?.role] || user?.role || 'Account';
   const roleColor = roleColors[user?.role] || 'bg-gray-100 text-gray-600';
-  const isOrg = role === 'organization';
 
-  const setField = (field, value) => setForm((prev) => ({ ...prev, [field]: value }));
-
-  const handleAvatarSelect = (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (!file.type.startsWith('image/')) { toast.error('Please choose an image file'); return; }
-    if (file.size > 1024 * 1024) { toast.error('Photo must be under 1 MB'); return; }
-    const reader = new FileReader();
-    reader.onload = () => { setField('avatarUrl', reader.result); toast.success('Photo ready — save to apply'); };
-    reader.readAsDataURL(file);
-    e.target.value = '';
+  const handleEditSpaceId = () => {
+    setSpaceIdDraft(user?.dhiwaySpaceId || '');
+    setSpaceIdEditing(true);
   };
 
-  const handleSave = async () => {
-    if (!form.name.trim()) { toast.error('Full name is required'); return; }
-    setSaving(true);
+  const handleCancelSpaceId = () => setSpaceIdEditing(false);
+
+  const handleSaveSpaceId = async () => {
+    setSavingSpaceId(true);
     try {
-      const dhiwaySpaceId = form.dhiwaySpaceId.trim();
-      if (isOrg && dhiwaySpaceId !== (user?.dhiwaySpaceId || '')) {
-        await authAPI.updateDhiwaySpaceId(dhiwaySpaceId);
-      }
-      updateUserProfile({
-        name: form.name.trim(),
-        phoneNumber: form.phoneNumber.trim(),
-        avatarUrl: form.avatarUrl,
-        ...(isOrg ? { dhiwaySpaceId } : {}),
-      });
-      setEditing(false);
-      toast.success('Profile updated');
+      const value = spaceIdDraft.trim();
+      await authAPI.updateDhiwaySpaceId(value);
+      updateUserProfile({ dhiwaySpaceId: value });
+      setSpaceIdEditing(false);
+      toast.success('Dhiway Space ID updated');
     } catch (err) {
       toast.error(getApiError(err, 'Failed to update Dhiway Space ID'));
     } finally {
-      setSaving(false);
+      setSavingSpaceId(false);
     }
-  };
-
-  const handleCancel = () => {
-    setForm(normalizeForm(user));
-    setEditing(false);
   };
 
   const handleRefresh = async () => {
@@ -161,21 +137,8 @@ export const Profile = () => {
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-5">
             {/* Left: avatar + info */}
             <div className="flex items-center gap-5">
-              {/* Avatar */}
-              <div className="relative shrink-0">
-                <div className="w-[72px] h-[72px] rounded-full bg-brand-blue ring-4 ring-brand-blue/15 flex items-center justify-center overflow-hidden text-white text-2xl font-bold font-sora shadow-md">
-                  {form.avatarUrl
-                    ? <img src={form.avatarUrl} alt="" className="w-full h-full object-cover" />
-                    : avatarInitial}
-                </div>
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  className="absolute -bottom-0.5 -right-0.5 w-6 h-6 bg-white border border-gray-200 rounded-full flex items-center justify-center text-gray-500 hover:text-brand-blue hover:border-brand-blue transition-colors shadow-sm"
-                >
-                  <Camera size={11} />
-                </button>
-                <input ref={fileInputRef} type="file" accept="image/*" onChange={handleAvatarSelect} className="hidden" />
+              <div className="w-[72px] h-[72px] rounded-full bg-brand-blue ring-4 ring-brand-blue/15 flex items-center justify-center shrink-0 text-white text-2xl font-bold font-sora shadow-md">
+                {avatarInitial}
               </div>
 
               {/* Name + badges + email */}
@@ -196,7 +159,7 @@ export const Profile = () => {
                 </div>
                 <div className="flex items-center gap-1.5 mt-2">
                   <Mail size={12} className="text-gray-400" />
-                  <span className="text-sm text-gray-500 font-inter">{form.email || '—'}</span>
+                  <span className="text-sm text-gray-500 font-inter">{user?.email || '—'}</span>
                 </div>
                 {user?.id && (
                   <div className="mt-3 pt-3 border-t border-gray-100 flex items-center gap-2">
@@ -207,7 +170,7 @@ export const Profile = () => {
               </div>
             </div>
 
-            {/* Right: action buttons */}
+            {/* Right: refresh */}
             <div className="flex items-center gap-2 shrink-0">
               <button
                 onClick={handleRefresh}
@@ -217,18 +180,6 @@ export const Profile = () => {
                 <RefreshCw size={13} className={refreshing ? 'animate-spin' : ''} />
                 Refresh
               </button>
-              {!editing ? (
-                <Button variant="primary" size="sm" icon={Edit3} onClick={() => setEditing(true)}>
-                  Edit Profile
-                </Button>
-              ) : (
-                <button
-                  onClick={handleCancel}
-                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-gray-200 text-sm text-gray-500 font-inter hover:bg-gray-50 transition-colors"
-                >
-                  <X size={13} /> Cancel
-                </button>
-              )}
             </div>
           </div>
         </Card>
@@ -236,47 +187,17 @@ export const Profile = () => {
         {/* Main content grid */}
         <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-5">
 
-          {/* Left — editable fields */}
+          {/* Left — info */}
           <div className="space-y-5">
             <Card className="p-5">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="font-sora font-bold text-brand-dark">Personal Information</h3>
-                {editing && (
-                  <span className="text-xs text-brand-blue bg-blue-50 px-2.5 py-1 rounded-lg font-inter font-medium">Editing</span>
-                )}
+              <h3 className="font-sora font-bold text-brand-dark mb-4">Personal Information</h3>
+              <div className="space-y-4">
+                <DetailRow icon={Building2} label={isOrg ? 'Organization Name' : 'Full Name'} value={user?.name} />
+                <div className="border-t border-gray-50" />
+                <DetailRow icon={Mail} label="Email Address" value={user?.email} hint="Cannot be changed" />
+                <div className="border-t border-gray-50" />
+                <DetailRow icon={Phone} label="Phone Number" value={user?.phoneNumber} />
               </div>
-
-              <div className="space-y-3">
-                {[
-                  { label: 'Full Name', value: form.name, icon: User, onChange: (e) => setField('name', e.target.value), disabled: !editing || loading || refreshing, placeholder: 'Your full name' },
-                  { label: 'Email Address', value: form.email, icon: Mail, disabled: true, hint: 'Cannot be changed' },
-                  { label: 'Phone Number', value: form.phoneNumber, icon: Phone, onChange: (e) => setField('phoneNumber', e.target.value), disabled: !editing || loading || refreshing, placeholder: '+91 00000 00000' },
-                ].map(({ label, value, icon: Icon, onChange, disabled: dis, placeholder: ph, hint }) => (
-                  <div key={label}>
-                    <label className="block text-xs font-medium text-gray-500 font-inter mb-1">{label}</label>
-                    <div className="relative">
-                      <Icon size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                      <input
-                        value={value}
-                        onChange={onChange}
-                        disabled={dis}
-                        placeholder={ph}
-                        className="w-full h-9 rounded-lg border border-gray-200 pl-8 pr-3 text-sm font-inter text-brand-dark bg-white disabled:bg-gray-50 disabled:text-gray-500 focus:outline-none focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/10 transition-all"
-                      />
-                    </div>
-                    {hint && <p className="text-[11px] text-gray-400 font-inter mt-0.5">{hint}</p>}
-                  </div>
-                ))}
-              </div>
-
-              {editing && (
-                <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} className="mt-4 flex gap-2">
-                  <Button variant="primary" icon={Save} loading={saving} disabled={loading || refreshing} onClick={handleSave}>
-                    Save Changes
-                  </Button>
-                  <Button variant="outline" onClick={handleCancel}>Cancel</Button>
-                </motion.div>
-              )}
             </Card>
 
             {/* Organization details */}
@@ -293,18 +214,15 @@ export const Profile = () => {
                 </div>
 
                 <div className="space-y-4">
-                  <DetailRow icon={Building2} label="Organization Name" value={user?.organization} />
-                  <div className="border-t border-gray-50" />
-
-                  {editing ? (
+                  {spaceIdEditing ? (
                     <div>
                       <label className="block text-xs font-medium text-gray-500 font-inter mb-1">Dhiway Space ID</label>
                       <div className="relative">
                         <Database size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                         <input
-                          value={form.dhiwaySpaceId}
-                          onChange={(e) => setField('dhiwaySpaceId', e.target.value)}
-                          disabled={loading || refreshing}
+                          value={spaceIdDraft}
+                          onChange={(e) => setSpaceIdDraft(e.target.value)}
+                          disabled={savingSpaceId}
                           placeholder="Leave blank unless your organization already has one"
                           className="w-full h-9 rounded-lg border border-gray-200 pl-8 pr-3 text-sm font-inter text-brand-dark bg-white disabled:bg-gray-50 disabled:text-gray-500 focus:outline-none focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/10 transition-all"
                         />
@@ -312,9 +230,26 @@ export const Profile = () => {
                       <p className="text-[11px] text-gray-400 font-inter mt-0.5">
                         Scopes this organization's SDC certificates on Dhiway. Optional.
                       </p>
+                      <div className="mt-2.5 flex gap-2">
+                        <Button variant="primary" size="sm" icon={Save} loading={savingSpaceId} onClick={handleSaveSpaceId}>
+                          Save
+                        </Button>
+                        <Button variant="outline" size="sm" icon={X} disabled={savingSpaceId} onClick={handleCancelSpaceId}>
+                          Cancel
+                        </Button>
+                      </div>
                     </div>
                   ) : (
-                    <DetailRow icon={Database} label="Dhiway Space ID" value={form.dhiwaySpaceId || 'Not set'} />
+                    <div className="flex items-start justify-between gap-3">
+                      <DetailRow icon={Database} label="Dhiway Space ID" value={user?.dhiwaySpaceId || 'Not set'} />
+                      <button
+                        type="button"
+                        onClick={handleEditSpaceId}
+                        className="flex shrink-0 items-center gap-1 rounded-lg px-2 py-1 text-xs font-semibold font-inter text-brand-blue hover:bg-blue-50 transition-colors"
+                      >
+                        <Pencil size={12} /> Edit
+                      </button>
+                    </div>
                   )}
                   <div className="border-t border-gray-50" />
 

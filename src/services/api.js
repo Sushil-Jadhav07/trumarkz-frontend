@@ -407,13 +407,6 @@ export const verificationAPI = {
 
   getUserVerification: (userId) => verificationApi.get(`/verification/user/${userId}`),
 
-  updateVerificationStatus: (userId, status, reason = null) => {
-    const payload = {};
-    if (status != null) payload.status = status;
-    if (reason != null && reason !== '') payload.reason = reason;
-    return verificationApi.patch(`/verification/user/${userId}/status`, payload);
-  },
-
   generateQRAndCertificate: (userId) =>
     verificationApi.post(`/verification/user/${userId}/generate-qr`),
 
@@ -492,6 +485,12 @@ export const verificationAPI = {
     verificationApi.get(`/verification/manual/reports/${requestId}/download/${fileIndex}`, {
       responseType: 'blob',
     }),
+
+  // ── Approve/reject a submitted manual verification report ──────────────────
+  // status: "verified" | "rejected" — updates every batch user assigned to
+  // this request for that verification type.
+  updateManualVerificationStatus: (requestId, status, reason) =>
+    verificationApi.patch(`/verification/manual/requests/${requestId}/status`, cleanObject({ status, reason })),
 
   // ── Email Drafts ──────────────────────────────────────────────────────────
   createEmailDraft: (payload) =>
@@ -618,6 +617,11 @@ export const sdcAPI = {
 
 export const verifiersAPI = {
   getAll: () => api.get('/verifiers'),
+  // Only verifiers whose own `specialization` array includes this type —
+  // used to filter the Smart Send picker so an admin can't assign a
+  // verification type to a verifier who doesn't actually handle it.
+  getByType: (verificationType) =>
+    api.get('/verifiers', { params: verificationType ? { verification_type: verificationType } : undefined }),
   create: (payload) => api.post('/verifiers', cleanObject(payload)),
   getById: (id) => api.get(`/verifiers/${id}`),
   update: (id, payload) => api.patch(`/verifiers/${id}`, cleanObject(payload)),

@@ -22,9 +22,9 @@ const activityStyles = {
 };
 
 const statusMeta = {
-  verified: { action: 'Verification completed', color: 'green', icon: CheckCircle },
-  failed: { action: 'Verification failed', color: 'red', icon: Clock },
-  pending_verification: { action: 'Verification pending', color: 'orange', icon: Clock },
+  approved: { action: 'Verification completed', color: 'green', icon: CheckCircle },
+  rejected: { action: 'Verification failed', color: 'red', icon: Clock },
+  pending: { action: 'Verification pending', color: 'orange', icon: Clock },
 };
 
 const normalizeIndustryValue = (value) => {
@@ -63,7 +63,7 @@ const buildBatchSummary = (users = []) => {
     }
 
     acc[batchId].total += 1;
-    if (item.verification_status === 'pending_verification') acc[batchId].pending += 1;
+    if (item.verification_status === 'pending') acc[batchId].pending += 1;
     else acc[batchId].completed += 1;
 
     const currentLatest = new Date(acc[batchId].latestAt || 0).getTime();
@@ -96,8 +96,8 @@ export const OrgDashboard = () => {
         setStatsSummary({
           total: data?.total ?? 0,
           pending: data?.pending ?? 0,
-          verified: data?.verified ?? 0,
-          failed: data?.failed ?? 0,
+          verified: data?.approved ?? 0,
+          failed: data?.rejected ?? 0,
         });
       })
       .catch((err) => {
@@ -138,7 +138,7 @@ export const OrgDashboard = () => {
     .sort((a, b) => new Date(b.updated_at || b.created_at || 0) - new Date(a.updated_at || a.created_at || 0))
     .slice(0, 4)
     .map((item) => {
-      const meta = statusMeta[item.verification_status] || statusMeta.pending_verification;
+      const meta = statusMeta[item.verification_status] || statusMeta.pending;
       return {
         action: meta.action,
         detail: item.full_name || item.email || 'Verification record',

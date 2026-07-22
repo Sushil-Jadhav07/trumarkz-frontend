@@ -174,7 +174,15 @@ export const SelectIndustry = () => {
           })}
         </div>
 
-        <div className="mt-8 flex justify-end">
+        <div className="mt-8 flex flex-col-reverse sm:flex-row justify-end gap-3">
+          <Button
+            variant="outline"
+            size="lg"
+            className="w-full sm:w-auto"
+            onClick={() => navigate('/org/create-batch')}
+          >
+            Back
+          </Button>
           <Button
             variant="primary"
             size="lg"

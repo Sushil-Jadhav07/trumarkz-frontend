@@ -17,6 +17,14 @@ import { verificationAPI, verifiersAPI, getApiError } from '@/services/api';
 const inputCls = 'w-full rounded-xl border border-gray-200 px-4 py-2.5 text-sm font-inter focus:outline-none focus:ring-2 focus:ring-brand-blue/30 bg-white';
 const labelCls = 'block text-sm font-medium text-brand-dark font-inter mb-1.5';
 
+// `specialization` is an array on the backend — normalise older/legacy string
+// values too, so existing records don't break the multi-select or the table.
+const normaliseSpecialization = (value) => {
+  if (Array.isArray(value)) return value.filter(Boolean);
+  if (typeof value === 'string' && value.trim()) return [value.trim()];
+  return [];
+};
+
 // ── Shared: CustomSelect ──────────────────────────────────────────────────────
 const CustomSelect = ({ value, onChange, options }) => {
   const [open, setOpen] = useState(false);
@@ -60,12 +68,87 @@ const CustomSelect = ({ value, onChange, options }) => {
   );
 };
 
-// ── Verifier Directory ────────────────────────────────────────────────────────
-const EMPTY_VF = {
-  name: '', email: '', phone: '', organization: '', specialization: '', address: '', notes: '',
+// ── Verifier Type multi-select — a styled chip combobox instead of the native
+// <datalist> (whose popup styling/positioning can't be controlled and renders
+// inconsistently across browsers). The backend stores `specialization` as an
+// array, so a verifier can carry more than one verification type.
+const VerifierTypeMultiSelect = ({ value, onChange, options }) => {
+  const [query, setQuery] = useState('');
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
+  }, []);
+
+  const selected = Array.isArray(value) ? value : [];
+  const q = query.trim().toLowerCase();
+  const available = options.filter((o) => !selected.includes(o));
+  const filtered = (q ? available.filter((o) => o.toLowerCase().includes(q)) : available).slice(0, 30);
+
+  const addType = (name) => {
+    onChange([...selected, name]);
+    setQuery('');
+  };
+  const removeType = (name) => onChange(selected.filter((s) => s !== name));
+
+  return (
+    <div className="relative" ref={ref}>
+      <div
+        onClick={() => setOpen(true)}
+        className={`${inputCls} h-auto min-h-[42px] py-2 flex flex-wrap items-center gap-1.5 cursor-text`}
+      >
+        <BookOpen size={14} className="text-gray-400 shrink-0" />
+        {selected.map((name) => (
+          <span
+            key={name}
+            className="inline-flex items-center gap-1 rounded-lg bg-blue-50 px-2 py-1 text-xs font-medium text-brand-blue"
+          >
+            {name}
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); removeType(name); }}
+              className="text-brand-blue/60 hover:text-brand-blue"
+            >
+              <X size={11} />
+            </button>
+          </span>
+        ))}
+        <input
+          value={query}
+          onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
+          onFocus={() => setOpen(true)}
+          className="flex-1 min-w-[120px] border-none outline-none bg-transparent text-sm font-inter"
+          placeholder={selected.length ? '' : 'e.g. Aadhaar Verification'}
+          autoComplete="off"
+        />
+      </div>
+      {open && filtered.length > 0 && (
+        <div className="absolute top-full left-0 right-0 mt-1 z-30 max-h-48 overflow-y-auto rounded-xl border border-gray-200 bg-white shadow-lg">
+          {filtered.map((name) => (
+            <button
+              key={name}
+              type="button"
+              onClick={() => addType(name)}
+              className="w-full px-4 py-2.5 text-left text-sm font-inter text-brand-dark transition-colors hover:bg-blue-50 hover:text-brand-blue"
+            >
+              {name}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 };
 
-const VerifierFields = ({ values, onChange }) => (
+// ── Verifier Directory ────────────────────────────────────────────────────────
+const EMPTY_VF = {
+  name: '', email: '', phone: '', organization: '', specialization: [], address: '', notes: '',
+};
+
+const VerifierFields = ({ values, onChange, typeNames = [] }) => (
   <div className="space-y-4">
     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
       <div>
@@ -124,16 +207,12 @@ const VerifierFields = ({ values, onChange }) => (
 
     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
       <div>
-        <label className={labelCls}>Specialization</label>
-        <div className="relative">
-          <BookOpen size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-          <input
-            value={values.specialization}
-            onChange={(e) => onChange('specialization', e.target.value)}
-            className={`${inputCls} pl-9`}
-            placeholder="Computer Science"
-          />
-        </div>
+        <label className={labelCls}>Verifier Type</label>
+        <VerifierTypeMultiSelect
+          value={values.specialization}
+          onChange={(v) => onChange('specialization', v)}
+          options={typeNames}
+        />
       </div>
       <div>
         <label className={labelCls}>Address</label>
@@ -181,6 +260,7 @@ const VerifierDirectory = () => {
   const [deletingId, setDeletingId] = useState(null);
   const [menuId,     setMenuId]     = useState(null);
   const [menuPos,    setMenuPos]    = useState(null);
+  const [typeNames,  setTypeNames]  = useState([]); // verification type names, for the Verifier Type autofill
 
   const fetchAll = useCallback(async (refresh = false) => {
     if (refresh) setRefreshing(true); else setLoading(true);
@@ -197,6 +277,19 @@ const VerifierDirectory = () => {
   }, []);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
+
+  useEffect(() => {
+    verificationAPI.getVerificationTypes()
+      .then(({ data }) => {
+        const list = Array.isArray(data) ? data : (data?.verification_types || data?.types || data?.items || []);
+        // Human verifiers only ever handle manual verification types —
+        // automatic ones run without a person in the loop, so they'd never
+        // apply to a verifier record.
+        const manualNames = list.filter((t) => t.label === 'manual').map((t) => t.name);
+        setTypeNames([...new Set(manualNames.filter(Boolean))].sort());
+      })
+      .catch(() => setTypeNames([]));
+  }, []);
 
   useEffect(() => {
     if (!menuId) return;
@@ -221,7 +314,7 @@ const VerifierDirectory = () => {
       v.name?.toLowerCase().includes(q) ||
       v.email?.toLowerCase().includes(q) ||
       v.organization?.toLowerCase().includes(q) ||
-      v.specialization?.toLowerCase().includes(q)
+      normaliseSpecialization(v.specialization).some((s) => s.toLowerCase().includes(q))
     );
   });
 
@@ -236,7 +329,7 @@ const VerifierDirectory = () => {
         email:          form.email.trim(),
         phone:          form.phone.trim()         || undefined,
         organization:   form.organization.trim()  || undefined,
-        specialization: form.specialization.trim() || undefined,
+        specialization: form.specialization.length ? form.specialization : undefined,
         address:        form.address.trim()       || undefined,
         notes:          form.notes.trim()         || undefined,
       });
@@ -258,7 +351,7 @@ const VerifierDirectory = () => {
       email:          item.email          || '',
       phone:          item.phone          || '',
       organization:   item.organization   || '',
-      specialization: item.specialization || '',
+      specialization: normaliseSpecialization(item.specialization),
       address:        item.address        || '',
       notes:          item.notes          || '',
     });
@@ -278,7 +371,7 @@ const VerifierDirectory = () => {
         email:          editForm.email.trim(),
         phone:          editForm.phone.trim()         || undefined,
         organization:   editForm.organization.trim()  || undefined,
-        specialization: editForm.specialization.trim() || undefined,
+        specialization: editForm.specialization.length ? editForm.specialization : undefined,
         address:        editForm.address.trim()       || undefined,
         notes:          editForm.notes.trim()         || undefined,
       });
@@ -309,7 +402,7 @@ const VerifierDirectory = () => {
   };
 
   const uniqueOrgs = [...new Set(verifiers.map((v) => v.organization).filter(Boolean))].length;
-  const withSpec   = verifiers.filter((v) => v.specialization).length;
+  const withSpec   = verifiers.filter((v) => normaliseSpecialization(v.specialization).length > 0).length;
 
   return (
     <div>
@@ -318,7 +411,7 @@ const VerifierDirectory = () => {
         {[
           { label: 'Total Verifiers',       value: verifiers.length, icon: Users,     color: 'text-brand-blue',  bg: 'bg-blue-50',   accent: 'bg-brand-blue' },
           { label: 'Organizations',          value: uniqueOrgs,       icon: Building2, color: 'text-purple-600', bg: 'bg-purple-50', accent: 'bg-purple-500' },
-          { label: 'With Specialization',   value: withSpec,         icon: BookOpen,  color: 'text-green-600',  bg: 'bg-green-50',  accent: 'bg-green-500' },
+          { label: 'With Verifier Type',    value: withSpec,         icon: BookOpen,  color: 'text-green-600',  bg: 'bg-green-50',  accent: 'bg-green-500' },
         ].map(({ label, value, icon: Icon, color, bg, accent }) => (
           <Card key={label} className="p-4 overflow-hidden relative">
             <div className={`absolute inset-x-0 top-0 h-1 ${accent}`} />
@@ -400,7 +493,7 @@ const VerifierDirectory = () => {
               <table className="w-full min-w-[900px] border-collapse">
                 <thead>
                   <tr className="bg-gray-50 border-b border-gray-100">
-                    {['Name / Address', 'Email', 'Phone', 'Organization', 'Specialization', 'Actions'].map((h) => (
+                    {['Name / Address', 'Email', 'Phone', 'Organization', 'Verifier Type', 'Actions'].map((h) => (
                       <th key={h} className="px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-500 font-inter">{h}</th>
                     ))}
                   </tr>
@@ -445,7 +538,17 @@ const VerifierDirectory = () => {
                         )}
                       </td>
                       <td className="px-5 py-4">
-                        <p className="text-xs text-gray-600 font-inter">{item.specialization || '—'}</p>
+                        {normaliseSpecialization(item.specialization).length > 0 ? (
+                          <div className="flex flex-wrap gap-1">
+                            {normaliseSpecialization(item.specialization).map((s) => (
+                              <span key={s} className="rounded-md bg-blue-50 px-1.5 py-0.5 text-[11px] font-medium text-brand-blue font-inter">
+                                {s}
+                              </span>
+                            ))}
+                          </div>
+                        ) : (
+                          <span className="text-xs text-gray-300 font-inter">—</span>
+                        )}
                       </td>
                       <td className="px-5 py-4 text-center">
                         <div className="inline-flex justify-center">
@@ -508,7 +611,7 @@ const VerifierDirectory = () => {
       {/* Add Modal */}
       <Modal isOpen={addOpen} onClose={() => { setAddOpen(false); setForm(EMPTY_VF); }} title="Add Verifier" size="lg">
         <form onSubmit={handleAdd} className="space-y-4">
-          <VerifierFields values={form} onChange={(f, v) => setForm((p) => ({ ...p, [f]: v }))} />
+          <VerifierFields values={form} onChange={(f, v) => setForm((p) => ({ ...p, [f]: v }))} typeNames={typeNames} />
           <div className="flex flex-col sm:flex-row justify-end gap-2 pt-2">
             <Button variant="ghost" type="button" onClick={() => { setAddOpen(false); setForm(EMPTY_VF); }} disabled={submitting}>
               Cancel
@@ -523,7 +626,7 @@ const VerifierDirectory = () => {
       {/* Edit Modal */}
       <Modal isOpen={editOpen} onClose={() => { setEditOpen(false); setEditTarget(null); }} title="Edit Verifier" size="lg">
         <form onSubmit={handleEdit} className="space-y-4">
-          <VerifierFields values={editForm} onChange={(f, v) => setEditForm((p) => ({ ...p, [f]: v }))} />
+          <VerifierFields values={editForm} onChange={(f, v) => setEditForm((p) => ({ ...p, [f]: v }))} typeNames={typeNames} />
           <div className="flex flex-col sm:flex-row justify-end gap-2 pt-2">
             <Button variant="ghost" type="button" onClick={() => { setEditOpen(false); setEditTarget(null); }} disabled={saving}>
               Cancel

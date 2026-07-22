@@ -7,10 +7,12 @@ import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { ProgressBar } from '@/components/ui/ProgressBar';
 import { Modal } from '@/components/ui/Modal';
-import { verificationAPI, getApiError } from '@/services/api';
+import { verificationAPI, sdcAPI, getApiError } from '@/services/api';
+import { useAuth } from '@/context/AuthContext';
+import { CertificateDetailModal } from '@/pages/admin/SDCVerification';
 import {
   ChevronLeft, ChevronRight, CheckCircle, Clock, Download,
-  Eye, FileText, Layers, Package, QrCode, RefreshCw, Upload,
+  Eye, FileText, Info, Layers, Package, RefreshCw, Upload,
   User, XCircle, Play, BarChart3, Building2, ShieldCheck, Globe, Award,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -29,16 +31,18 @@ const isProductRecord = (r) =>
   r?.entity_type === 'product' || !!r?.product_name || !!r?.category_name;
 
 const getRecordTitle = (r) =>
-  r?.product_name || r?.full_name || r?.email || r?.id || 'Record';
+  r?.product_name || r?.full_name || r?.email || r?.id || r?.user_id || r?.entity_id || 'Record';
 
 const getRecordSubtitle = (r) =>
   isProductRecord(r)
     ? r?.category_name || 'Product verification'
     : [r?.email, r?.phone_number].filter(Boolean).join(' · ') || 'Human verification';
 
+const getRecordKey = (r) => r?.id || r?.user_id || r?.entity_id;
+
 const recordStatusBadge = (status) => {
-  if (status === 'verified') return { variant: 'success', label: 'Verified' };
-  if (status === 'failed')   return { variant: 'error',   label: 'Failed' };
+  if (status === 'approved') return { variant: 'success', label: 'Approved' };
+  if (status === 'rejected') return { variant: 'error',   label: 'Rejected' };
   return                            { variant: 'pending',  label: 'Pending' };
 };
 
@@ -48,8 +52,10 @@ const sdcStatusLabel = (status) => {
   return 'Certificate Pending';
 };
 
+// Real backend batch statuses (BatchListResponse.status / BatchDetailResponse.status)
+// — derived server-side, monotonic, only ever moves forward through this list.
 const BATCH_STATUS_META = {
-  pending_verification: {
+  pending: {
     label:      'Pending',
     dot:        'bg-amber-400',
     tone:       'bg-amber-50 text-amber-700 border-amber-200',
@@ -58,8 +64,26 @@ const BATCH_STATUS_META = {
     iconColor:  'text-amber-600',
     icon:       Clock,
   },
-  verified: {
-    label:      'Verified',
+  processing: {
+    label:      'Processing',
+    dot:        'bg-blue-400',
+    tone:       'bg-blue-50 text-blue-700 border-blue-200',
+    headerBg:   'bg-blue-50 border-blue-100',
+    iconBg:     'bg-blue-100',
+    iconColor:  'text-blue-600',
+    icon:       Play,
+  },
+  verification_in_progress: {
+    label:      'Verification In Progress',
+    dot:        'bg-blue-500',
+    tone:       'bg-blue-50 text-blue-700 border-blue-200',
+    headerBg:   'bg-blue-50 border-blue-100',
+    iconBg:     'bg-blue-100',
+    iconColor:  'text-blue-600',
+    icon:       ShieldCheck,
+  },
+  verification_completed: {
+    label:      'Verification Completed',
     dot:        'bg-green-500',
     tone:       'bg-green-50 text-green-700 border-green-200',
     headerBg:   'bg-green-50 border-green-100',
@@ -67,22 +91,24 @@ const BATCH_STATUS_META = {
     iconColor:  'text-green-600',
     icon:       CheckCircle,
   },
-  failed: {
-    label:      'Failed',
-    dot:        'bg-red-500',
-    tone:       'bg-red-50 text-red-600 border-red-200',
-    headerBg:   'bg-red-50 border-red-100',
-    iconBg:     'bg-red-100',
-    iconColor:  'text-red-500',
-    icon:       XCircle,
+  sdc_generated: {
+    label:      'SDC Generated',
+    dot:        'bg-emerald-500',
+    tone:       'bg-emerald-50 text-emerald-700 border-emerald-200',
+    headerBg:   'bg-emerald-50 border-emerald-100',
+    iconBg:     'bg-emerald-100',
+    iconColor:  'text-emerald-600',
+    icon:       Award,
   },
 };
 
 const FILTER_OPTIONS = [
-  { value: '',                     label: 'All',      icon: Layers },
-  { value: 'pending_verification', label: 'Pending',  icon: Clock },
-  { value: 'verified',             label: 'Verified', icon: CheckCircle },
-  { value: 'failed',               label: 'Failed',   icon: XCircle },
+  { value: '',                          label: 'All',                       icon: Layers },
+  { value: 'pending',                   label: 'Pending',                   icon: Clock },
+  { value: 'processing',                label: 'Processing',                icon: Play },
+  { value: 'verification_in_progress',  label: 'Verification In Progress',  icon: ShieldCheck },
+  { value: 'verification_completed',    label: 'Verification Completed',    icon: CheckCircle },
+  { value: 'sdc_generated',              label: 'SDC Generated',            icon: Award },
 ];
 
 const PAGE_SIZE = 10;
@@ -91,10 +117,10 @@ const normaliseBatch = (b) => {
   if (!b || typeof b !== 'object') return null;
   const id       = b.batch_id || b.id || '';
   const total    = Number(b.total_users ?? b.total ?? 0);
-  const verified = Number(b.verified ?? b.verified_count ?? 0);
-  const failed   = Number(b.failed ?? b.failed_count ?? 0);
+  const verified = Number(b.approved ?? b.approved_count ?? 0);
+  const failed   = Number(b.rejected ?? b.rejected_count ?? 0);
   const pending  = Math.max(0, total - verified - failed);
-  const status   = pending > 0 ? 'pending_verification' : failed > 0 ? 'failed' : 'verified';
+  const status   = b.status || 'pending';
   // Normalise verificationTypes — API may return strings or objects
   const rawTypes = b.verification_types || [];
   const verificationTypes = rawTypes.map((t) =>
@@ -104,7 +130,7 @@ const normaliseBatch = (b) => {
     id,
     name:                 b.batch_name || b.name || `Batch ${String(id).slice(0, 8)}`,
     total, verified, failed, pending, status,
-    statusMeta:           BATCH_STATUS_META[status] || BATCH_STATUS_META.pending_verification,
+    statusMeta:           BATCH_STATUS_META[status] || BATCH_STATUS_META.pending,
     createdAt:            b.created_at || b.createdAt,
     excelPath:            b.excel_storage_path || null,
     reportPaths:          Array.isArray(b.report_storage_paths) ? b.report_storage_paths : [],
@@ -115,6 +141,19 @@ const normaliseBatch = (b) => {
     verificationProgress: b.verification_progress || {},
     records:              Array.isArray(b.users) ? b.users : [],
   };
+};
+
+// API returns [{ org_id, organization_name, batches: [...] }] — one entry per org,
+// with the actual batch list nested under `.batches`.
+const extractBatchList = (data) => {
+  const groups = Array.isArray(data) ? data : [data];
+  return groups.flatMap((g) => {
+    if (Array.isArray(g?.batches)) return g.batches;
+    if (Array.isArray(g?.items)) return g.items;
+    if (Array.isArray(g)) return g;
+    if (g && typeof g === 'object' && (g.batch_id || g.id)) return [g];
+    return [];
+  });
 };
 
 const formatDate = (v) => {
@@ -166,43 +205,115 @@ const SegmentedBar = ({ total, verified, failed, pending }) => {
 
 // ── Batch Detail Modal ────────────────────────────────────────────────────────
 const BatchDetailModal = ({ batchId, batchName, onClose }) => {
+  const { user } = useAuth();
   const [detail,  setDetail]  = useState(null);
   const [loading, setLoading] = useState(true);
+  const [sdcByRecordId, setSdcByRecordId] = useState({});
+  const [certsLoading, setCertsLoading] = useState(false);
+  const [downloadingId, setDownloadingId] = useState(null);
+  const [detailRecord, setDetailRecord] = useState(null);
+  const instanceKey = 'de';
+
+  // Matches this batch's records against the Dhiway record list by
+  // email/title (same approach used on the admin Batch Monitor / SDC
+  // Verification pages) — org_id/space_id come straight from THIS batch's own
+  // verification_progress.sdc (recorded at generation time), which is the
+  // authoritative source for exactly which Dhiway org/space its certificates
+  // actually live in — more reliable than guessing from the org's current
+  // profile setting, which could differ or have changed since generation.
+  const refreshCertificates = useCallback(async (records, sdcInfo) => {
+    if (!records?.length) return;
+    setCertsLoading(true);
+    try {
+      const orgId   = sdcInfo?.org_id || undefined;
+      const spaceId = sdcInfo?.space_id || user?.dhiwaySpaceId || undefined;
+
+      const allRecords = [];
+      let page = 1;
+      let hasMore = true;
+      while (hasMore) {
+        const { data } = await sdcAPI.getRecords({ active: 1, page, pageSize: 100, org_id: orgId, space_id: spaceId });
+        const pageRecords = Array.isArray(data?.records) ? data.records : [];
+        allRecords.push(...pageRecords);
+        const totalPages = Number(data?.totalPages || data?.total_pages || 0);
+        hasMore = totalPages > 0 ? page < totalPages : pageRecords.length === 100;
+        page += 1;
+      }
+      const byId = {};
+      records.forEach((record) => {
+        // Confirmed via the live batch-details response: each user is keyed
+        // by `user_id`, not `id` — check all three since the shape can vary.
+        const recordId = getRecordKey(record);
+        const recordEmail = record?.email?.trim().toLowerCase();
+        const recordName = getRecordTitle(record)?.trim().toLowerCase();
+        const match = allRecords.find((item) => {
+          const recipients = (item?.recipients || []).map((v) => v?.trim().toLowerCase()).filter(Boolean);
+          const itemTitle = item?.title?.trim().toLowerCase();
+          return (recordEmail && recipients.includes(recordEmail)) || (recordName && itemTitle === recordName);
+        });
+        if (match?.publicId && recordId) {
+          byId[recordId] = {
+            id: match.id, publicId: match.publicId, title: match.title,
+            recipients: Array.isArray(match.recipients) ? match.recipients : [],
+            anchorTime: match.anchorTime || null, revoked: !!match.revoked,
+            issued: !!match.anchorTime && !match.revoked,
+            active: !!match.active, latest: !!match.latest, edited: !!match.edited,
+            createdAt: match.createdAt || null, updatedAt: match.updatedAt || null,
+          };
+        }
+      });
+      setSdcByRecordId(byId);
+    } catch (err) {
+      setSdcByRecordId({});
+      toast.error(getApiError(err, 'Failed to fetch SDC records'));
+    } finally {
+      setCertsLoading(false);
+    }
+  }, [user?.dhiwaySpaceId]);
 
   useEffect(() => {
     if (!batchId) return;
     setLoading(true);
     setDetail(null);
+    setSdcByRecordId({});
     verificationAPI.getBatchDetails(batchId)
-      .then(({ data }) => setDetail(normaliseBatch(data)))
+      .then(({ data }) => {
+        const normalised = normaliseBatch(data);
+        setDetail(normalised);
+        const sdcInfo = normalised?.verificationProgress?.sdc;
+        if (sdcInfo?.status) {
+          refreshCertificates(normalised.records, sdcInfo);
+        }
+      })
       .catch((err) => toast.error(getApiError(err, 'Failed to load batch details')))
       .finally(() => setLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [batchId]);
 
-  const handleGenerateQR = async (userId) => {
+  // Opens a blank tab synchronously (same tick as the click) and redirects it
+  // once the URL arrives — awaiting the fetch first and only then calling
+  // window.open gets silently blocked by most browsers.
+  const handleDownloadCertificate = async (publicId) => {
+    setDownloadingId(publicId);
+    const win = window.open('', '_blank');
+    if (win) win.opener = null;
     try {
-      const { data } = await verificationAPI.generateQRAndCertificate(userId);
-      if (data?.pdf_url) window.open(data.pdf_url, '_blank');
-      else toast.success('QR generated');
+      const { data } = await sdcAPI.getRecord(publicId, instanceKey);
+      if (data?.pdf) {
+        if (win) win.location.href = data.pdf;
+      } else {
+        win?.close();
+        toast.error('No PDF link on this certificate yet');
+      }
     } catch (err) {
-      toast.error(getApiError(err, 'Failed to generate QR'));
+      win?.close();
+      toast.error(getApiError(err, 'Failed to fetch certificate'));
+    } finally {
+      setDownloadingId(null);
     }
   };
 
-  const handleAutoVerify = async (record) => {
-    const typeToRun = record.verification_types?.[0] || 'authenticity';
-    try {
-      await verificationAPI.runAutoVerification(typeToRun, record.id);
-      toast.success('Automatic verification triggered');
-      verificationAPI.getBatchDetails(batchId)
-        .then(({ data }) => setDetail(normaliseBatch(data)))
-        .catch(() => {});
-    } catch (err) {
-      toast.error(getApiError(err, 'Failed to run automatic verification'));
-    }
-  };
-
-  const meta = detail?.statusMeta || BATCH_STATUS_META.pending_verification;
+  const meta = detail?.statusMeta || BATCH_STATUS_META.pending;
   const StatusIcon = meta.icon;
   const sdc = detail?.verificationProgress?.sdc || null;
   const pct = detail && detail.total > 0
@@ -214,6 +325,7 @@ const BatchDetailModal = ({ batchId, batchName, onClose }) => {
     (detail.industryType.length > 0 || detail.verificationTypes.length > 0 || detail.credentialVisibility);
 
   return (
+    <>
     <Modal isOpen={!!batchId} onClose={onClose} title={`${batchName} — Details`} size="4xl">
       {loading ? (
         <div className="flex flex-col items-center justify-center gap-3 py-16">
@@ -271,6 +383,16 @@ const BatchDetailModal = ({ batchId, batchName, onClose }) => {
                     <Award size={12} />
                     <span className="font-inter text-xs font-semibold">{sdcStatusLabel(sdc.status)}</span>
                   </div>
+                )}
+                {sdc && (
+                  <button
+                    type="button"
+                    onClick={() => refreshCertificates(detail.records, detail.verificationProgress?.sdc)}
+                    disabled={certsLoading}
+                    className="flex items-center gap-1 font-inter text-[11px] font-semibold text-brand-blue hover:opacity-70 disabled:opacity-50"
+                  >
+                    <RefreshCw size={11} className={certsLoading ? 'animate-spin' : ''} /> Refresh Certificates
+                  </button>
                 )}
               </div>
             </div>
@@ -480,7 +602,7 @@ const BatchDetailModal = ({ batchId, batchName, onClose }) => {
                 </span>
               </div>
               <div className="max-h-72 overflow-y-auto">
-                <table className="w-full min-w-[500px]">
+                <table className="w-full min-w-[680px]">
                   <thead className="sticky top-0 z-10 border-b border-gray-100 bg-white">
                     <tr>
                       <th className="px-5 py-3 text-left font-inter text-[10px] font-bold uppercase tracking-[0.12em] text-gray-400">
@@ -489,8 +611,8 @@ const BatchDetailModal = ({ batchId, batchName, onClose }) => {
                       <th className="px-5 py-3 text-left font-inter text-[10px] font-bold uppercase tracking-[0.12em] text-gray-400">
                         Status
                       </th>
-                      <th className="px-5 py-3 text-right font-inter text-[10px] font-bold uppercase tracking-[0.12em] text-gray-400">
-                        Actions
+                      <th className="px-5 py-3 text-left font-inter text-[10px] font-bold uppercase tracking-[0.12em] text-gray-400 w-56">
+                        Certificate
                       </th>
                     </tr>
                   </thead>
@@ -498,9 +620,10 @@ const BatchDetailModal = ({ batchId, batchName, onClose }) => {
                     {detail.records.map((record, i) => {
                       const Icon = isProductRecord(record) ? Package : User;
                       const sb   = recordStatusBadge(record.verification_status);
+                      const sdcMatch = sdcByRecordId[getRecordKey(record)] || null;
                       return (
                         <motion.tr
-                          key={record.id}
+                          key={getRecordKey(record)}
                           initial={{ opacity: 0 }}
                           animate={{ opacity: 1 }}
                           transition={{ delay: i * 0.04 }}
@@ -525,16 +648,32 @@ const BatchDetailModal = ({ batchId, batchName, onClose }) => {
                             <Badge status={sb.variant}>{sb.label}</Badge>
                           </td>
                           <td className="px-5 py-3.5">
-                            <div className="flex items-center justify-end gap-1.5">
-                              {record.verification_status === 'pending_verification' && (
-                                <Button variant="ghost" size="sm" icon={Play} onClick={() => handleAutoVerify(record)}>
-                                  Auto
-                                </Button>
-                              )}
-                              <Button variant="ghost" size="sm" icon={QrCode} onClick={() => handleGenerateQR(record.id)}>
-                                QR
-                              </Button>
-                            </div>
+                            {sdcMatch?.issued ? (
+                              <div className="flex items-center gap-2">
+                                <Badge status="info">Ready</Badge>
+                                <div className="flex items-center gap-0.5 rounded-lg border border-gray-100 bg-gray-50 p-0.5">
+                                  <button
+                                    type="button"
+                                    disabled={downloadingId === sdcMatch.publicId}
+                                    onClick={() => handleDownloadCertificate(sdcMatch.publicId)}
+                                    className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold font-inter text-brand-blue transition-colors hover:bg-white hover:shadow-sm disabled:opacity-50"
+                                  >
+                                    <Download size={12} className={downloadingId === sdcMatch.publicId ? 'animate-spin' : ''} /> Download
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setDetailRecord(record)}
+                                    className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold font-inter text-gray-500 transition-colors hover:bg-white hover:text-brand-blue hover:shadow-sm"
+                                  >
+                                    <Info size={12} /> Detail
+                                  </button>
+                                </div>
+                              </div>
+                            ) : sdcMatch ? (
+                              <Badge status="pending">Draft</Badge>
+                            ) : (
+                              <span className="text-xs text-gray-300 font-inter">-</span>
+                            )}
                           </td>
                         </motion.tr>
                       );
@@ -547,6 +686,14 @@ const BatchDetailModal = ({ batchId, batchName, onClose }) => {
         </div>
       )}
     </Modal>
+
+    <CertificateDetailModal
+      record={detailRecord}
+      sdcMatch={detailRecord ? sdcByRecordId[getRecordKey(detailRecord)] || null : null}
+      instanceKey={instanceKey}
+      onClose={() => setDetailRecord(null)}
+    />
+    </>
   );
 };
 
@@ -566,7 +713,7 @@ export const BatchStatus = () => {
     else setLoading(true);
     try {
       const { data } = await verificationAPI.getBatches();
-      const list = Array.isArray(data) ? data : (data?.batches || data?.items || []);
+      const list = extractBatchList(data);
       setBatches(list.map(normaliseBatch).filter(Boolean));
     } catch (err) {
       toast.error(getApiError(err, 'Failed to fetch batches'));
@@ -595,10 +742,12 @@ export const BatchStatus = () => {
     : 0;
 
   const filterCounts = {
-    '':                   batches.length,
-    pending_verification: batches.filter((b) => b.status === 'pending_verification').length,
-    verified:             batches.filter((b) => b.status === 'verified').length,
-    failed:               batches.filter((b) => b.status === 'failed').length,
+    '':                          batches.length,
+    pending:                     batches.filter((b) => b.status === 'pending').length,
+    processing:                  batches.filter((b) => b.status === 'processing').length,
+    verification_in_progress:   batches.filter((b) => b.status === 'verification_in_progress').length,
+    verification_completed:     batches.filter((b) => b.status === 'verification_completed').length,
+    sdc_generated:                batches.filter((b) => b.status === 'sdc_generated').length,
   };
 
   const statCards = [
