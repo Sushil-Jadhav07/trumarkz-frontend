@@ -286,6 +286,53 @@ export const verificationAPI = {
       })
     ),
 
+  // OCR bulk-upload — document images in, batch_users out (pending_review), one
+  // call per batch. 1 image = 1 user. `fields`/`docType` are extraction hints,
+  // not required. Same optional industry/verification/visibility params as the
+  // Excel bulkUpload above.
+  bulkUploadDocuments: (files, batchName, maybeOptions, maybeProgress) => {
+    const formData = new FormData();
+    const { options, onProgress } = normalizeUploadArgs(maybeOptions, maybeProgress);
+
+    files.forEach((file) => formData.append('files', file));
+    formData.append('batch_name', batchName);
+    appendFormValue(formData, 'description', options.description);
+    appendFormValue(formData, 'industry_type', options.industryType || options.industry_type);
+    appendFormValue(formData, 'verification_types', options.verificationTypes || options.verification_types);
+    appendFormValue(
+      formData,
+      'credential_visibility',
+      options.credentialVisibility || options.credential_visibility
+    );
+    appendFormValue(formData, 'fields', options.fields);
+    appendFormValue(formData, 'doc_type', options.docType || options.doc_type);
+
+    return verificationApi.post('/verification/bulk-upload/documents', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      onUploadProgress: onProgress
+        ? (event) => onProgress(Math.round((event.loaded * 100) / (event.total || 1)))
+        : undefined,
+    });
+  },
+
+  // Edit OCR-extracted fields post-review and (by default) mark reviewed —
+  // only the fields present in `payload` are changed. Pass mark_reviewed:
+  // false to save corrections while keeping ocr_review_status pending.
+  updateBatchUser: (userId, payload) =>
+    verificationApi.patch(`/verification/batch-users/${userId}`, cleanObject(payload)),
+
+  // Attach a document to a single existing human user (separate from the bulk
+  // OCR flow — not part of the review wizard, just a standalone utility).
+  uploadHumanDocument: (userId, documentLabel, file) => {
+    const formData = new FormData();
+    formData.append('user_id', userId);
+    formData.append('document_label', documentLabel);
+    formData.append('file', file);
+    return verificationApi.post('/verification/humans/upload-doc', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
+
   bulkUpload: (file, batchName, description = '', maybeOptions, maybeProgress) => {
     const formData = new FormData();
     const { options, onProgress } = normalizeUploadArgs(maybeOptions, maybeProgress);

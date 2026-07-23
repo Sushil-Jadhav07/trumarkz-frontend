@@ -27,11 +27,14 @@ export const CostBreakdown = () => {
   const [typesLoading, setTypesLoading] = useState(true);
 
   useEffect(() => {
-    if (!batchData?.file || !batchData?.recordCount) {
+    // Excel path defers batch creation to Preview (batchData.file is enough
+    // to proceed); the OCR document path already created the batch at the
+    // Template step, so batchData.uploadResponse stands in for it instead.
+    if (!(batchData?.file || batchData?.uploadResponse) || !batchData?.recordCount) {
       toast.error('Upload the template file first');
       navigate('/org/template', { replace: true });
     }
-  }, [batchData?.file, batchData?.recordCount, navigate]);
+  }, [batchData?.file, batchData?.uploadResponse, batchData?.recordCount, navigate]);
 
   // Stable string key to avoid infinite refetch from object reference changes
   const industryKey = (() => {

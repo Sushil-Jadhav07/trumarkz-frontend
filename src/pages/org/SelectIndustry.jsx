@@ -75,17 +75,12 @@ export const SelectIndustry = () => {
     const matched = saved
       .map((item) => industries.find((ind) => ind.name.toLowerCase() === String(item).toLowerCase()))
       .filter(Boolean);
-    if (matched.length > 0) setSelectedIndustry(matched);
+    if (matched.length > 0) setSelectedIndustry([matched[0]]);
   }, [selectedIndustries.length, setSelectedIndustry, user?.industryType, industries]);
 
   const toggleIndustry = (industry) => {
     const exists = selectedIndustries.some((item) => item.id === industry.id);
-    if (exists) {
-      const next = selectedIndustries.filter((item) => item.id !== industry.id);
-      setSelectedIndustry(next.length > 0 ? next : null);
-    } else {
-      setSelectedIndustry([...selectedIndustries, industry]);
-    }
+    setSelectedIndustry(exists ? null : [industry]);
   };
 
   const handleContinue = () => {
@@ -110,8 +105,8 @@ export const SelectIndustry = () => {
           title="Select Industry"
           subtitle={
             selectedIndustries.length > 0
-              ? `${selectedIndustries.length} selected • ${selectedNames}`
-              : `Choose one or more industries for your ${isProduct ? 'product' : 'human'} verification batch`
+              ? `Selected • ${selectedNames}`
+              : `Choose an industry for your ${isProduct ? 'product' : 'human'} verification batch`
           }
           action={
             <button

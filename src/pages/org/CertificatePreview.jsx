@@ -57,11 +57,13 @@ export const CertificatePreview = () => {
   const [allTypes, setAllTypes] = useState([]);
 
   useEffect(() => {
-    if (!batchData?.file || !batchData?.recordCount || !batchData?.costConfirmed) {
+    // OCR document path already created the batch at the Template step —
+    // batchData.uploadResponse stands in for batchData.file in that case.
+    if (!(batchData?.file || batchData?.uploadResponse) || !batchData?.recordCount || !batchData?.costConfirmed) {
       toast.error('Complete the costing step first');
       navigate('/org/costing', { replace: true });
     }
-  }, [batchData?.costConfirmed, batchData?.file, batchData?.recordCount, navigate]);
+  }, [batchData?.costConfirmed, batchData?.file, batchData?.uploadResponse, batchData?.recordCount, navigate]);
 
   // Same real verification-type fetch used by SelectVerifications/CostBreakdown
   // — this page previously looked selectedVerifications' real backend UUIDs up
@@ -209,7 +211,7 @@ export const CertificatePreview = () => {
                   {uploadResult.skipped_users.map((s, i) => (
                     <div key={i} className="rounded-xl border border-amber-100 bg-white px-3 py-2.5">
                       <p className="text-xs font-medium text-amber-800">
-                        Row {s.row}: {s.reason}
+                        {s.row !== undefined ? `Row ${s.row}` : s.file}: {s.reason}
                       </p>
                     </div>
                   ))}
@@ -226,7 +228,7 @@ export const CertificatePreview = () => {
                   {uploadResult.errors.map((e, i) => (
                     <div key={i} className="rounded-xl border border-red-100 bg-white px-3 py-2.5">
                       <p className="text-xs font-medium text-red-700">
-                        Row {e.row} — {e.field}: {e.error}
+                        {e.row !== undefined && `Row ${e.row} — `}{e.field && `${e.field}: `}{e.error || (typeof e === 'string' ? e : JSON.stringify(e))}
                       </p>
                     </div>
                   ))}
