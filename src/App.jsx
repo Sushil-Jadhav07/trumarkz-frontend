@@ -45,7 +45,7 @@ import SelectIndustry from '@/pages/org/SelectIndustry';
 import SelectVerifications from '@/pages/org/SelectVerifications';
 import DownloadTemplate from '@/pages/org/DownloadTemplate';
 import CostBreakdown from '@/pages/org/CostBreakdown';
-import CertificatePreview from '@/pages/org/CertificatePreview';
+// import CertificatePreview from '@/pages/org/CertificatePreview';
 import CreateBatch from '@/pages/org/CreateBatch';
 import BatchStatus from '@/pages/org/BatchStatus';
 import RecordDetail from '@/pages/org/RecordDetail';
@@ -55,19 +55,19 @@ import SelectProductVerifications from '@/pages/org/SelectProductVerifications';
 import SelectProductService from '@/pages/org/SelectProductService';
 import ProductTemplate from '@/pages/org/ProductTemplate';
 import ProductCostBreakdown from '@/pages/org/ProductCostBreakdown';
-import ProductCertificatePreview from '@/pages/org/ProductCertificatePreview';
+// import ProductCertificatePreview from '@/pages/org/ProductCertificatePreview';
 import QRScanner from '@/pages/qr/QRScanner';
 import VerificationResult from '@/pages/qr/VerificationResult';
 import ReportsList from '@/pages/qr/ReportsList';
 import ReportView from '@/pages/qr/ReportView';
-import RegistryHome from '@/pages/marketplace/RegistryHome';
-import SearchResults from '@/pages/marketplace/SearchResults';
-import MarketplaceRecordDetail from '@/pages/marketplace/RecordDetail';
-import SelectDocuments from '@/pages/marketplace/SelectDocuments';
-import Payment from '@/pages/marketplace/Payment';
-import DownloadDocuments from '@/pages/marketplace/DownloadDocuments';
-import BlockchainRecord from '@/pages/marketplace/BlockchainRecord';
-import PurchaseHistory from '@/pages/marketplace/PurchaseHistory';
+// import RegistryHome from '@/pages/marketplace/RegistryHome';
+// import SearchResults from '@/pages/marketplace/SearchResults';
+// import MarketplaceRecordDetail from '@/pages/marketplace/RecordDetail';
+// import SelectDocuments from '@/pages/marketplace/SelectDocuments';
+// import Payment from '@/pages/marketplace/Payment';
+// import DownloadDocuments from '@/pages/marketplace/DownloadDocuments';
+// import BlockchainRecord from '@/pages/marketplace/BlockchainRecord';
+// import PurchaseHistory from '@/pages/marketplace/PurchaseHistory';
 import Profile from '@/pages/account/Profile';
 import Notifications from '@/pages/account/Notifications';
 import Wallet from '@/pages/account/Wallet';
@@ -167,7 +167,7 @@ const AnimatedRoutes = () => {
           <Route path="/org/permissions" element={<PermissionSettings />} />
           <Route path="/org/template" element={<DownloadTemplate />} />
           <Route path="/org/costing" element={<CostBreakdown />} />
-          <Route path="/org/certificate-preview" element={<CertificatePreview />} />
+          {/* <Route path="/org/certificate-preview" element={<CertificatePreview />} /> */}
           <Route path="/org/create-batch" element={<CreateBatch />} />
           <Route path="/org/batch-status" element={<ProtectedRoute><BatchStatus /></ProtectedRoute>} />
           <Route path="/org/record/:id" element={<RecordDetail />} />
@@ -178,7 +178,7 @@ const AnimatedRoutes = () => {
           <Route path="/org/product/service" element={<SelectProductService />} />
           <Route path="/org/product/template" element={<ProductTemplate />} />
           <Route path="/org/product/costing" element={<ProductCostBreakdown />} />
-          <Route path="/org/product/certificate-preview" element={<ProductCertificatePreview />} />
+          {/* <Route path="/org/product/certificate-preview" element={<ProductCertificatePreview />} /> */}
           <Route path="/org/product/warranty" element={<ProtectedRoute><ProductWarrantyUpload /></ProtectedRoute>} />
           {/* ── QR routes ── */}
           <Route path="/qr/scan" element={<QRScanner />} />
@@ -186,7 +186,7 @@ const AnimatedRoutes = () => {
           <Route path="/qr/reports" element={<ReportsList />} />
           <Route path="/qr/report/:id" element={<ReportView />} />
 
-          {/* ── Marketplace routes ── */}
+          {/* ── Marketplace routes (removed) ──
           <Route path="/marketplace" element={<RegistryHome />} />
           <Route path="/marketplace/results" element={<SearchResults />} />
           <Route path="/marketplace/record/:id" element={<MarketplaceRecordDetail />} />
@@ -195,6 +195,7 @@ const AnimatedRoutes = () => {
           <Route path="/marketplace/download" element={<DownloadDocuments />} />
           <Route path="/marketplace/blockchain" element={<BlockchainRecord />} />
           <Route path="/marketplace/history" element={<PurchaseHistory />} />
+          */}
 
           {/* ── Account routes ── */}
           <Route path="/account/profile" element={<Profile />} />

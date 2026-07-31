@@ -13,8 +13,8 @@ export const Support = () => {
   const [ticket, setTicket] = useState({ subject: '', message: '' });
 
   const faqs = [
-    { id: 1, question: 'How do I create a verification batch?', answer: 'Go to Dashboard → New Verification → Select Industry → Choose Verifications → Download Template → Upload Data → Submit Batch.' },
-    { id: 2, question: 'What is the cost per verification?', answer: 'Verification costs vary by type. Identity verification starts at ₹20 per record. View pricing in the marketplace documents section.' },
+    { id: 1, question: 'How do I create a verification batch?', answer: 'Go to Dashboard → New Verification → Select Industry → Choose Verifications → Set Permissions → Download Template → Upload Data → Confirm Costing. The batch is created automatically once you confirm the cost — no separate submit step.' },
+    { id: 2, question: 'What is the cost per verification?', answer: 'Verification costs vary by type. Identity verification starts at ₹20 per record. You’ll see the full cost breakdown on the Costing step before you confirm and create the batch.' },
     { id: 3, question: 'How does blockchain securing work?', answer: 'Once a verification is complete, a cryptographic hash of the record is stored on the Polygon blockchain, creating an immutable, timestamped proof.' },
     { id: 4, question: 'Can I share credentials externally?', answer: 'Yes, generated credentials can be shared via WhatsApp, Email, direct link, or by downloading the QR code.' }
   ];

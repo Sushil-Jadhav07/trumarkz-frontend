@@ -9,7 +9,7 @@ import { ProgressBar } from '@/components/ui/ProgressBar';
 import { useAuth } from '@/context/AuthContext';
 import { authAPI, verificationAPI, getApiError } from '@/services/api';
 import {
-  Layers, Award, BarChart2, Store, ArrowRight,
+  Layers, Award, BarChart2, ArrowRight,
   Clock, CheckCircle, TrendingUp, Users, Shield, Globe, Lock, Zap, Briefcase
 } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -170,7 +170,6 @@ export const OrgDashboard = () => {
     { label: 'New Verification', icon: Shield, path: '/org/industry', color: 'bg-brand-blue text-white' },
     { label: 'Create Credential', icon: Award, path: '/credential/template', color: 'bg-brand-dark text-white' },
     { label: 'View Reports', icon: BarChart2, path: '/qr/reports', color: 'bg-green-500 text-white' },
-    { label: 'Blockchain Registry', icon: Store, path: '/marketplace', color: 'bg-brand-blue text-white' }
   ];
 
   const howItWorks = [

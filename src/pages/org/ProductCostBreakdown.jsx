@@ -12,6 +12,7 @@ import {
   PRODUCT_VERIFICATION_STEPS,
   PRODUCT_VERIFICATION_STEP_META,
   PRODUCT_VERIFICATION_STEP_ROUTES,
+  PRODUCT_CERTIFICATE_TEMPLATES,
 } from '@/data/productVerificationFlow';
 import { verificationAPI, getApiError } from '@/services/api';
 
@@ -23,6 +24,7 @@ export const ProductCostBreakdown = () => {
     selectedProductSector,
     selectedProductVerifications,
     selectedProductService,
+    selectedProductTemplate,
     productBatchData,
     setProductBatchData,
   } = useApp();
@@ -30,6 +32,11 @@ export const ProductCostBreakdown = () => {
   const [agreed, setAgreed] = useState(Boolean(productBatchData?.costConfirmed));
   const [allTypes, setAllTypes] = useState([]);
   const [typesLoading, setTypesLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+
+  const isWarranty = selectedProductService?.id === 'warranty';
+  const activeTemplate = selectedProductTemplate || PRODUCT_CERTIFICATE_TEMPLATES[0].id;
+  const credentialVisibility = isWarranty ? 'private' : 'public';
 
   useEffect(() => {
     if (!productBatchData?.file || !productBatchData?.recordCount) {
@@ -98,13 +105,77 @@ export const ProductCostBreakdown = () => {
   const recordCount = productBatchData?.recordCount || 0;
   const totalCost = selectedChecks.reduce((sum, item) => sum + ((item.price || 0) * recordCount), 0);
 
-  const handleContinue = () => {
+  const handleContinue = async () => {
     if (!agreed) {
       toast.error('Confirm the total cost before continuing');
       return;
     }
     setProductBatchData((current) => ({ ...(current || {}), costConfirmed: true }));
-    navigate('/org/product/certificate-preview');
+
+    if (!productBatchData?.file) {
+      toast.error('Upload the completed Excel file again');
+      navigate('/org/product/template');
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      if (isWarranty) {
+        const warrantyDocs = (productBatchData.docEntries || []).filter(
+          (e) => e.productName?.trim() && e.label && e.file
+        );
+        const { data } = await verificationAPI.uploadWarrantyExcel(
+          productBatchData.file,
+          productBatchData.batchName.trim(),
+          productBatchData.description || '',
+          {
+            docProductNames: warrantyDocs.map((e) => e.productName.trim()),
+            docLabels:       warrantyDocs.map((e) => e.label),
+            docFiles:        warrantyDocs.map((e) => e.file),
+          }
+        );
+        setProductBatchData((current) => ({
+          ...(current || {}),
+          uploadResponse: data,
+          isWarranty: true,
+        }));
+        toast.success('Warranty batch submitted — pending admin review');
+        navigate('/org/batch-status');
+        return;
+      }
+
+      const validDocs = (productBatchData.docEntries || []).filter(
+        (e) => e.productName?.trim() && e.label && e.file
+      );
+      const { data } = await verificationAPI.bulkUploadProducts(
+        productBatchData.file,
+        productBatchData.batchName.trim(),
+        selectedProductSector.title,
+        productBatchData.description || '',
+        {
+          verificationTypes: selectedProductVerifications,
+          credentialVisibility,
+          templateId: activeTemplate,
+          docProductNames: validDocs.map((e) => e.productName.trim()),
+          docLabels:       validDocs.map((e) => e.label),
+          docFiles:        validDocs.map((e) => e.file),
+        }
+      );
+
+      setProductBatchData((current) => ({
+        ...(current || {}),
+        selectedProductTemplate: activeTemplate,
+        uploadResponse: data,
+        isWarranty: false,
+      }));
+
+      toast.success('Product batch created successfully');
+      navigate('/org/batch-status');
+    } catch (error) {
+      toast.error(getApiError(error, isWarranty ? 'Failed to submit warranty batch' : 'Failed to create product batch'));
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -207,10 +278,10 @@ export const ProductCostBreakdown = () => {
             <div className="mt-4 rounded-2xl bg-blue-50 px-4 py-4">
               <div className="flex items-center gap-2 text-sm text-brand-blue">
                 <CheckSquare size={16} />
-                <span className="font-medium">Ready for certificate preview</span>
+                <span className="font-medium">Ready to create batch</span>
               </div>
               <p className="mt-2 text-xs leading-5 text-slate-500">
-                Next step lets you choose the product certificate design before the batch is created.
+                Continuing creates the batch using the default certificate design.
               </p>
             </div>
 
@@ -220,10 +291,10 @@ export const ProductCostBreakdown = () => {
                 size="lg"
                 className="w-full"
                 onClick={handleContinue}
-                icon={ArrowRight}
-                disabled={!agreed || recordCount <= 0}
+                icon={submitting ? RefreshCw : ArrowRight}
+                disabled={!agreed || recordCount <= 0 || submitting}
               >
-                Continue
+                {submitting ? 'Creating Batch...' : isWarranty ? 'Submit Warranty Batch' : 'Continue'}
               </Button>
             </div>
           </Card>

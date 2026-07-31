@@ -10,8 +10,13 @@ import { StepWizard } from '@/components/ui/StepWizard';
 import { useApp } from '@/context/AppContext';
 import { HUMAN_VERIFICATION_STEPS, HUMAN_VERIFICATION_STEP_META, HUMAN_VERIFICATION_STEP_ROUTES } from '@/data/humanVerificationFlow';
 import { verificationAPI, getApiError } from '@/services/api';
+import { getIndustryTypeList } from '@/utils/verificationFlow';
 
 const formatCurrency = (value) => `₹${Number(value).toLocaleString('en-IN')}`;
+
+// Default certificate design used since the template-picker step was removed
+// from this flow — matches CERTIFICATE_TEMPLATES[0] in CertificatePreview.jsx.
+const DEFAULT_HUMAN_TEMPLATE = 'classic-blue';
 
 export const CostBreakdown = () => {
   const navigate = useNavigate();
@@ -19,12 +24,14 @@ export const CostBreakdown = () => {
     batchEntityType,
     selectedIndustry,
     selectedVerifications,
+    selectedPermission,
     batchData,
     setBatchData,
   } = useApp();
   const [agreed,      setAgreed]      = useState(Boolean(batchData?.costConfirmed));
   const [allTypes,    setAllTypes]    = useState([]);
   const [typesLoading, setTypesLoading] = useState(true);
+  const [submitting,  setSubmitting]  = useState(false);
 
   useEffect(() => {
     // Excel path defers batch creation to Preview (batchData.file is enough
@@ -71,7 +78,7 @@ export const CostBreakdown = () => {
   const recordCount = batchData?.recordCount || 0;
   const totalCost   = selectedChecks.reduce((sum, item) => sum + ((item.price || 0) * recordCount), 0);
 
-  const handleContinue = () => {
+  const handleContinue = async () => {
     if (!agreed) {
       toast.error('Confirm the total cost before continuing');
       return;
@@ -82,7 +89,44 @@ export const CostBreakdown = () => {
       costConfirmed: true,
     }));
 
-    navigate('/org/certificate-preview');
+    // OCR document path already created the batch at the Template step.
+    if (batchData?.uploadResponse) {
+      navigate('/org/batch-status');
+      return;
+    }
+
+    if (!batchData?.file) {
+      toast.error('Upload the completed Excel file again');
+      navigate('/org/template');
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const { data } = await verificationAPI.bulkUpload(
+        batchData.file,
+        batchData.batchName.trim(),
+        batchData.description || '',
+        {
+          industryType: getIndustryTypeList(selectedIndustry),
+          verificationTypes: selectedVerifications.join(','),
+          credentialVisibility: selectedPermission || 'private',
+        }
+      );
+
+      setBatchData((current) => ({
+        ...(current || {}),
+        selectedHumanTemplate: DEFAULT_HUMAN_TEMPLATE,
+        uploadResponse: data,
+      }));
+
+      toast.success('Batch created successfully');
+      navigate('/org/batch-status');
+    } catch (error) {
+      toast.error(getApiError(error, 'Failed to create batch'));
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -170,10 +214,10 @@ export const CostBreakdown = () => {
             <div className="mt-4 rounded-2xl bg-blue-50 px-4 py-4">
               <div className="flex items-center gap-2 text-sm text-brand-blue">
                 <CheckSquare size={16} />
-                <span className="font-medium">Ready for template preview</span>
+                <span className="font-medium">Ready to create batch</span>
               </div>
               <p className="mt-2 text-xs leading-5 text-slate-500">
-                Next step lets you choose the certificate design before the batch is created.
+                Continuing creates the batch using the default certificate design.
               </p>
             </div>
 
@@ -184,9 +228,9 @@ export const CostBreakdown = () => {
                 className="w-full"
                 onClick={handleContinue}
                 icon={ArrowRight}
-                disabled={!agreed || recordCount <= 0}
+                disabled={!agreed || recordCount <= 0 || submitting}
               >
-                Continue
+                {submitting ? 'Creating Batch...' : 'Continue'}
               </Button>
             </div>
           </Card>

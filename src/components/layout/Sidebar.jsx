@@ -3,7 +3,7 @@ import { useAuth } from '@/context/AuthContext';
 import { Logo } from '@/components/ui/Logo';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
-  LayoutDashboard, Layers, Award, Store,
+  LayoutDashboard, Layers, Award,
   Wallet, HelpCircle, User, LogOut, ChevronLeft, ChevronRight,
   GitBranch, Share2, Building2,
   ShieldCheck, UserCog, UserSearch,
@@ -28,7 +28,6 @@ export const Sidebar = ({ collapsed, onToggle, mobileOpen = false, onMobileClose
       return [
         { path: '/org/dashboard', label: 'Dashboard', icon: LayoutDashboard },
         { path: '/org/batch-status', label: 'Batches', icon: Layers },
-        { path: '/marketplace', label: 'Registry', icon: Store },
         { path: '/qr/reports', label: 'Certificates', icon: Award },
         { path: '/account/wallet', label: 'Wallet', icon: Wallet },
         { path: '/account/support', label: 'Support', icon: HelpCircle },
@@ -41,7 +40,6 @@ export const Sidebar = ({ collapsed, onToggle, mobileOpen = false, onMobileClose
         { path: '/individual/skill-tree', label: 'My Skill Tree', icon: GitBranch },
         { path: '/individual/credentials', label: 'My Credentials', icon: Award },
         { path: '/individual/share', label: 'Share Profile', icon: Share2 },
-        { path: '/marketplace', label: 'Registry', icon: Store },
         { path: '/account/wallet', label: 'Wallet', icon: Wallet },
         { path: '/account/support', label: 'Support', icon: HelpCircle },
         { path: '/account/profile', label: 'Profile', icon: User }
