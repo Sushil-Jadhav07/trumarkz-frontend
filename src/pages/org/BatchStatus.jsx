@@ -226,7 +226,7 @@ const BatchDetailModal = ({ batchId, batchName, onClose }) => {
     setCertsLoading(true);
     try {
       const orgId   = sdcInfo?.org_id || undefined;
-      const spaceId = sdcInfo?.space_id || user?.dhiwaySpaceId || undefined;
+      const spaceId = sdcInfo?.space_id || user?.humanSpaceId || user?.productSpaceId || user?.warrentySpaceId || undefined;
 
       const allRecords = [];
       let page = 1;
@@ -269,7 +269,7 @@ const BatchDetailModal = ({ batchId, batchName, onClose }) => {
     } finally {
       setCertsLoading(false);
     }
-  }, [user?.dhiwaySpaceId]);
+  }, [user?.humanSpaceId, user?.productSpaceId, user?.warrentySpaceId]);
 
   useEffect(() => {
     if (!batchId) return;

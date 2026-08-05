@@ -5,6 +5,7 @@ import * as XLSX from 'xlsx';
 import { AuthLayout } from '@/components/layout/AuthLayout';
 import { PageHeader } from '@/components/shared/PageHeader';
 import { useApp } from '@/context/AppContext';
+import { useAuth } from '@/context/AuthContext';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
@@ -1138,6 +1139,12 @@ const ProductBulkPanel = ({ categories, onResult, selectedCategory, selectedServ
 export const CreateBatch = () => {
   const navigate = useNavigate();
   const location = useLocation();
+  const { user } = useAuth();
+  // Org already declared what it verifies at registration/profile — skip the
+  // Human/Product picker screen entirely and go straight into that flow.
+  const orgServiceType = user?.serviceType === 'product' || user?.serviceType === 'human'
+    ? user.serviceType
+    : null;
   const flowBatchType = location.state?.batchType || null;
   const flowSubMode = location.state?.subMode || null;
   const {
@@ -1233,6 +1240,14 @@ export const CreateBatch = () => {
     navigate('/org/product/sector');
   };
 
+  // Landing here fresh (not mid-wizard) with a known org service type —
+  // skip straight to that flow instead of showing the Human/Product picker.
+  useEffect(() => {
+    if (batchType || hasVerificationFlow || !orgServiceType) return;
+    if (orgServiceType === 'human') startHumanFlow();
+    else startProductFlow();
+  }, [batchType, hasVerificationFlow, orgServiceType]);
+
   const resetProductStep = () => {
     setSubMode(null);
     setSelectedProductService(null);
@@ -1243,8 +1258,11 @@ export const CreateBatch = () => {
     setSingleResults((prev) => [data, ...prev]);
   };
 
-  // Step 1: Choose batch type
+  // Step 1: Choose batch type (skipped when the org's service type is already known)
   if (!batchType) {
+    if (orgServiceType) {
+      return <AuthLayout title="Create Batch" />;
+    }
     return (
       <AuthLayout title="Create Batch">
         <div className="w-full mx-auto lg:max-w-none">

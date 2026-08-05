@@ -141,13 +141,26 @@ export const authAPI = {
       email: data.email.trim(),
       phone_number: data.phoneNumber ? data.phoneNumber.trim() : undefined,
       password: data.password,
-      dhiway_space_id: data.dhiwaySpaceId ? data.dhiwaySpaceId.trim() : undefined,
+      service_type: data.serviceType || undefined,
+      human_space_id: data.humanSpaceId ? data.humanSpaceId.trim() : undefined,
+      product_space_id: data.productSpaceId ? data.productSpaceId.trim() : undefined,
+      warrenty_space_id: data.warrentySpaceId ? data.warrentySpaceId.trim() : undefined,
     }),
 
-  // PATCH /auth/me/dhiway-space — org saves/updates its own Dhiway space id.
-  // Repeatable: call again any time to change it. Pass '' or null to clear.
-  updateDhiwaySpaceId: (spaceId) =>
-    api.patch('/auth/me/dhiway-space', { dhiway_space_id: spaceId ? spaceId.trim() : null }),
+  // PATCH /auth/me/service-type — set what the org deals in ('human' or 'product').
+  updateServiceType: (serviceType) =>
+    api.patch('/auth/me/service-type', { service_type: serviceType }),
+
+  // PATCH /auth/me/dhiway-space — org saves/updates its per-kind space ids
+  // (human_space_id, product_space_id, warrenty_space_id). Only keys present
+  // in `data` are sent, so omit a key to leave it untouched; pass '' to clear it.
+  updateSpaceIds: (data = {}) => {
+    const payload = {};
+    if ('humanSpaceId' in data) payload.human_space_id = data.humanSpaceId ? data.humanSpaceId.trim() : null;
+    if ('productSpaceId' in data) payload.product_space_id = data.productSpaceId ? data.productSpaceId.trim() : null;
+    if ('warrentySpaceId' in data) payload.warrenty_space_id = data.warrentySpaceId ? data.warrentySpaceId.trim() : null;
+    return api.patch('/auth/me/dhiway-space', payload);
+  },
 
   signupIndividual: (data) =>
     api.post('/auth/signup/individual', {
@@ -607,9 +620,9 @@ export const verificationAPI = {
 export const sdcAPI = {
   // POST /sdc/batches/{batch_id}/generate — create + auto-issue in one call.
   // Body is normally just {publish, active}. org_id is fixed backend-side and
-  // must NEVER be sent. space_id normally comes from the org's own
-  // dhiway_space_id (set via authAPI.updateDhiwaySpaceId, falling back to a
-  // config default) and schema_id resolves from the batch's industry — both
+  // must NEVER be sent. space_id normally comes from the org's own per-kind
+  // space id (set via authAPI.updateSpaceIds, falling back to a config
+  // default) and schema_id resolves from the batch's industry — both
   // can optionally be passed here to override that resolution, but that's a
   // testing-only escape hatch, not part of the normal admin flow.
   generateBatchSDC: (batchId, payload = {}) =>

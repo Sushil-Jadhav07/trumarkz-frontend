@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/Input';
 import { StepWizard } from '@/components/ui/StepWizard';
 import { Card } from '@/components/ui/Card';
 import { Building2, Mail, Phone, Lock, ArrowLeft, ArrowRight, ChevronDown } from 'lucide-react';
+import { SERVICE_TYPE_OPTIONS } from '@/data/serviceTypeOptions';
 import toast from 'react-hot-toast';
 
 export const OrgRegistration = () => {
@@ -19,7 +20,10 @@ export const OrgRegistration = () => {
     phoneNumber: '',
     password: '',
     confirmPassword: '',
-    dhiwaySpaceId: '', // optional, only for orgs that already have a Dhiway space
+    serviceType: '', // 'human' | 'product'
+    humanSpaceId: '', // optional, only for orgs that already have a space
+    productSpaceId: '', // optional, only for orgs that already have a space
+    warrentySpaceId: '', // optional, only for orgs that already have a space
   });
   const [errors, setErrors] = useState({});
   const [submitting, setSubmitting] = useState(false);
@@ -36,6 +40,7 @@ export const OrgRegistration = () => {
     if (!form.password) newErrors.password = 'Password is required';
     else if (form.password.length < 8) newErrors.password = 'Minimum 8 characters';
     if (form.confirmPassword !== form.password) newErrors.confirmPassword = 'Passwords do not match';
+    if (!form.serviceType) newErrors.serviceType = 'Select what your organization verifies';
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -126,6 +131,34 @@ export const OrgRegistration = () => {
               icon={Lock}
             />
 
+            <div>
+              <label className="block text-sm font-medium text-brand-dark font-inter mb-1.5">
+                What does your organization verify?
+              </label>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {SERVICE_TYPE_OPTIONS.map(({ value, label, description, icon: Icon }) => {
+                  const selected = form.serviceType === value;
+                  return (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => updateField('serviceType', value)}
+                      className={`text-left rounded-xl border-2 p-4 transition-all duration-200 ${
+                        selected ? 'border-brand-blue bg-brand-blue/5' : 'border-gray-200 hover:border-gray-300'
+                      }`}
+                    >
+                      <Icon size={20} className={selected ? 'text-brand-blue' : 'text-gray-400'} />
+                      <p className="font-sora font-semibold text-sm text-brand-dark mt-2">{label}</p>
+                      <p className="text-xs text-gray-500 font-inter mt-1 leading-relaxed">{description}</p>
+                    </button>
+                  );
+                })}
+              </div>
+              {errors.serviceType && (
+                <p className="text-xs text-red-500 font-inter mt-1.5">{errors.serviceType}</p>
+              )}
+            </div>
+
             <button
               type="button"
               onClick={() => setShowAdvanced((v) => !v)}
@@ -136,12 +169,37 @@ export const OrgRegistration = () => {
             </button>
 
             {showAdvanced && (
-              <Input
-                label="Dhiway Space ID (optional)"
-                placeholder="Leave blank unless your organization already has one"
-                value={form.dhiwaySpaceId}
-                onChange={e => updateField('dhiwaySpaceId', e.target.value)}
-              />
+              <>
+                {!form.serviceType && (
+                  <p className="text-xs text-gray-400 font-inter">
+                    Select a verification type above to set an existing space ID.
+                  </p>
+                )}
+                {form.serviceType === 'human' && (
+                  <Input
+                    label="Human Space ID (optional)"
+                    placeholder="Leave blank unless your organization already has one"
+                    value={form.humanSpaceId}
+                    onChange={e => updateField('humanSpaceId', e.target.value)}
+                  />
+                )}
+                {form.serviceType === 'product' && (
+                  <>
+                    <Input
+                      label="Product Space ID (optional)"
+                      placeholder="Leave blank unless your organization already has one"
+                      value={form.productSpaceId}
+                      onChange={e => updateField('productSpaceId', e.target.value)}
+                    />
+                    <Input
+                      label="Warranty Space ID (optional)"
+                      placeholder="Leave blank unless your organization already has one"
+                      value={form.warrentySpaceId}
+                      onChange={e => updateField('warrentySpaceId', e.target.value)}
+                    />
+                  </>
+                )}
+              </>
             )}
 
             <Button type="submit" variant="primary" size="lg" className="w-full" disabled={submitting}>

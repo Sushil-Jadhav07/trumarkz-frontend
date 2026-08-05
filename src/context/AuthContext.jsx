@@ -81,7 +81,10 @@ export const AuthProvider = ({ children }) => {
       addressLine3: data.address_line3,
       useCases: data.use_cases,
       createdAt: data.created_at,
-      dhiwaySpaceId: data.dhiway_space_id || '',
+      serviceType: data.service_type || '',
+      humanSpaceId: data.human_space_id || '',
+      productSpaceId: data.product_space_id || '',
+      warrentySpaceId: data.warrenty_space_id || '',
     };
   }, []);
 
