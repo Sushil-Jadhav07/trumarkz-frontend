@@ -84,7 +84,9 @@ export const AuthProvider = ({ children }) => {
       serviceType: data.service_type || '',
       humanSpaceId: data.human_space_id || '',
       productSpaceId: data.product_space_id || '',
-      warrentySpaceId: data.warrenty_space_id || '',
+      // Backend field is spelled "warrenty_space_id" (confirmed live) — kept
+      // as warrantySpaceId in JS for readability, mapped from the typo'd key.
+      warrantySpaceId: data.warrenty_space_id || '',
     };
   }, []);
 

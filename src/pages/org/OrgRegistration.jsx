@@ -8,6 +8,7 @@ import { StepWizard } from '@/components/ui/StepWizard';
 import { Card } from '@/components/ui/Card';
 import { Building2, Mail, Phone, Lock, ArrowLeft, ArrowRight, ChevronDown } from 'lucide-react';
 import { SERVICE_TYPE_OPTIONS } from '@/data/serviceTypeOptions';
+import { ID_FIELDS_BY_SERVICE_TYPE } from '@/data/spaceSchemaFields';
 import toast from 'react-hot-toast';
 
 export const OrgRegistration = () => {
@@ -21,9 +22,9 @@ export const OrgRegistration = () => {
     password: '',
     confirmPassword: '',
     serviceType: '', // 'human' | 'product'
-    humanSpaceId: '', // optional, only for orgs that already have a space
-    productSpaceId: '', // optional, only for orgs that already have a space
-    warrentySpaceId: '', // optional, only for orgs that already have a space
+    humanSpaceId: '', // optional, only for orgs that already have one
+    productSpaceId: '', // optional, only for orgs that already have one
+    warrantySpaceId: '', // optional, only for orgs that already have one
   });
   const [errors, setErrors] = useState({});
   const [submitting, setSubmitting] = useState(false);
@@ -175,30 +176,15 @@ export const OrgRegistration = () => {
                     Select a verification type above to set an existing space ID.
                   </p>
                 )}
-                {form.serviceType === 'human' && (
+                {(ID_FIELDS_BY_SERVICE_TYPE[form.serviceType] || []).map(({ key, label }) => (
                   <Input
-                    label="Human Space ID (optional)"
+                    key={key}
+                    label={`${label} (optional)`}
                     placeholder="Leave blank unless your organization already has one"
-                    value={form.humanSpaceId}
-                    onChange={e => updateField('humanSpaceId', e.target.value)}
+                    value={form[key]}
+                    onChange={e => updateField(key, e.target.value)}
                   />
-                )}
-                {form.serviceType === 'product' && (
-                  <>
-                    <Input
-                      label="Product Space ID (optional)"
-                      placeholder="Leave blank unless your organization already has one"
-                      value={form.productSpaceId}
-                      onChange={e => updateField('productSpaceId', e.target.value)}
-                    />
-                    <Input
-                      label="Warranty Space ID (optional)"
-                      placeholder="Leave blank unless your organization already has one"
-                      value={form.warrentySpaceId}
-                      onChange={e => updateField('warrentySpaceId', e.target.value)}
-                    />
-                  </>
-                )}
+                ))}
               </>
             )}
 

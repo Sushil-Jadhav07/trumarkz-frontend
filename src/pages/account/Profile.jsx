@@ -12,6 +12,7 @@ import {
   Calendar, Hash, Briefcase, Pencil, X, Database, Layers,
 } from 'lucide-react';
 import { SERVICE_TYPE_OPTIONS } from '@/data/serviceTypeOptions';
+import { ID_FIELDS_BY_SERVICE_TYPE } from '@/data/spaceSchemaFields';
 import toast from 'react-hot-toast';
 
 const roleLabels = {
@@ -36,15 +37,6 @@ const normalizeIndustryList = (value) => {
 
 const SERVICE_TYPE_LABELS = Object.fromEntries(SERVICE_TYPE_OPTIONS.map((o) => [o.value, o.label]));
 
-// Which space id field(s) are relevant depends on what the org verifies.
-const SPACE_ID_FIELDS = {
-  human: [{ key: 'humanSpaceId', label: 'Human Space ID' }],
-  product: [
-    { key: 'productSpaceId', label: 'Product Space ID' },
-    { key: 'warrentySpaceId', label: 'Warranty Space ID' },
-  ],
-};
-
 const DetailRow = ({ icon: Icon, label, value, hint }) => (
   <div className="flex items-start gap-3">
     <div className="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center shrink-0 mt-0.5">
@@ -58,27 +50,59 @@ const DetailRow = ({ icon: Icon, label, value, hint }) => (
   </div>
 );
 
+const FieldInput = ({ icon: Icon, label, value, onChange, placeholder, disabled }) => (
+  <div>
+    <label className="block text-xs font-medium text-gray-500 font-inter mb-1">{label}</label>
+    <div className="relative">
+      {Icon && <Icon size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />}
+      <input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        disabled={disabled}
+        placeholder={placeholder}
+        className={`w-full h-9 rounded-lg border border-gray-200 ${Icon ? 'pl-8' : 'pl-3'} pr-3 text-sm font-inter text-brand-dark bg-white disabled:bg-gray-50 disabled:text-gray-500 focus:outline-none focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/10 transition-all`}
+      />
+    </div>
+  </div>
+);
+
+// One Edit button puts every editable field in this card into edit mode at
+// once; it's replaced by Save/Cancel while editing, so a single Save commits
+// everything changed. Only Service Type + Space ID(s) are wired to a real
+// backend endpoint (PATCH /auth/me/service-type, PATCH /auth/me/dhiway-space)
+// — there is currently no endpoint to save name/phone/GSTIN/business reg
+// number/address, so those stay read-only. Don't add editing for them
+// without a confirmed live endpoint (PATCH /auth/me does not exist yet).
+const CardEditControl = ({ isEditing, saving, onEdit, onSave, onCancel }) =>
+  isEditing ? (
+    <div className="flex gap-2 shrink-0">
+      <Button variant="primary" size="sm" icon={Save} loading={saving} onClick={onSave}>Save</Button>
+      <Button variant="outline" size="sm" icon={X} disabled={saving} onClick={onCancel}>Cancel</Button>
+    </div>
+  ) : (
+    <button
+      type="button"
+      onClick={onEdit}
+      className="flex shrink-0 items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-semibold font-inter text-brand-blue hover:bg-blue-50 transition-colors"
+    >
+      <Pencil size={12} /> Edit
+    </button>
+  );
+
 export const Profile = () => {
   const { user, loading, updateUserProfile, refreshUser, role } = useAuth();
   const [refreshing, setRefreshing] = useState(false);
   const [organizationIndustry, setOrganizationIndustry] = useState(() => normalizeIndustryList(user?.industryType));
 
-  // Space IDs are the only profile fields with a real backend endpoint
-  // (PATCH /auth/me/dhiway-space) — each gets its own small scoped edit
-  // control rather than a whole-page edit mode, since nothing else here can
-  // actually be saved (there's no endpoint to update name/phone/avatar).
-  const [editingSpaceField, setEditingSpaceField] = useState(null);
-  const [spaceIdDraft, setSpaceIdDraft] = useState('');
-  const [savingSpaceId, setSavingSpaceId] = useState(false);
-
-  // Service type drives which space id field(s) show below it — editable via
-  // PATCH /auth/me/service-type, same scoped inline-edit pattern as space ids.
-  const [editingServiceType, setEditingServiceType] = useState(false);
-  const [serviceTypeDraft, setServiceTypeDraft] = useState('');
-  const [savingServiceType, setSavingServiceType] = useState(false);
-
   const isOrg = role === 'organization';
-  const spaceIdFields = SPACE_ID_FIELDS[user?.serviceType] || [];
+
+  // Organization Details card — Service Type + Space ID(s) are the only
+  // fields with a real backend endpoint, so they're the only editable ones.
+  const [editingOrg, setEditingOrg] = useState(false);
+  const [orgDraft, setOrgDraft] = useState({ serviceType: '', humanSpaceId: '', productSpaceId: '', warrantySpaceId: '' });
+  const [savingOrg, setSavingOrg] = useState(false);
+
+  const idFields = ID_FIELDS_BY_SERVICE_TYPE[editingOrg ? orgDraft.serviceType : user?.serviceType] || [];
 
   useEffect(() => {
     let mounted = true;
@@ -112,53 +136,48 @@ export const Profile = () => {
   const roleLabel = roleLabels[user?.role] || user?.role || 'Account';
   const roleColor = roleColors[user?.role] || 'bg-gray-100 text-gray-600';
 
-  const handleEditSpaceId = (key) => {
-    setSpaceIdDraft(user?.[key] || '');
-    setEditingSpaceField(key);
+  const startEditOrg = () => {
+    setOrgDraft({
+      serviceType: user?.serviceType || '',
+      humanSpaceId: user?.humanSpaceId || '',
+      productSpaceId: user?.productSpaceId || '',
+      warrantySpaceId: user?.warrantySpaceId || '',
+    });
+    setEditingOrg(true);
   };
+  const cancelOrg = () => setEditingOrg(false);
+  const updateOrgDraft = (key, value) => setOrgDraft((prev) => ({ ...prev, [key]: value }));
 
-  const handleCancelSpaceId = () => setEditingSpaceField(null);
-
-  const handleSaveSpaceId = async () => {
-    const key = editingSpaceField;
-    const label = spaceIdFields.find((f) => f.key === key)?.label || 'Space ID';
-    setSavingSpaceId(true);
+  const saveOrg = async () => {
+    setSavingOrg(true);
     try {
-      const value = spaceIdDraft.trim();
-      await authAPI.updateSpaceIds({ [key]: value });
-      updateUserProfile({ [key]: value });
-      setEditingSpaceField(null);
-      toast.success(`${label} updated`);
+      const calls = [];
+      const updates = {};
+
+      if (orgDraft.serviceType && orgDraft.serviceType !== user?.serviceType) {
+        calls.push(authAPI.updateServiceType(orgDraft.serviceType));
+        updates.serviceType = orgDraft.serviceType;
+      }
+
+      const idFieldsForDraft = ID_FIELDS_BY_SERVICE_TYPE[orgDraft.serviceType] || [];
+      if (idFieldsForDraft.length) {
+        const idPayload = {};
+        idFieldsForDraft.forEach(({ key }) => {
+          const value = orgDraft[key].trim();
+          idPayload[key] = value;
+          updates[key] = value;
+        });
+        calls.push(authAPI.updateSpaceIds(idPayload));
+      }
+
+      await Promise.all(calls);
+      updateUserProfile(updates);
+      setEditingOrg(false);
+      toast.success('Organization details updated');
     } catch (err) {
-      toast.error(getApiError(err, `Failed to update ${label}`));
+      toast.error(getApiError(err, 'Failed to save changes'));
     } finally {
-      setSavingSpaceId(false);
-    }
-  };
-
-  const handleEditServiceType = () => {
-    setServiceTypeDraft(user?.serviceType || '');
-    setEditingServiceType(true);
-  };
-
-  const handleCancelServiceType = () => setEditingServiceType(false);
-
-  const handleSaveServiceType = async () => {
-    if (!serviceTypeDraft || serviceTypeDraft === user?.serviceType) {
-      setEditingServiceType(false);
-      return;
-    }
-    setSavingServiceType(true);
-    try {
-      await authAPI.updateServiceType(serviceTypeDraft);
-      updateUserProfile({ serviceType: serviceTypeDraft });
-      setEditingServiceType(false);
-      setEditingSpaceField(null); // stale key from the old type's field list
-      toast.success('Service type updated');
-    } catch (err) {
-      toast.error(getApiError(err, 'Failed to update service type'));
-    } finally {
-      setSavingServiceType(false);
+      setSavingOrg(false);
     }
   };
 
@@ -174,6 +193,8 @@ export const Profile = () => {
   const memberSince = user?.createdAt
     ? new Date(user.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric' })
     : null;
+
+  const addressValue = [user?.addressLine1, user?.addressLine2, user?.addressLine3].filter(Boolean).join(', ');
 
   return (
     <AuthLayout title="Profile">
@@ -250,29 +271,38 @@ export const Profile = () => {
             {/* Organization details */}
             {isOrg && (
               <Card className="p-6">
-                <div className="flex items-center gap-2 mb-5">
-                  <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center">
-                    <Building2 size={15} className="text-brand-blue" />
+                <div className="flex items-center justify-between gap-3 mb-5">
+                  <div className="flex items-center gap-2">
+                    <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center">
+                      <Building2 size={15} className="text-brand-blue" />
+                    </div>
+                    <div>
+                      <h3 className="font-sora font-bold text-brand-dark">Organization Details</h3>
+                      <p className="text-xs text-gray-400 font-inter mt-0.5">Registered business information</p>
+                    </div>
                   </div>
-                  <div>
-                    <h3 className="font-sora font-bold text-brand-dark">Organization Details</h3>
-                    <p className="text-xs text-gray-400 font-inter mt-0.5">Registered business information</p>
-                  </div>
+                  <CardEditControl
+                    isEditing={editingOrg}
+                    saving={savingOrg}
+                    onEdit={startEditOrg}
+                    onSave={saveOrg}
+                    onCancel={cancelOrg}
+                  />
                 </div>
 
                 <div className="space-y-4">
-                  {editingServiceType ? (
+                  {editingOrg ? (
                     <div>
                       <label className="block text-xs font-medium text-gray-500 font-inter mb-1">Service Type</label>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                         {SERVICE_TYPE_OPTIONS.map(({ value, label, icon: Icon }) => {
-                          const selected = serviceTypeDraft === value;
+                          const selected = orgDraft.serviceType === value;
                           return (
                             <button
                               key={value}
                               type="button"
-                              disabled={savingServiceType}
-                              onClick={() => setServiceTypeDraft(value)}
+                              disabled={savingOrg}
+                              onClick={() => updateOrgDraft('serviceType', value)}
                               className={`flex items-center gap-2 rounded-lg border-2 px-3 py-2 text-left transition-all duration-200 disabled:opacity-50 ${
                                 selected ? 'border-brand-blue bg-brand-blue/5' : 'border-gray-200 hover:border-gray-300'
                               }`}
@@ -286,71 +316,29 @@ export const Profile = () => {
                       <p className="text-[11px] text-gray-400 font-inter mt-1.5">
                         Determines which space id field(s) below apply to your organization.
                       </p>
-                      <div className="mt-2.5 flex gap-2">
-                        <Button variant="primary" size="sm" icon={Save} loading={savingServiceType} onClick={handleSaveServiceType}>
-                          Save
-                        </Button>
-                        <Button variant="outline" size="sm" icon={X} disabled={savingServiceType} onClick={handleCancelServiceType}>
-                          Cancel
-                        </Button>
-                      </div>
                     </div>
                   ) : (
-                    <div className="flex items-start justify-between gap-3">
-                      <DetailRow
-                        icon={Layers}
-                        label="Service Type"
-                        value={SERVICE_TYPE_LABELS[user?.serviceType] || 'Not set'}
-                      />
-                      <button
-                        type="button"
-                        onClick={handleEditServiceType}
-                        className="flex shrink-0 items-center gap-1 rounded-lg px-2 py-1 text-xs font-semibold font-inter text-brand-blue hover:bg-blue-50 transition-colors"
-                      >
-                        <Pencil size={12} /> Edit
-                      </button>
-                    </div>
+                    <DetailRow
+                      icon={Layers}
+                      label="Service Type"
+                      value={SERVICE_TYPE_LABELS[user?.serviceType] || 'Not set'}
+                    />
                   )}
                   <div className="border-t border-gray-50" />
 
-                  {spaceIdFields.map((field) => (
+                  {idFields.map((field) => (
                     <React.Fragment key={field.key}>
-                      {editingSpaceField === field.key ? (
-                        <div>
-                          <label className="block text-xs font-medium text-gray-500 font-inter mb-1">{field.label}</label>
-                          <div className="relative">
-                            <Database size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                            <input
-                              value={spaceIdDraft}
-                              onChange={(e) => setSpaceIdDraft(e.target.value)}
-                              disabled={savingSpaceId}
-                              placeholder="Leave blank unless your organization already has one"
-                              className="w-full h-9 rounded-lg border border-gray-200 pl-8 pr-3 text-sm font-inter text-brand-dark bg-white disabled:bg-gray-50 disabled:text-gray-500 focus:outline-none focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/10 transition-all"
-                            />
-                          </div>
-                          <p className="text-[11px] text-gray-400 font-inter mt-0.5">
-                            Scopes this organization's SDC certificates on Dhiway. Optional.
-                          </p>
-                          <div className="mt-2.5 flex gap-2">
-                            <Button variant="primary" size="sm" icon={Save} loading={savingSpaceId} onClick={handleSaveSpaceId}>
-                              Save
-                            </Button>
-                            <Button variant="outline" size="sm" icon={X} disabled={savingSpaceId} onClick={handleCancelSpaceId}>
-                              Cancel
-                            </Button>
-                          </div>
-                        </div>
+                      {editingOrg ? (
+                        <FieldInput
+                          icon={Database}
+                          label={field.label}
+                          value={orgDraft[field.key]}
+                          onChange={(v) => updateOrgDraft(field.key, v)}
+                          disabled={savingOrg}
+                          placeholder="Leave blank unless your organization already has one"
+                        />
                       ) : (
-                        <div className="flex items-start justify-between gap-3">
-                          <DetailRow icon={Database} label={field.label} value={user?.[field.key] || 'Not set'} />
-                          <button
-                            type="button"
-                            onClick={() => handleEditSpaceId(field.key)}
-                            className="flex shrink-0 items-center gap-1 rounded-lg px-2 py-1 text-xs font-semibold font-inter text-brand-blue hover:bg-blue-50 transition-colors"
-                          >
-                            <Pencil size={12} /> Edit
-                          </button>
-                        </div>
+                        <DetailRow icon={Database} label={field.label} value={user?.[field.key]} />
                       )}
                       <div className="border-t border-gray-50" />
                     </React.Fragment>
@@ -359,17 +347,8 @@ export const Profile = () => {
                   <DetailRow icon={FileText} label="GSTIN" value={user?.gstin} />
                   <div className="border-t border-gray-50" />
                   <DetailRow icon={Hash} label="Business Registration No." value={user?.businessRegNumber} />
-
-                  {(user?.addressLine1 || user?.addressLine2 || user?.addressLine3) && (
-                    <>
-                      <div className="border-t border-gray-50" />
-                      <DetailRow
-                        icon={MapPin}
-                        label="Registered Address"
-                        value={[user.addressLine1, user.addressLine2, user.addressLine3].filter(Boolean).join(', ')}
-                      />
-                    </>
-                  )}
+                  <div className="border-t border-gray-50" />
+                  <DetailRow icon={MapPin} label="Registered Address" value={addressValue} />
 
                   {organizationIndustry.length > 0 && (
                     <>

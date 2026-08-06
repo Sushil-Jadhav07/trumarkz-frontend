@@ -144,7 +144,7 @@ export const authAPI = {
       service_type: data.serviceType || undefined,
       human_space_id: data.humanSpaceId ? data.humanSpaceId.trim() : undefined,
       product_space_id: data.productSpaceId ? data.productSpaceId.trim() : undefined,
-      warrenty_space_id: data.warrentySpaceId ? data.warrentySpaceId.trim() : undefined,
+      warrenty_space_id: data.warrantySpaceId ? data.warrantySpaceId.trim() : undefined,
     }),
 
   // PATCH /auth/me/service-type — set what the org deals in ('human' or 'product').
@@ -152,15 +152,25 @@ export const authAPI = {
     api.patch('/auth/me/service-type', { service_type: serviceType }),
 
   // PATCH /auth/me/dhiway-space — org saves/updates its per-kind space ids
-  // (human_space_id, product_space_id, warrenty_space_id). Only keys present
-  // in `data` are sent, so omit a key to leave it untouched; pass '' to clear it.
-  updateSpaceIds: (data = {}) => {
-    const payload = {};
-    if ('humanSpaceId' in data) payload.human_space_id = data.humanSpaceId ? data.humanSpaceId.trim() : null;
-    if ('productSpaceId' in data) payload.product_space_id = data.productSpaceId ? data.productSpaceId.trim() : null;
-    if ('warrentySpaceId' in data) payload.warrenty_space_id = data.warrentySpaceId ? data.warrentySpaceId.trim() : null;
-    return api.patch('/auth/me/dhiway-space', payload);
-  },
+  // (human_space_id, product_space_id, warrenty_space_id — note the backend's
+  // field is spelled "warrenty", confirmed against the live schema; do not
+  // "fix" this spelling without re-checking the live swagger first). Only
+  // keys present in `data` are sent, so omit a key to leave it untouched;
+  // pass '' to clear it.
+  updateSpaceIds: (() => {
+    const KEY_MAP = {
+      humanSpaceId: 'human_space_id',
+      productSpaceId: 'product_space_id',
+      warrantySpaceId: 'warrenty_space_id',
+    };
+    return (data = {}) => {
+      const payload = {};
+      Object.entries(KEY_MAP).forEach(([jsKey, wireKey]) => {
+        if (jsKey in data) payload[wireKey] = data[jsKey] ? data[jsKey].trim() : null;
+      });
+      return api.patch('/auth/me/dhiway-space', payload);
+    };
+  })(),
 
   signupIndividual: (data) =>
     api.post('/auth/signup/individual', {
