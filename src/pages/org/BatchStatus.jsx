@@ -40,9 +40,40 @@ const getRecordSubtitle = (r) =>
 
 const getRecordKey = (r) => r?.id || r?.user_id || r?.entity_id;
 
+const VERIFIED_RECORD_STATUSES = new Set(['approved', 'verified']);
+const FAILED_RECORD_STATUSES = new Set(['rejected', 'failed']);
+const PENDING_RECORD_STATUSES = new Set([
+  'pending',
+  'pending_verification',
+  'processing',
+  'verification_in_progress',
+  'doc_uploaded',
+  'awaiting_review',
+]);
+
+const classifyRecordStatus = (status) => {
+  const value = String(status || '').trim().toLowerCase();
+  if (VERIFIED_RECORD_STATUSES.has(value)) return 'verified';
+  if (FAILED_RECORD_STATUSES.has(value)) return 'failed';
+  if (!value || PENDING_RECORD_STATUSES.has(value)) return 'pending';
+  return 'pending';
+};
+
+const summarizeRecordCounts = (records = []) => (
+  records.reduce((acc, record) => {
+    const bucket = classifyRecordStatus(record?.verification_status ?? record?.status);
+    acc[bucket] += 1;
+    return acc;
+  }, { verified: 0, failed: 0, pending: 0 })
+);
+
+const hasRenderableRecords = (batch) =>
+  !!batch && (batch.total > 0 || batch.records.length > 0);
+
 const recordStatusBadge = (status) => {
   if (status === 'approved') return { variant: 'success', label: 'Approved' };
-  if (status === 'rejected') return { variant: 'error',   label: 'Rejected' };
+  if (status === 'verified') return { variant: 'success', label: 'Verified' };
+  if (status === 'rejected' || status === 'failed') return { variant: 'error',   label: 'Rejected' };
   return                            { variant: 'pending',  label: 'Pending' };
 };
 
@@ -116,10 +147,15 @@ const PAGE_SIZE = 10;
 const normaliseBatch = (b) => {
   if (!b || typeof b !== 'object') return null;
   const id       = b.batch_id || b.id || '';
-  const total    = Number(b.total_users ?? b.total ?? 0);
-  const verified = Number(b.approved ?? b.approved_count ?? 0);
-  const failed   = Number(b.rejected ?? b.rejected_count ?? 0);
-  const pending  = Math.max(0, total - verified - failed);
+  const records  = Array.isArray(b.users) ? b.users : [];
+  const total    = records.length > 0 ? records.length : Number(b.total_users ?? b.total ?? 0);
+  const summaryVerified = Number(b.approved ?? b.approved_count ?? 0);
+  const summaryFailed   = Number(b.rejected ?? b.rejected_count ?? 0);
+  const hasRecordStatuses = records.some((record) => record?.verification_status != null || record?.status != null);
+  const recordCounts = hasRecordStatuses ? summarizeRecordCounts(records) : null;
+  const verified = recordCounts ? recordCounts.verified : summaryVerified;
+  const failed   = recordCounts ? recordCounts.failed : summaryFailed;
+  const pending  = recordCounts ? recordCounts.pending : Math.max(0, total - verified - failed);
   const status   = b.status || 'pending';
   // Normalise verificationTypes — API may return strings or objects
   const rawTypes = b.verification_types || [];
@@ -139,7 +175,7 @@ const normaliseBatch = (b) => {
     verificationTypes,
     credentialVisibility: b.credential_visibility || '',
     verificationProgress: b.verification_progress || {},
-    records:              Array.isArray(b.users) ? b.users : [],
+    records,
   };
 };
 
@@ -714,7 +750,7 @@ export const BatchStatus = () => {
     try {
       const { data } = await verificationAPI.getBatches();
       const list = extractBatchList(data);
-      setBatches(list.map(normaliseBatch).filter(Boolean));
+      setBatches(list.map(normaliseBatch).filter(hasRenderableRecords));
     } catch (err) {
       toast.error(getApiError(err, 'Failed to fetch batches'));
     } finally {

@@ -17,9 +17,40 @@ import {
 import toast from 'react-hot-toast';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
+const VERIFIED_RECORD_STATUSES = new Set(['approved', 'verified']);
+const FAILED_RECORD_STATUSES = new Set(['rejected', 'failed']);
+const PENDING_RECORD_STATUSES = new Set([
+  'pending',
+  'pending_verification',
+  'processing',
+  'verification_in_progress',
+  'doc_uploaded',
+  'awaiting_review',
+]);
+
+const classifyRecordStatus = (status) => {
+  const value = String(status || '').trim().toLowerCase();
+  if (VERIFIED_RECORD_STATUSES.has(value)) return 'verified';
+  if (FAILED_RECORD_STATUSES.has(value)) return 'failed';
+  if (!value || PENDING_RECORD_STATUSES.has(value)) return 'pending';
+  return 'pending';
+};
+
+const summarizeRecordCounts = (records = []) => (
+  records.reduce((acc, record) => {
+    const bucket = classifyRecordStatus(record?.verification_status ?? record?.status);
+    acc[bucket] += 1;
+    return acc;
+  }, { verified: 0, failed: 0, pending: 0 })
+);
+
+const hasRenderableRecords = (batch) =>
+  !!batch && (batch.total > 0 || batch.users.length > 0);
+
 const statusBadge = (status) => {
   if (status === 'approved') return { variant: 'success', label: 'Approved' };
-  if (status === 'rejected') return { variant: 'error', label: 'Rejected' };
+  if (status === 'verified') return { variant: 'success', label: 'Verified' };
+  if (status === 'rejected' || status === 'failed') return { variant: 'error', label: 'Rejected' };
   return { variant: 'pending', label: 'Pending' };
 };
 
@@ -38,10 +69,15 @@ const formatDate = (value) => {
 const normaliseBatch = (b) => {
   if (!b || typeof b !== 'object') return null;
   const id = b.batch_id || b.id || '';
-  const total = Number(b.total_users ?? b.total ?? 0);
-  const verified = Number(b.approved ?? b.approved_count ?? 0);
-  const failed = Number(b.rejected ?? b.rejected_count ?? 0);
-  const pending = Math.max(0, total - verified - failed);
+  const records = Array.isArray(b.users) ? b.users : [];
+  const total = records.length > 0 ? records.length : Number(b.total_users ?? b.total ?? 0);
+  const summaryVerified = Number(b.approved ?? b.approved_count ?? 0);
+  const summaryFailed = Number(b.rejected ?? b.rejected_count ?? 0);
+  const hasRecordStatuses = records.some((record) => record?.verification_status != null || record?.status != null);
+  const recordCounts = hasRecordStatuses ? summarizeRecordCounts(records) : null;
+  const verified = recordCounts ? recordCounts.verified : summaryVerified;
+  const failed = recordCounts ? recordCounts.failed : summaryFailed;
+  const pending = recordCounts ? recordCounts.pending : Math.max(0, total - verified - failed);
   const rawTypes = Array.isArray(b.industry_type) ? b.industry_type : [];
   // Backend stores SDC state in verification_progress.sdc (status, created_at,
   // issued_count, etc.) — not a flat sdc_status field. Any status present here
@@ -55,7 +91,7 @@ const normaliseBatch = (b) => {
     industryType: rawTypes,
     sdcStatus: sdcInfo?.status ? 'generated' : null,
     sdcInfo,
-    users: Array.isArray(b.users) ? b.users : [],
+    users: records,
   };
 };
 
@@ -1090,7 +1126,7 @@ const SDCVerification = () => {
                   .catch(() => null)
               )
             );
-            return { orgId, orgName, spaceId, batches: batchDetails.filter(Boolean) };
+            return { orgId, orgName, spaceId, batches: batchDetails.filter(hasRenderableRecords) };
           } catch {
             return { orgId, orgName, spaceId, batches: [] };
           }

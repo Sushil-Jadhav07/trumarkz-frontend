@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { motion } from 'framer-motion';
 import { AuthLayout } from '@/components/layout/AuthLayout';
 import { PageHeader } from '@/components/shared/PageHeader';
@@ -10,7 +11,7 @@ import { Modal } from '@/components/ui/Modal';
 import { verificationAPI, verifiersAPI, sdcAPI, adminAPI, getApiError, triggerBlobDownload } from '@/services/api';
 import { GenerateSDCModal, CertificateDetailModal } from '@/pages/admin/SDCVerification';
 import {
-  ArrowRight, Building2, CheckCircle, ChevronLeft, Clock, Download, Eye, Filter, Info,
+  ArrowRight, Building2, CheckCircle, ChevronLeft, Clock, Download, Eye, Info,
   Mail, MoreVertical, Package, Plus, RefreshCw, Send, ShieldCheck, Sparkles, Trash2, User, Users, X, XCircle, Zap,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -57,18 +58,6 @@ const buildHtmlBody = (name, uploadUrl) => `<!DOCTYPE html>
 </table>
 </body></html>`;
 
-// Real backend batch statuses (BatchListResponse.status / BatchDetailResponse.status)
-// — derived server-side from users + manual verification requests + SDC issuance.
-// Monotonic: only ever moves forward through this list.
-const STATUS_OPTIONS = [
-  { value: '',                          label: 'All' },
-  { value: 'pending',                   label: 'Pending' },
-  { value: 'processing',                label: 'Processing' },
-  { value: 'verification_in_progress',  label: 'Verification In Progress' },
-  { value: 'verification_completed',    label: 'Verification Completed' },
-  { value: 'sdc_generated',             label: 'SDC Generated' },
-];
-
 // "Send to Organization" has no backend concept (batch.status stops at
 // sdc_generated) — it's a purely local notify-action, tracked client-side
 // only, shown as an extra badge alongside the real status.
@@ -76,7 +65,8 @@ const BATCH_WORKFLOW_KEY = 'trumarkz_admin_batch_workflow_mock';
 
 const statusBadge = (status) => {
   if (status === 'approved') return { variant: 'success', label: 'Approved', icon: CheckCircle };
-  if (status === 'rejected') return { variant: 'error',   label: 'Rejected', icon: XCircle };
+  if (status === 'verified') return { variant: 'success', label: 'Verified', icon: CheckCircle };
+  if (status === 'rejected' || status === 'failed') return { variant: 'error',   label: 'Rejected', icon: XCircle };
   return                            { variant: 'pending', label: 'Pending',  icon: Clock };
 };
 
@@ -100,6 +90,36 @@ const getStoredWorkflow = () => {
   try { return JSON.parse(localStorage.getItem(BATCH_WORKFLOW_KEY) || '{}'); }
   catch { return {}; }
 };
+
+const VERIFIED_RECORD_STATUSES = new Set(['approved', 'verified']);
+const FAILED_RECORD_STATUSES = new Set(['rejected', 'failed']);
+const PENDING_RECORD_STATUSES = new Set([
+  'pending',
+  'pending_verification',
+  'processing',
+  'verification_in_progress',
+  'doc_uploaded',
+  'awaiting_review',
+]);
+
+const classifyRecordStatus = (status) => {
+  const value = String(status || '').trim().toLowerCase();
+  if (VERIFIED_RECORD_STATUSES.has(value)) return 'verified';
+  if (FAILED_RECORD_STATUSES.has(value)) return 'failed';
+  if (!value || PENDING_RECORD_STATUSES.has(value)) return 'pending';
+  return 'pending';
+};
+
+const summarizeRecordCounts = (records = []) => (
+  records.reduce((acc, record) => {
+    const bucket = classifyRecordStatus(record?.verification_status ?? record?.status);
+    acc[bucket] += 1;
+    return acc;
+  }, { verified: 0, failed: 0, pending: 0 })
+);
+
+const hasRenderableRecords = (batch) =>
+  !!batch && (batch.total > 0 || batch.records.length > 0);
 
 const isProductRecord = (record) =>
   record?.entity_type === 'product' || !!record?.product_name || !!record?.category_name || !!record?.custom_fields;
@@ -129,17 +149,22 @@ const formatCreatedAt = (value) => {
 // infer status client-side either.
 const normaliseApiBatch = (b) => {
   const id = b.batch_id || b.id || '';
-  const total = Number(b.total_users ?? b.total ?? 0);
-  const verified = Number(b.approved ?? b.approved_count ?? 0);
-  const failed = Number(b.rejected ?? b.rejected_count ?? 0);
-  const pending = Math.max(0, total - verified - failed);
+  const records = Array.isArray(b.users) ? b.users : [];
+  const total = records.length > 0 ? records.length : Number(b.total_users ?? b.total ?? 0);
+  const summaryVerified = Number(b.approved ?? b.approved_count ?? 0);
+  const summaryFailed = Number(b.rejected ?? b.rejected_count ?? 0);
+  const hasRecordStatuses = records.some((record) => record?.verification_status != null || record?.status != null);
+  const recordCounts = hasRecordStatuses ? summarizeRecordCounts(records) : null;
+  const verified = recordCounts ? recordCounts.verified : summaryVerified;
+  const failed = recordCounts ? recordCounts.failed : summaryFailed;
+  const pending = recordCounts ? recordCounts.pending : Math.max(0, total - verified - failed);
   const createdAt = b.created_at ? new Date(b.created_at).getTime() : 0;
   return {
     id,
     name: b.batch_name || b.name || `Batch ${String(id).slice(0, 8)}`,
     orgName: b.organization_name || b.org_name || 'Organization',
     orgId: b.org_id || null,
-    records: Array.isArray(b.users) ? b.users : [],
+    records,
     total, pending, verified, failed,
     rawStatus: b.status || 'pending',
     latestCreatedAt: createdAt,
@@ -673,7 +698,6 @@ export const BatchMonitor = () => {
   const [data, setData] = useState(null);
   const [batchDetail, setBatchDetail] = useState(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
-  const [statusFilter, setStatusFilter] = useState('');
   const [orgFilter, setOrgFilter] = useState('');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -706,7 +730,27 @@ export const BatchMonitor = () => {
   const [sdcCertsLoading,     setSdcCertsLoading]     = useState(false);
   const [downloadingSdcId,    setDownloadingSdcId]    = useState(null);
   const [detailRecord,        setDetailRecord]        = useState(null);
-  const [actionMenuBatchId, setActionMenuBatchId] = useState(null);
+  const [actionMenu, setActionMenu] = useState({ batchId: null, anchorRect: null });
+
+  const closeActionMenu = useCallback(() => {
+    setActionMenu({ batchId: null, anchorRect: null });
+  }, []);
+
+  useEffect(() => {
+    if (!actionMenu.batchId) return undefined;
+    const handleEscape = (event) => {
+      if (event.key === 'Escape') closeActionMenu();
+    };
+    const handleScrollOrResize = () => closeActionMenu();
+    window.addEventListener('keydown', handleEscape);
+    window.addEventListener('scroll', handleScrollOrResize, true);
+    window.addEventListener('resize', handleScrollOrResize);
+    return () => {
+      window.removeEventListener('keydown', handleEscape);
+      window.removeEventListener('scroll', handleScrollOrResize, true);
+      window.removeEventListener('resize', handleScrollOrResize);
+    };
+  }, [actionMenu.batchId, closeActionMenu]);
 
   const fetchData = useCallback(async (showRefresh = false) => {
     if (showRefresh) setRefreshing(true);
@@ -723,7 +767,7 @@ export const BatchMonitor = () => {
           ? entry.batches.map((b) => ({ ...b, organization_name: entry.organization_name, org_id: entry.org_id }))
           : [entry]
       );
-      setData(flat.map(normaliseApiBatch));
+      setData(flat.map(normaliseApiBatch).filter(hasRenderableRecords));
     } catch (err) {
       setData([]);
       toast.error(getApiError(err, 'Failed to load verification batches'));
@@ -792,7 +836,6 @@ export const BatchMonitor = () => {
   const orgOptions = Array.from(new Set(batches.map((b) => b.orgName).filter(Boolean))).sort((a, b) => a.localeCompare(b));
 
   const visibleBatches = batches
-    .filter((b) => !statusFilter || b.status === statusFilter)
     .filter((b) => !orgFilter || b.orgName === orgFilter);
   const selectedBatch = batches.find((b) => b.id === selectedBatchId) || null;
 
@@ -1185,22 +1228,6 @@ export const BatchMonitor = () => {
                 ))}
               </select>
             </div>
-            <div className="flex items-center gap-2">
-              <Filter size={14} className="text-gray-400 shrink-0" />
-              <div className="flex gap-2 flex-wrap">
-                {STATUS_OPTIONS.map((option) => (
-                  <button
-                    key={option.value}
-                    onClick={() => setStatusFilter(option.value)}
-                    className={`px-3 py-2 rounded-lg text-xs font-semibold font-inter transition-all ${
-                      statusFilter === option.value ? 'bg-brand-blue text-white shadow-sm' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                    }`}
-                  >
-                    {option.label}
-                  </button>
-                ))}
-              </div>
-            </div>
           </div>
         </div>
       </Card>
@@ -1289,38 +1316,18 @@ export const BatchMonitor = () => {
                           <div className="relative flex items-center justify-center min-w-[80px]">
                             <button
                               type="button"
-                              onClick={() => setActionMenuBatchId((current) => (current === batch.id ? null : batch.id))}
+                              onClick={(event) => {
+                                const rect = event.currentTarget.getBoundingClientRect();
+                                setActionMenu((current) => (
+                                  current.batchId === batch.id
+                                    ? { batchId: null, anchorRect: null }
+                                    : { batchId: batch.id, anchorRect: rect }
+                                ));
+                              }}
                               className="p-2 rounded-lg border border-gray-200 text-gray-500 hover:text-brand-dark hover:bg-gray-50 shadow-sm"
                             >
                               <MoreVertical size={14} />
                             </button>
-                            {actionMenuBatchId === batch.id && (
-                              <div className="absolute right-0 top-10 z-20 w-44 rounded-xl border border-gray-200 bg-white shadow-md p-1">
-                                <button
-                                  type="button"
-                                  onClick={() => handleOpenBatchDetails(batch)}
-                                  className="w-full px-3 py-2 text-left text-sm font-inter text-gray-700 rounded-lg hover:bg-gray-50 flex items-center gap-2"
-                                >
-                                  <Eye size={14} />
-                                  View Details
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setActionMenuBatchId(null);
-                                    if (batch.status === 'pending' || batch.status === 'processing' || batch.status === 'verification_in_progress') {
-                                      openSmartSend(batch);
-                                    } else {
-                                      toast('Smart Send is only available before verification is completed');
-                                    }
-                                  }}
-                                  className="w-full px-3 py-2 text-left text-sm font-inter text-gray-700 rounded-lg hover:bg-gray-50 flex items-center gap-2"
-                                >
-                                  <Zap size={14} />
-                                  Smart Send
-                                </button>
-                              </div>
-                            )}
                           </div>
                         </td>
                       </tr>
@@ -1331,6 +1338,67 @@ export const BatchMonitor = () => {
             </div>
           </Card>
         </motion.div>
+      )}
+
+      {actionMenu.batchId && actionMenu.anchorRect && createPortal(
+        <div
+          className="fixed inset-0 z-[100] bg-transparent"
+          onMouseDown={closeActionMenu}
+        >
+          {(() => {
+            const width = 176;
+            const height = 92;
+            const margin = 12;
+            const gap = 8;
+            const flipUp = window.innerHeight - actionMenu.anchorRect.bottom < height + gap + margin;
+            const top = flipUp
+              ? Math.max(margin, actionMenu.anchorRect.top - height - gap)
+              : actionMenu.anchorRect.bottom + gap;
+            const left = Math.min(
+              Math.max(margin, actionMenu.anchorRect.right - width),
+              window.innerWidth - width - margin
+            );
+            const batch = batches.find((item) => item.id === actionMenu.batchId) || null;
+            if (!batch) return null;
+            return (
+              <div
+                role="menu"
+                aria-label="Batch actions"
+                className="fixed w-44 rounded-xl border border-gray-200 bg-white p-1 shadow-xl"
+                style={{ top, left, zIndex: 101 }}
+                onMouseDown={(e) => e.stopPropagation()}
+              >
+                <button
+                  type="button"
+                  onClick={() => {
+                    closeActionMenu();
+                    handleOpenBatchDetails(batch);
+                  }}
+                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-inter text-gray-700 hover:bg-gray-50"
+                >
+                  <Eye size={14} />
+                  View Details
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    closeActionMenu();
+                    if (batch.status === 'pending' || batch.status === 'processing' || batch.status === 'verification_in_progress') {
+                      openSmartSend(batch);
+                    } else {
+                      toast('Smart Send is only available before verification is completed');
+                    }
+                  }}
+                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-inter text-gray-700 hover:bg-gray-50"
+                >
+                  <Zap size={14} />
+                  Smart Send
+                </button>
+              </div>
+            );
+          })()}
+        </div>,
+        document.body
       )}
 
       {/* ── View Details Modal ─────────────────────────────────────────────── */}
