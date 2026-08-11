@@ -789,9 +789,6 @@ const VerificationTypes = () => {
     if (form.label === 'manual' && !form.email_address.trim()) {
       toast.error('Email Address is required for manual verification'); return;
     }
-    if (form.label === 'automatic' && !form.api_link.trim()) {
-      toast.error('API Link is required for automatic verification'); return;
-    }
     setSubmitting(true);
     const payload = {
       name:          form.name.trim(),
@@ -853,7 +850,6 @@ const VerificationTypes = () => {
     e.preventDefault();
     if (!editForm.name.trim()) { toast.error('Name is required'); return; }
     if (editForm.label === 'manual'    && !editForm.email_address.trim()) { toast.error('Email Address is required for manual'); return; }
-    if (editForm.label === 'automatic' && !editForm.api_link.trim())      { toast.error('API Link is required for automatic'); return; }
     setSaving(true);
     const payload = {
       name:          editForm.name.trim(),
@@ -1165,7 +1161,7 @@ const VerificationTypes = () => {
               </div>
             ) : (
               <div>
-                <label className={labelCls}>API Link *</label>
+                <label className={labelCls}>API Link</label>
                 <div className="relative">
                   <Link size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                   <input value={form.api_link} onChange={(e) => updateForm('api_link', e.target.value)}
@@ -1260,7 +1256,7 @@ const VerificationTypes = () => {
               </div>
             ) : (
               <div>
-                <label className={labelCls}>API Link *</label>
+                <label className={labelCls}>API Link</label>
                 <div className="relative">
                   <Link size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                   <input value={editForm.api_link}

@@ -9,7 +9,7 @@ import { ProgressBar } from '@/components/ui/ProgressBar';
 import { useAuth } from '@/context/AuthContext';
 import { authAPI, verificationAPI, getApiError } from '@/services/api';
 import {
-  Layers, Award, BarChart2, ArrowRight,
+  Layers, Award, ArrowRight, Wallet,
   Clock, CheckCircle, TrendingUp, Users, Shield, Globe, Lock, Zap, Briefcase
 } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -46,37 +46,45 @@ const formatDateTime = (value) => {
   });
 };
 
-const buildBatchSummary = (users = []) => {
-  const batches = users.reduce((acc, item) => {
-    const batchId = item.batch_id || 'unbatched';
-
-    if (!acc[batchId]) {
-      acc[batchId] = {
-        id: batchId,
-        name: batchId === 'unbatched' ? 'Unbatched records' : `Batch ${batchId.slice(0, 8)}`,
-        industry: 'Verification batch',
-        total: 0,
-        completed: 0,
-        pending: 0,
-        latestAt: item.updated_at || item.created_at,
-      };
-    }
-
-    acc[batchId].total += 1;
-    if (item.verification_status === 'pending') acc[batchId].pending += 1;
-    else acc[batchId].completed += 1;
-
-    const currentLatest = new Date(acc[batchId].latestAt || 0).getTime();
-    const itemLatest = new Date(item.updated_at || item.created_at || 0).getTime();
-    if (itemLatest > currentLatest) acc[batchId].latestAt = item.updated_at || item.created_at;
-
-    return acc;
-  }, {});
-
-  return Object.values(batches)
-    .sort((a, b) => new Date(b.latestAt || 0) - new Date(a.latestAt || 0))
-    .slice(0, 3);
+// GET /verification/batches returns [{ org_id, organization_name, batches: [...] }]
+// — one entry per org, actual batch list nested under `.batches` (same shape
+// BatchStatus.jsx's extractBatchList/normaliseBatch already handle).
+const extractBatchList = (data) => {
+  const groups = Array.isArray(data) ? data : [data];
+  return groups.flatMap((g) => {
+    if (Array.isArray(g?.batches)) return g.batches;
+    if (Array.isArray(g?.items)) return g.items;
+    if (Array.isArray(g)) return g;
+    if (g && typeof g === 'object' && (g.batch_id || g.id)) return [g];
+    return [];
+  });
 };
+
+const normaliseBatchSummary = (b) => {
+  if (!b || typeof b !== 'object') return null;
+  const id = b.batch_id || b.id || '';
+  const total = Number(b.total_users ?? b.total ?? 0);
+  const verified = Number(b.approved ?? b.approved_count ?? 0);
+  const failed = Number(b.rejected ?? b.rejected_count ?? 0);
+  const pending = Math.max(0, total - verified - failed);
+  const industryType = Array.isArray(b.industry_type) ? b.industry_type.filter(Boolean) : [];
+  return {
+    id,
+    name: b.batch_name || b.name || `Batch ${String(id).slice(0, 8)}`,
+    industry: industryType.length ? industryType.join(', ') : 'Verification batch',
+    total,
+    completed: verified + failed,
+    pending,
+    createdAt: b.created_at || b.createdAt,
+  };
+};
+
+const buildBatchSummary = (rawBatches = []) =>
+  rawBatches
+    .map(normaliseBatchSummary)
+    .filter(Boolean)
+    .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
+    .slice(0, 3);
 
 export const OrgDashboard = () => {
   const navigate = useNavigate();
@@ -85,6 +93,7 @@ export const OrgDashboard = () => {
   const [verificationData, setVerificationData] = useState(null);
   const [statsSummary, setStatsSummary] = useState({ total: '-', pending: '-', verified: '-', failed: '-' });
   const [organizationIndustry, setOrganizationIndustry] = useState(() => normalizeIndustryValue(user?.industryType));
+  const [batchList, setBatchList] = useState([]);
 
   useEffect(() => {
     let isMounted = true;
@@ -102,6 +111,21 @@ export const OrgDashboard = () => {
       })
       .catch((err) => {
         if (isMounted) toast.error(getApiError(err, 'Failed to load dashboard data'));
+      });
+
+    return () => { isMounted = false; };
+  }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    verificationAPI.getBatches()
+      .then(({ data }) => {
+        if (!isMounted) return;
+        setBatchList(extractBatchList(data));
+      })
+      .catch(() => {
+        // Active Batches card just shows its own empty state below.
       });
 
     return () => { isMounted = false; };
@@ -132,7 +156,7 @@ export const OrgDashboard = () => {
   }, [user?.industryType, user?.organizationId]);
 
   const usersList = verificationData?.users || [];
-  const activeBatches = buildBatchSummary(usersList);
+  const activeBatches = buildBatchSummary(batchList);
   const recentActivity = usersList
     .slice()
     .sort((a, b) => new Date(b.updated_at || b.created_at || 0) - new Date(a.updated_at || a.created_at || 0))
@@ -166,10 +190,14 @@ export const OrgDashboard = () => {
     },
   ];
 
+  // Only routes that actually exist and are reachable elsewhere in the app
+  // (sidebar nav or the live verification flow) belong here — /credential/*
+  // was dropped because no route for it is registered in App.jsx at all.
   const quickActions = [
-    { label: 'New Verification', icon: Shield, path: '/org/industry', color: 'bg-brand-blue text-white' },
-    { label: 'Create Credential', icon: Award, path: '/credential/template', color: 'bg-brand-dark text-white' },
-    { label: 'View Reports', icon: BarChart2, path: '/qr/reports', color: 'bg-green-500 text-white' },
+    { label: 'Create Batch', icon: Shield, path: '/org/create-batch', color: 'bg-brand-blue text-white' },
+    { label: 'View Batches', icon: Layers, path: '/org/batch-status', color: 'bg-brand-dark text-white' },
+    { label: 'Certificates', icon: Award, path: '/qr/reports', color: 'bg-green-500 text-white' },
+    { label: 'Wallet', icon: Wallet, path: '/account/wallet', color: 'bg-amber-500 text-white' },
   ];
 
   const howItWorks = [
