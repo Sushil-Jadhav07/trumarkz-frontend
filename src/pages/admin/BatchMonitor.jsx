@@ -999,7 +999,6 @@ export const BatchMonitor = () => {
   }, [batchSdcByRecordId, sdcRecordsByEmail, sdcRecordsByName]);
 
   const handleOpenBatchDetails = useCallback(async (batch) => {
-    setActionMenuBatchId(null);
     setSelectedBatchId(batch.id);
     setBatchDetail(null);
     setSubmittedReports(null);
@@ -1435,17 +1434,17 @@ export const BatchMonitor = () => {
                 </div>
                 <div className="relative grid grid-cols-2 sm:grid-cols-4 gap-2.5 mt-6">
                   {[
-                    { label: 'Records',  value: selectedBatch.total,    icon: Users },
-                    { label: 'Pending',  value: selectedBatch.pending,  icon: Clock },
-                    { label: 'Verified', value: selectedBatch.verified, icon: CheckCircle },
-                    { label: 'Failed',   value: selectedBatch.failed,   icon: XCircle },
+                    { label: 'Records',  value: selectedBatch.total,    icon: Users,       ico: 'text-brand-blue', num: 'text-brand-blue' },
+                    { label: 'Pending',  value: selectedBatch.pending,  icon: Clock,       ico: 'text-amber-500',  num: 'text-amber-600' },
+                    { label: 'Verified', value: selectedBatch.verified, icon: CheckCircle, ico: 'text-green-500',  num: 'text-green-600' },
+                    { label: 'Failed',   value: selectedBatch.failed,   icon: XCircle,     ico: 'text-red-400',    num: 'text-red-500' },
                   ].map((item) => (
-                    <div key={item.label} className="rounded-xl bg-white/80 border border-white/90 p-3">
-                      <div className="flex items-center gap-1.5 mb-1">
-                        <item.icon size={11} className="opacity-60" />
-                        <p className="text-[10px] uppercase tracking-wide opacity-70 font-inter">{item.label}</p>
+                    <div key={item.label} className="rounded-xl bg-white/90 border border-white/90 p-3">
+                      <div className="flex items-center justify-between gap-1.5 mb-1">
+                        <p className="text-[10px] uppercase tracking-wide text-gray-400 font-inter">{item.label}</p>
+                        <item.icon size={13} className={item.ico} />
                       </div>
-                      <p className="font-sora font-bold text-xl">{item.value}</p>
+                      <p className={`font-sora font-bold text-xl ${item.num}`}>{item.value}</p>
                     </div>
                   ))}
                 </div>
