@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { motion } from 'framer-motion';
+import { Area, AreaChart, ResponsiveContainer } from 'recharts';
 import { AuthLayout } from '@/components/layout/AuthLayout';
 import { PageHeader } from '@/components/shared/PageHeader';
 import { Card } from '@/components/ui/Card';
@@ -24,8 +25,6 @@ import {
   AlertTriangle,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-
-const PAGE_SIZE = 100;
 
 const USER_TYPE_TABS = [
   { value: '', label: 'All Users' },
@@ -579,15 +578,16 @@ export const AllUsersList = () => {
   const [typeFilter, setTypeFilter] = useState('');
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(0);
+  const [pageSize, setPageSize] = useState(10);
 
   const [createOpen, setCreateOpen] = useState(false);
   const [editModal, setEditModal] = useState({ open: false, user: null });
   const [deactivateModal, setDeactivateModal] = useState({ open: false, user: null });
 
-  const fetchUsers = useCallback(async (type, pageIdx) => {
+  const fetchUsers = useCallback(async (type, pageIdx, size) => {
     setLoading(true);
     try {
-      const params = { limit: PAGE_SIZE, offset: pageIdx * PAGE_SIZE };
+      const params = { limit: size, offset: pageIdx * size };
       if (type) params.user_type = type;
       const { data } = await adminAPI.getAllUsers(params);
       setUsers(Array.isArray(data.users) ? data.users : []);
@@ -600,15 +600,20 @@ export const AllUsersList = () => {
   }, []);
 
   useEffect(() => {
-    fetchUsers(typeFilter, page);
-  }, [page, typeFilter, fetchUsers]);
+    fetchUsers(typeFilter, page, pageSize);
+  }, [page, pageSize, typeFilter, fetchUsers]);
 
   const handleTypeChange = (type) => {
     setTypeFilter(type);
     setPage(0);
   };
 
-  const refresh = () => fetchUsers(typeFilter, page);
+  const handlePageSizeChange = (size) => {
+    setPageSize(size);
+    setPage(0);
+  };
+
+  const refresh = () => fetchUsers(typeFilter, page, pageSize);
 
   const filteredUsers = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -620,9 +625,27 @@ export const AllUsersList = () => {
     );
   }, [users, search]);
 
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const startIdx = page * PAGE_SIZE + 1;
-  const endIdx = Math.min((page + 1) * PAGE_SIZE, total);
+  // Real join trend for the current page of users, bucketed by day over the
+  // last 7 days. Reflects only the currently-loaded page (server-paginated),
+  // not the full user base — an honest signal, not a platform-wide trend.
+  const sparkData = useMemo(() => {
+    const days = Array.from({ length: 7 }).map((_, i) => {
+      const d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - (6 - i)); return d;
+    });
+    return days.map((day, i) => {
+      const next = new Date(day); next.setDate(day.getDate() + 1);
+      const value = users.filter((u) => {
+        if (!u.created_at) return false;
+        const t = new Date(u.created_at).getTime();
+        return t >= day.getTime() && t < next.getTime();
+      }).length;
+      return { i, value };
+    });
+  }, [users]);
+
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const startIdx = page * pageSize + 1;
+  const endIdx = Math.min((page + 1) * pageSize, total);
   const activeTabLabel = USER_TYPE_TABS.find((t) => t.value === typeFilter)?.label || 'All Users';
 
   return (
@@ -660,15 +683,29 @@ export const AllUsersList = () => {
         transition={{ duration: 0.22 }}
         className="mb-5"
       >
-        <Card className="px-5 py-4 flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-blue-50 flex items-center justify-center shrink-0">
-            <Users size={17} className="text-brand-blue" />
+        <Card className="px-5 py-4 flex items-center gap-4">
+          <div className="w-11 h-11 rounded-xl bg-blue-50 flex items-center justify-center shrink-0">
+            <Users size={20} className="text-brand-blue" />
           </div>
-          <div>
-            <p className="text-2xl font-bold text-brand-dark font-sora leading-none">
+          <div className="min-w-[140px]">
+            <p className="text-xs text-gray-500 font-inter">Total Users</p>
+            <p className="text-2xl font-bold text-brand-dark font-sora leading-none mt-1">
               {loading ? '—' : total}
             </p>
             <p className="text-xs text-gray-400 font-inter mt-1">{activeTabLabel}</p>
+          </div>
+          <div className="flex-1 h-12 hidden sm:block">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={sparkData} margin={{ top: 2, right: 4, left: 4, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="spark-users" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#2563eb" stopOpacity={0.3} />
+                    <stop offset="100%" stopColor="#2563eb" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <Area type="monotone" dataKey="value" stroke="#2563eb" strokeWidth={1.75} fill="url(#spark-users)" isAnimationActive={false} />
+              </AreaChart>
+            </ResponsiveContainer>
           </div>
         </Card>
       </motion.div>
@@ -847,33 +884,49 @@ export const AllUsersList = () => {
           </div>
 
           {/* Pagination */}
-          {!loading && total > PAGE_SIZE && (
-            <div className="flex items-center justify-between px-5 py-3.5 border-t border-gray-100 bg-brand-bg">
+          {!loading && total > 0 && (
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-5 py-3.5 border-t border-gray-100 bg-brand-bg">
               <p className="text-xs text-gray-400 font-inter">
                 Showing {startIdx}–{endIdx} of {total} users
               </p>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setPage((p) => Math.max(0, p - 1))}
-                  disabled={page === 0}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-200 text-xs text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors font-inter"
+              <div className="flex items-center gap-3">
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setPage((p) => Math.max(0, p - 1))}
+                    disabled={page === 0}
+                    className="p-1.5 rounded-lg border border-gray-200 text-gray-500 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50"
+                  >
+                    <ChevronLeft size={14} />
+                  </button>
+                  {Array.from({ length: totalPages }).slice(0, 5).map((_, i) => (
+                    <button
+                      key={i}
+                      type="button"
+                      onClick={() => setPage(i)}
+                      className={`w-7 h-7 rounded-lg text-xs font-semibold font-inter ${
+                        page === i ? 'bg-brand-blue text-white' : 'text-gray-500 hover:bg-white border border-gray-200'
+                      }`}
+                    >
+                      {i + 1}
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+                    disabled={page >= totalPages - 1}
+                    className="p-1.5 rounded-lg border border-gray-200 text-gray-500 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50"
+                  >
+                    <ChevronRight size={14} />
+                  </button>
+                </div>
+                <select
+                  value={pageSize}
+                  onChange={(e) => handlePageSizeChange(Number(e.target.value))}
+                  className="rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-semibold font-inter text-gray-600 focus:outline-none focus:ring-2 focus:ring-brand-blue/20"
                 >
-                  <ChevronLeft size={13} />
-                  Prev
-                </button>
-                <span className="text-xs text-gray-500 font-inter px-1">
-                  {page + 1} / {totalPages}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
-                  disabled={page >= totalPages - 1}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-200 text-xs text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors font-inter"
-                >
-                  Next
-                  <ChevronRight size={13} />
-                </button>
+                  {[10, 25, 50, 100].map((n) => <option key={n} value={n}>{n} / page</option>)}
+                </select>
               </div>
             </div>
           )}

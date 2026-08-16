@@ -37,6 +37,10 @@ const normalizeIndustryList = (value) => {
 
 const SERVICE_TYPE_LABELS = Object.fromEntries(SERVICE_TYPE_OPTIONS.map((o) => [o.value, o.label]));
 
+// Basic org profile fields saved via PATCH /auth/me — keys match both the
+// `user` object field name and the authAPI.updateOwnProfile() payload key.
+const ORG_DETAIL_FIELD_KEYS = ['gstin', 'businessRegNumber', 'addressLine1', 'addressLine2', 'addressLine3'];
+
 const DetailRow = ({ icon: Icon, label, value, hint }) => (
   <div className="flex items-start gap-3">
     <div className="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center shrink-0 mt-0.5">
@@ -68,11 +72,9 @@ const FieldInput = ({ icon: Icon, label, value, onChange, placeholder, disabled 
 
 // One Edit button puts every editable field in this card into edit mode at
 // once; it's replaced by Save/Cancel while editing, so a single Save commits
-// everything changed. Only Service Type + Space ID(s) are wired to a real
-// backend endpoint (PATCH /auth/me/service-type, PATCH /auth/me/dhiway-space)
-// — there is currently no endpoint to save name/phone/GSTIN/business reg
-// number/address, so those stay read-only. Don't add editing for them
-// without a confirmed live endpoint (PATCH /auth/me does not exist yet).
+// everything changed. Service Type + Space ID(s) go through their own
+// endpoints (PATCH /auth/me/service-type, PATCH /auth/me/dhiway-space);
+// GSTIN/business reg number/address go through PATCH /auth/me.
 const CardEditControl = ({ isEditing, saving, onEdit, onSave, onCancel }) =>
   isEditing ? (
     <div className="flex gap-2 shrink-0">
@@ -96,10 +98,18 @@ export const Profile = () => {
 
   const isOrg = role === 'organization';
 
-  // Organization Details card — Service Type + Space ID(s) are the only
-  // fields with a real backend endpoint, so they're the only editable ones.
+  // Personal Information card — Organization Name + Phone Number, org users only.
+  const [editingPersonal, setEditingPersonal] = useState(false);
+  const [personalDraft, setPersonalDraft] = useState({ organizationName: '', phoneNumber: '' });
+  const [savingPersonal, setSavingPersonal] = useState(false);
+
+  // Organization Details card — Service Type, Space ID(s), GSTIN, business
+  // reg number and address are all editable together in one Save.
   const [editingOrg, setEditingOrg] = useState(false);
-  const [orgDraft, setOrgDraft] = useState({ serviceType: '', humanSpaceId: '', productSpaceId: '', warrantySpaceId: '' });
+  const [orgDraft, setOrgDraft] = useState({
+    serviceType: '', humanSpaceId: '', productSpaceId: '', warrantySpaceId: '',
+    gstin: '', businessRegNumber: '', addressLine1: '', addressLine2: '', addressLine3: '',
+  });
   const [savingOrg, setSavingOrg] = useState(false);
 
   const idFields = ID_FIELDS_BY_SERVICE_TYPE[editingOrg ? orgDraft.serviceType : user?.serviceType] || [];
@@ -142,11 +152,58 @@ export const Profile = () => {
       humanSpaceId: user?.humanSpaceId || '',
       productSpaceId: user?.productSpaceId || '',
       warrantySpaceId: user?.warrantySpaceId || '',
+      gstin: user?.gstin || '',
+      businessRegNumber: user?.businessRegNumber || '',
+      addressLine1: user?.addressLine1 || '',
+      addressLine2: user?.addressLine2 || '',
+      addressLine3: user?.addressLine3 || '',
     });
     setEditingOrg(true);
   };
   const cancelOrg = () => setEditingOrg(false);
   const updateOrgDraft = (key, value) => setOrgDraft((prev) => ({ ...prev, [key]: value }));
+
+  const startEditPersonal = () => {
+    setPersonalDraft({
+      organizationName: user?.name || '',
+      phoneNumber: user?.phoneNumber || '',
+    });
+    setEditingPersonal(true);
+  };
+  const cancelPersonal = () => setEditingPersonal(false);
+  const updatePersonalDraft = (key, value) => setPersonalDraft((prev) => ({ ...prev, [key]: value }));
+
+  const savePersonal = async () => {
+    setSavingPersonal(true);
+    try {
+      const payload = {};
+      const updates = {};
+
+      const trimmedName = personalDraft.organizationName.trim();
+      if (trimmedName !== (user?.name || '')) {
+        payload.organizationName = trimmedName;
+        updates.name = trimmedName;
+      }
+
+      const trimmedPhone = personalDraft.phoneNumber.trim();
+      if (trimmedPhone !== (user?.phoneNumber || '')) {
+        payload.phoneNumber = trimmedPhone;
+        updates.phoneNumber = trimmedPhone;
+      }
+
+      if (Object.keys(payload).length > 0) {
+        await authAPI.updateOwnProfile(payload);
+        updateUserProfile(updates);
+        await refreshUser();
+        toast.success('Profile updated');
+      }
+      setEditingPersonal(false);
+    } catch (err) {
+      toast.error(getApiError(err, 'Failed to save changes'));
+    } finally {
+      setSavingPersonal(false);
+    }
+  };
 
   const saveOrg = async () => {
     setSavingOrg(true);
@@ -170,8 +227,21 @@ export const Profile = () => {
         calls.push(authAPI.updateSpaceIds(idPayload));
       }
 
+      const profilePayload = {};
+      ORG_DETAIL_FIELD_KEYS.forEach((key) => {
+        const value = orgDraft[key].trim();
+        if (value !== (user?.[key] || '')) {
+          profilePayload[key] = value;
+          updates[key] = value;
+        }
+      });
+      if (Object.keys(profilePayload).length > 0) {
+        calls.push(authAPI.updateOwnProfile(profilePayload));
+      }
+
       await Promise.all(calls);
       updateUserProfile(updates);
+      if (calls.length > 0) await refreshUser();
       setEditingOrg(false);
       toast.success('Organization details updated');
     } catch (err) {
@@ -258,13 +328,44 @@ export const Profile = () => {
           {/* Left — info */}
           <div className="space-y-5">
             <Card className="p-5">
-              <h3 className="font-sora font-bold text-brand-dark mb-4">Personal Information</h3>
+              <div className="flex items-center justify-between gap-3 mb-4">
+                <h3 className="font-sora font-bold text-brand-dark">Personal Information</h3>
+                {isOrg && (
+                  <CardEditControl
+                    isEditing={editingPersonal}
+                    saving={savingPersonal}
+                    onEdit={startEditPersonal}
+                    onSave={savePersonal}
+                    onCancel={cancelPersonal}
+                  />
+                )}
+              </div>
               <div className="space-y-4">
-                <DetailRow icon={Building2} label={isOrg ? 'Organization Name' : 'Full Name'} value={user?.name} />
+                {editingPersonal ? (
+                  <FieldInput
+                    icon={Building2}
+                    label="Organization Name"
+                    value={personalDraft.organizationName}
+                    onChange={(v) => updatePersonalDraft('organizationName', v)}
+                    disabled={savingPersonal}
+                  />
+                ) : (
+                  <DetailRow icon={Building2} label={isOrg ? 'Organization Name' : 'Full Name'} value={user?.name} />
+                )}
                 <div className="border-t border-gray-50" />
                 <DetailRow icon={Mail} label="Email Address" value={user?.email} hint="Cannot be changed" />
                 <div className="border-t border-gray-50" />
-                <DetailRow icon={Phone} label="Phone Number" value={user?.phoneNumber} />
+                {editingPersonal ? (
+                  <FieldInput
+                    icon={Phone}
+                    label="Phone Number"
+                    value={personalDraft.phoneNumber}
+                    onChange={(v) => updatePersonalDraft('phoneNumber', v)}
+                    disabled={savingPersonal}
+                  />
+                ) : (
+                  <DetailRow icon={Phone} label="Phone Number" value={user?.phoneNumber} />
+                )}
               </div>
             </Card>
 
@@ -344,11 +445,57 @@ export const Profile = () => {
                     </React.Fragment>
                   ))}
 
-                  <DetailRow icon={FileText} label="GSTIN" value={user?.gstin} />
+                  {editingOrg ? (
+                    <FieldInput
+                      icon={FileText}
+                      label="GSTIN"
+                      value={orgDraft.gstin}
+                      onChange={(v) => updateOrgDraft('gstin', v)}
+                      disabled={savingOrg}
+                    />
+                  ) : (
+                    <DetailRow icon={FileText} label="GSTIN" value={user?.gstin} />
+                  )}
                   <div className="border-t border-gray-50" />
-                  <DetailRow icon={Hash} label="Business Registration No." value={user?.businessRegNumber} />
+                  {editingOrg ? (
+                    <FieldInput
+                      icon={Hash}
+                      label="Business Registration No."
+                      value={orgDraft.businessRegNumber}
+                      onChange={(v) => updateOrgDraft('businessRegNumber', v)}
+                      disabled={savingOrg}
+                    />
+                  ) : (
+                    <DetailRow icon={Hash} label="Business Registration No." value={user?.businessRegNumber} />
+                  )}
                   <div className="border-t border-gray-50" />
-                  <DetailRow icon={MapPin} label="Registered Address" value={addressValue} />
+                  {editingOrg ? (
+                    <div className="space-y-3">
+                      <FieldInput
+                        icon={MapPin}
+                        label="Address Line 1"
+                        value={orgDraft.addressLine1}
+                        onChange={(v) => updateOrgDraft('addressLine1', v)}
+                        disabled={savingOrg}
+                      />
+                      <FieldInput
+                        icon={MapPin}
+                        label="Address Line 2"
+                        value={orgDraft.addressLine2}
+                        onChange={(v) => updateOrgDraft('addressLine2', v)}
+                        disabled={savingOrg}
+                      />
+                      <FieldInput
+                        icon={MapPin}
+                        label="Address Line 3"
+                        value={orgDraft.addressLine3}
+                        onChange={(v) => updateOrgDraft('addressLine3', v)}
+                        disabled={savingOrg}
+                      />
+                    </div>
+                  ) : (
+                    <DetailRow icon={MapPin} label="Registered Address" value={addressValue} />
+                  )}
 
                   {organizationIndustry.length > 0 && (
                     <>

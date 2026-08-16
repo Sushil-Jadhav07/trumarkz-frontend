@@ -38,6 +38,7 @@ export const Sidebar = ({ collapsed, onToggle, mobileOpen = false, onMobileClose
       return [
         { path: '/individual/dashboard', label: 'Dashboard', icon: LayoutDashboard },
         { path: '/individual/skill-tree', label: 'My Skill Tree', icon: GitBranch },
+        { path: '/individual/all-skills', label: 'All Skills', icon: Layers },
         { path: '/individual/credentials', label: 'My Credentials', icon: Award },
         { path: '/individual/share', label: 'Share Profile', icon: Share2 },
         { path: '/account/wallet', label: 'Wallet', icon: Wallet },

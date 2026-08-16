@@ -108,7 +108,6 @@ verificationApi.interceptors.request.use(
     const isPublicUpload =
       config.url?.includes('/verification/upload/photo') ||
       config.url?.includes('/verification/upload/document') ||
-      config.url?.includes('/verification/categories') ||
       config.url?.includes('/verification/manual/upload/');
 
     if (token && !isPublicUpload) {
@@ -169,6 +168,30 @@ export const authAPI = {
         if (jsKey in data) payload[wireKey] = data[jsKey] ? data[jsKey].trim() : null;
       });
       return api.patch('/auth/me/dhiway-space', payload);
+    };
+  })(),
+
+  // PATCH /auth/me — org self-service profile fields (organization name, full
+  // name, phone, GSTIN, business reg number, address lines). Only keys
+  // present in `data` are sent, mirroring updateSpaceIds, so callers control
+  // exactly which fields go out (send only what actually changed).
+  updateOwnProfile: (() => {
+    const KEY_MAP = {
+      organizationName: 'organization_name',
+      fullName: 'full_name',
+      phoneNumber: 'phone_number',
+      gstin: 'gstin',
+      businessRegNumber: 'business_reg_number',
+      addressLine1: 'address_line1',
+      addressLine2: 'address_line2',
+      addressLine3: 'address_line3',
+    };
+    return (data = {}) => {
+      const payload = {};
+      Object.entries(KEY_MAP).forEach(([jsKey, wireKey]) => {
+        if (jsKey in data) payload[wireKey] = data[jsKey];
+      });
+      return api.patch('/auth/me', payload);
     };
   })(),
 
@@ -270,7 +293,6 @@ export const adminAPI = {
 };
 
 export const verificationAPI = {
-  getCategories: () => verificationApi.get('/verification/categories'),
   getIndustryTypes: () => verificationApi.get('/verification/industry-types'),
 
   uploadSingleHuman: (data) =>

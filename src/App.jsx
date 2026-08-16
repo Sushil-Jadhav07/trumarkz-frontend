@@ -78,6 +78,7 @@ import IndividualDashboard from '@/pages/individual/IndividualDashboard';
 import SkillTree from '@/pages/individual/SkillTree';
 import SkillTreeForm from '@/pages/individual/SkillTreeForm';
 import IndividualCredentials from '@/pages/individual/IndividualCredentials';
+import AllSkills from '@/pages/individual/AllSkills';
 import ShareProfile from '@/pages/individual/ShareProfile';
 import AdminDashboard from '@/pages/admin/AdminDashboard';
 import BatchMonitor from '@/pages/admin/BatchMonitor';
@@ -210,6 +211,7 @@ const AnimatedRoutes = () => {
           <Route path="/individual/skill-tree" element={<SkillTree />} />
           <Route path="/individual/skill-tree/build" element={<SkillTreeForm />} />
           <Route path="/individual/credentials" element={<IndividualCredentials />} />
+          <Route path="/individual/all-skills" element={<AllSkills />} />
           <Route path="/individual/share" element={<ShareProfile />} />
 
           {/* ── Admin routes ── */}

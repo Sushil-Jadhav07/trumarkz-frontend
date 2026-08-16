@@ -1,292 +1,539 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
+import { Cell, Pie, PieChart, ResponsiveContainer } from 'recharts';
 import { AuthLayout } from '@/components/layout/AuthLayout';
+import { PageHeader } from '@/components/shared/PageHeader';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
-import { ProgressBar } from '@/components/ui/ProgressBar';
-import { verificationAPI, getApiError } from '@/services/api';
+import { SkeletonLoader } from '@/components/ui/SkeletonLoader';
+import { authAPI, verificationAPI, getApiError } from '@/services/api';
 import {
-  ArrowRight, CheckCircle, CheckSquare,
-  Clock, Layers, RefreshCw, ShieldCheck, UserPlus, Users, XCircle,
+  AlertTriangle, Building2, CheckCircle, Clock, Inbox,
+  Layers, RefreshCw, ShieldCheck, UserPlus, XCircle,
 } from 'lucide-react';
-import toast from 'react-hot-toast';
 
-const groupByBatch = (users = []) => {
-  const batches = users.reduce((acc, item) => {
-    const id = item.batch_id || 'single';
-    if (!acc[id]) {
-      acc[id] = {
-        id,
-        orgName: item.organization_name || item.org_name || 'Organization',
-        total: 0, verified: 0, pending: 0, failed: 0,
-        createdAt: item.created_at,
-      };
-    }
-    acc[id].total += 1;
-    if (item.verification_status === 'approved') acc[id].verified += 1;
-    else if (item.verification_status === 'rejected') acc[id].failed += 1;
-    else acc[id].pending += 1;
-    return acc;
-  }, {});
-  return Object.values(batches);
+// ── Status vocabulary ──────────────────────────────────────────────────────
+// Mirrors the exact classification already used in BatchMonitor.jsx /
+// SDCVerification.jsx so counts stay consistent across the admin section.
+const VERIFIED_RECORD_STATUSES = new Set(['approved', 'verified']);
+const FAILED_RECORD_STATUSES = new Set(['rejected', 'failed']);
+const PENDING_RECORD_STATUSES = new Set([
+  'pending', 'pending_verification', 'processing',
+  'verification_in_progress', 'doc_uploaded', 'awaiting_review',
+]);
+
+const classifyRecordStatus = (status) => {
+  const value = String(status || '').trim().toLowerCase();
+  if (VERIFIED_RECORD_STATUSES.has(value)) return 'verified';
+  if (FAILED_RECORD_STATUSES.has(value)) return 'failed';
+  return 'pending';
 };
 
-const Stat = ({ label, value, icon: Icon, tone, delay, onClick }) => (
-  <motion.div
-    initial={{ opacity: 0, y: 16 }}
-    animate={{ opacity: 1, y: 0 }}
-    transition={{ delay }}
-    onClick={onClick}
-    className={`relative overflow-hidden rounded-[22px] border p-5 cursor-pointer transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_20px_40px_-24px_rgba(37,99,235,0.35)] ${tone.card}`}
-  >
-    <div className="absolute inset-x-0 top-0 h-[3px] bg-brand-blue/70 rounded-t-[22px]" />
-    <div className="flex items-start justify-between gap-3">
-      <div>
-        <p className={`text-[10px] font-semibold uppercase tracking-[0.16em] font-inter ${tone.label}`}>{label}</p>
-        <p className={`mt-3 font-sora font-bold text-[42px] leading-none ${tone.value}`}>{value}</p>
+// Batch-level `status` field vocabulary (from BatchMonitor.jsx's batchStatusMeta).
+// There is no batch-level "failed/rejected" status in the backend — failure is
+// only ever tracked per-record, which is why it isn't listed here.
+const BATCH_STATUS_META = {
+  pending:                   { label: 'Pending',       badge: 'pending' },
+  processing:                { label: 'Processing',    badge: 'in-progress' },
+  verification_in_progress:  { label: 'In Progress',   badge: 'in-progress' },
+  verification_completed:    { label: 'Completed',     badge: 'verified' },
+  sdc_generated:              { label: 'SDC Generated',  badge: 'verified' },
+};
+const getBatchStatusMeta = (status) => BATCH_STATUS_META[status] || BATCH_STATUS_META.pending;
+
+const PROCESSING_BATCH_STATUSES = new Set(['processing', 'verification_in_progress']);
+
+const ACTIVITY_META = {
+  pending:                   { label: 'New batch created',        dot: 'bg-blue-500' },
+  processing:                { label: 'Verification in progress', dot: 'bg-orange-500' },
+  verification_in_progress:  { label: 'Verification in progress', dot: 'bg-orange-500' },
+  verification_completed:    { label: 'Verification completed',   dot: 'bg-green-500' },
+  sdc_generated:              { label: 'SDC generated',            dot: 'bg-green-500' },
+};
+
+const summarizeRecordCounts = (records = []) => records.reduce((acc, r) => {
+  acc[classifyRecordStatus(r?.verification_status ?? r?.status)] += 1;
+  return acc;
+}, { verified: 0, failed: 0, pending: 0 });
+
+// Best-effort batch "type" — reuses the same product-vs-human heuristic
+// already established in BatchMonitor.jsx's isProductRecord check. Only
+// derivable when the batch response includes its record list; otherwise
+// left null (rendered as "—") rather than guessed.
+const deriveBatchType = (records) => {
+  if (!records || records.length === 0) return null;
+  const isProduct = records.some((r) => (
+    r?.entity_type === 'product' || !!r?.product_name || !!r?.category_name || !!r?.custom_fields
+  ));
+  return isProduct ? 'Product' : 'Human';
+};
+
+// Normalizes one batch object from GET /verification/batches — mirrors
+// BatchMonitor.jsx's normaliseApiBatch so figures match that page exactly.
+const normalizeBatch = (b) => {
+  const id = b.batch_id || b.id || '';
+  const records = Array.isArray(b.users) ? b.users : [];
+  const total = records.length > 0 ? records.length : Number(b.total_users ?? b.total ?? 0);
+  const summaryVerified = Number(b.approved ?? b.approved_count ?? 0);
+  const summaryFailed = Number(b.rejected ?? b.rejected_count ?? 0);
+  const hasRecordStatuses = records.some((r) => r?.verification_status != null || r?.status != null);
+  const counts = hasRecordStatuses ? summarizeRecordCounts(records) : null;
+  const verified = counts ? counts.verified : summaryVerified;
+  const failed = counts ? counts.failed : summaryFailed;
+  const pending = counts ? counts.pending : Math.max(0, total - verified - failed);
+  return {
+    id,
+    name: b.batch_name || b.name || `Batch ${String(id).slice(0, 8)}`,
+    orgName: b.organization_name || b.org_name || 'Organization',
+    orgId: b.org_id || null,
+    type: deriveBatchType(records),
+    total, verified, pending, failed,
+    status: b.status || 'pending',
+    createdAt: b.created_at || null,
+  };
+};
+
+const formatDate = (value) => {
+  if (!value) return '—';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '—';
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+};
+
+const timeAgo = (value) => {
+  if (!value) return '—';
+  const diffMs = Date.now() - new Date(value).getTime();
+  if (Number.isNaN(diffMs)) return '—';
+  const mins = Math.floor(diffMs / 60000);
+  if (mins < 1) return 'Just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  if (days < 30) return `${days}d ago`;
+  return formatDate(value);
+};
+
+// ── Small presentational pieces ────────────────────────────────────────────
+const StatCard = ({ label, value, sub, icon: Icon, iconBg, iconColor, delay = 0 }) => (
+  <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay, duration: 0.3 }}>
+    <Card className="p-5">
+      <div className="flex items-start justify-between gap-3">
+        <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${iconBg} ${iconColor}`}>
+          <Icon size={19} />
+        </div>
       </div>
-      <div className={`flex h-12 w-12 items-center justify-center rounded-2xl shadow-sm ${tone.icon}`}>
-        <Icon size={19} />
-      </div>
-    </div>
+      <p className="mt-4 text-[11px] font-semibold uppercase tracking-wide text-gray-400 font-inter">{label}</p>
+      <p className="mt-1 font-sora font-bold text-3xl text-brand-dark leading-none">{value}</p>
+      {sub && <p className="mt-1.5 text-xs text-gray-400 font-inter truncate">{sub}</p>}
+    </Card>
   </motion.div>
+);
+
+const StatCardSkeleton = () => (
+  <Card className="p-5">
+    <SkeletonLoader width="44px" height="44px" className="rounded-xl" />
+    <div className="mt-4 space-y-2">
+      <SkeletonLoader width="70%" height="11px" />
+      <SkeletonLoader width="45%" height="28px" />
+      <SkeletonLoader width="60%" height="10px" />
+    </div>
+  </Card>
+);
+
+const SectionCard = ({ title, subtitle, action, children, className = '', bodyClassName = 'p-5' }) => (
+  <Card className={`p-0 overflow-hidden h-full ${className}`}>
+    <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-gray-100">
+      <div className="min-w-0">
+        <h3 className="font-sora font-semibold text-brand-dark text-[15px]">{title}</h3>
+        {subtitle && <p className="text-xs text-gray-400 font-inter mt-0.5">{subtitle}</p>}
+      </div>
+      {action}
+    </div>
+    <div className={bodyClassName}>{children}</div>
+  </Card>
+);
+
+const InlineEmpty = ({ icon: Icon = Inbox, text }) => (
+  <div className="flex flex-col items-center justify-center py-10 text-center">
+    <div className="p-3 bg-gray-100 rounded-full mb-3">
+      <Icon size={22} className="text-gray-400" />
+    </div>
+    <p className="text-sm text-gray-500 font-inter">{text}</p>
+  </div>
+);
+
+const TableSkeletonRows = ({ cols, rows = 5 }) => (
+  <>
+    {Array.from({ length: rows }).map((_, i) => (
+      <tr key={i} className="border-b border-gray-100 last:border-0">
+        {Array.from({ length: cols }).map((__, j) => (
+          <td key={j} className="px-4 py-3.5">
+            <SkeletonLoader height="14px" width={j === 0 ? '85%' : '60%'} />
+          </td>
+        ))}
+      </tr>
+    ))}
+  </>
 );
 
 export const AdminDashboard = () => {
   const navigate = useNavigate();
-  const [verData, setVerData] = useState(null);
+  const [batches, setBatches] = useState([]);
+  const [orgCount, setOrgCount] = useState(null); // null = unknown/unavailable, not zero
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState(null);
 
-  useEffect(() => {
-    let mounted = true;
-    verificationAPI.getAllVerifications({ limit: 500, offset: 0 })
-      .then(({ data }) => { if (mounted) setVerData(data); })
-      .catch((err) => { if (mounted) toast.error(getApiError(err, 'Failed to load dashboard data')); })
-      .finally(() => { if (mounted) setLoading(false); });
-    return () => { mounted = false; };
+  const loadDashboard = useCallback(async (isRefresh = false) => {
+    if (isRefresh) setRefreshing(true); else setLoading(true);
+
+    // NOTE: There is no dedicated dashboard-summary/aggregate endpoint on the
+    // backend yet. Every KPI below is derived client-side from the same two
+    // endpoints the rest of the admin section already relies on:
+    //   - GET /verification/batches  (source of truth for Batch Monitor)
+    //   - GET /auth/users/grouped    (source of truth for org lists elsewhere)
+    // Both calls are made once, in parallel, and reused for every section on
+    // this page (no per-section refetching).
+    // TODO(backend): once the platform has enough batches that
+    // /verification/batches needs its own pagination, replace this
+    // client-side aggregation with a real /admin/dashboard-summary endpoint.
+    const [batchesResult, orgsResult] = await Promise.allSettled([
+      verificationAPI.getBatches(),
+      authAPI.getUsersGrouped(),
+    ]);
+
+    if (batchesResult.status === 'fulfilled') {
+      const raw = Array.isArray(batchesResult.value?.data) ? batchesResult.value.data : [];
+      const flat = raw.flatMap((entry) => (
+        Array.isArray(entry.batches)
+          ? entry.batches.map((b) => ({ ...b, organization_name: entry.organization_name, org_id: entry.org_id }))
+          : [entry]
+      ));
+      setBatches(flat.map(normalizeBatch));
+      setError(null);
+    } else {
+      console.error('[AdminDashboard] Failed to load batches:', batchesResult.reason?.response?.status, batchesResult.reason?.message);
+      setBatches([]);
+      setError(getApiError(batchesResult.reason, 'Failed to load verification batches.'));
+    }
+
+    if (orgsResult.status === 'fulfilled') {
+      const data = orgsResult.value?.data;
+      const orgs = Array.isArray(data) ? data : Array.isArray(data?.organizations) ? data.organizations : [];
+      setOrgCount(orgs.length);
+    } else {
+      console.error('[AdminDashboard] Failed to load organizations:', orgsResult.reason?.response?.status, orgsResult.reason?.message);
+      setOrgCount(null);
+    }
+
+    setLoading(false);
+    setRefreshing(false);
   }, []);
 
-  const users = verData?.users || [];
-  const totalRecords = verData?.total ?? users.length;
-  const totalPending = verData?.pending ?? users.filter((u) => u.verification_status === 'pending').length;
-  const totalVerified = verData?.approved ?? users.filter((u) => u.verification_status === 'approved').length;
-  const totalFailed = verData?.rejected ?? users.filter((u) => u.verification_status === 'rejected').length;
+  useEffect(() => { loadDashboard(); }, [loadDashboard]);
 
-  const batches = groupByBatch(users);
-  const activeBatches = batches.filter((b) => b.pending > 0).length;
-  const recentBatches = batches
-    .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
-    .slice(0, 4);
+  // ── Derived stats (memoized — recomputed only when batches change) ──────
+  const stats = useMemo(() => batches.reduce((acc, b) => {
+    acc.totalRecords += b.total;
+    acc.verified += b.verified;
+    acc.pending += b.pending;
+    acc.failed += b.failed;
+    return acc;
+  }, { totalRecords: 0, verified: 0, pending: 0, failed: 0 }), [batches]);
 
-  const statCards = [
-    {
-      label: 'Total Records', value: loading ? '...' : totalRecords, icon: Users,
-      path: '/admin/batch-monitor', delay: 0,
-      tone: { card: 'bg-blue-50 border-blue-200', label: 'text-blue-600', value: 'text-blue-950', icon: 'bg-white text-brand-blue' },
-    },
-    {
-      label: 'Active Batches', value: loading ? '...' : activeBatches, icon: Layers,
-      path: '/admin/batch-monitor', delay: 0.06,
-      tone: { card: 'bg-blue-50 border-blue-200', label: 'text-blue-600', value: 'text-blue-950', icon: 'bg-white text-brand-blue' },
-    },
-    {
-      label: 'Pending Verifications', value: loading ? '...' : totalPending, icon: CheckSquare,
-      path: '/admin/batch-monitor', delay: 0.12,
-      tone: { card: 'bg-blue-50 border-blue-200', label: 'text-blue-600', value: 'text-blue-950', icon: 'bg-white text-brand-blue' },
-    },
+  const processingBatchCount = useMemo(() => (
+    batches.filter((b) => PROCESSING_BATCH_STATUSES.has(b.status)).length
+  ), [batches]);
+
+  const recentBatches = useMemo(() => (
+    [...batches].sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0)).slice(0, 8)
+  ), [batches]);
+
+  const recentActivity = useMemo(() => (
+    [...batches]
+      .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
+      .slice(0, 6)
+      .map((b) => {
+        const meta = b.failed > 0
+          ? { label: 'Records rejected', dot: 'bg-red-500' }
+          : (ACTIVITY_META[b.status] || ACTIVITY_META.pending);
+        return { id: b.id, label: meta.label, dot: meta.dot, orgName: b.orgName, time: b.createdAt };
+      })
+  ), [batches]);
+
+  const topOrganizations = useMemo(() => {
+    const map = new Map();
+    batches.forEach((b) => {
+      const key = b.orgId || b.orgName;
+      if (!map.has(key)) map.set(key, { key, orgName: b.orgName, totalBatches: 0 });
+      map.get(key).totalBatches += 1;
+    });
+    return [...map.values()].sort((a, b) => b.totalBatches - a.totalBatches).slice(0, 4);
+  }, [batches]);
+  const maxOrgBatches = topOrganizations[0]?.totalBatches || 1;
+
+  const todayLabel = useMemo(() => new Date().toLocaleDateString('en-US', {
+    day: '2-digit', month: 'short', year: 'numeric',
+  }), []);
+
+  const kpis = [
+    { label: 'Total Organizations', value: orgCount === null ? '—' : orgCount, sub: orgCount === null ? 'Unavailable' : 'Active organizations', icon: Building2, iconBg: 'bg-purple-100', iconColor: 'text-purple-600' },
+    { label: 'Total Batches', value: batches.length, sub: 'All verification batches', icon: Layers, iconBg: 'bg-blue-100', iconColor: 'text-brand-blue' },
+    { label: 'Pending', value: stats.pending, sub: 'Awaiting verification', icon: Clock, iconBg: 'bg-orange-100', iconColor: 'text-orange-600' },
+    { label: 'Verified', value: stats.verified, sub: 'Completed', icon: CheckCircle, iconBg: 'bg-green-100', iconColor: 'text-green-600' },
+    { label: 'Failed', value: stats.failed, sub: 'Require attention', icon: XCircle, iconBg: 'bg-red-100', iconColor: 'text-red-600' },
   ];
 
-  const adminActions = [
-    { title: 'Promote Existing User', description: 'Grant super-admin access to an existing verified account.', path: '/admin/promote-super-admin', icon: ShieldCheck },
-    { title: 'Create New Super Admin', description: 'Create a brand-new privileged account with full platform control.', path: '/admin/create-super-admin', icon: UserPlus },
+  const donutData = [
+    { name: 'Pending', value: stats.pending, color: '#f97316' },
+    { name: 'Verified', value: stats.verified, color: '#22c55e' },
+    { name: 'Failed', value: stats.failed, color: '#ef4444' },
   ];
+
+  const attentionMetrics = [
+    { label: 'Pending verifications', value: stats.pending, tone: 'bg-orange-50 text-orange-700 hover:bg-orange-100/70' },
+    { label: 'Failed / rejected', value: stats.failed, tone: 'bg-red-50 text-red-700 hover:bg-red-100/70' },
+    { label: 'Processing batches', value: processingBatchCount, tone: 'bg-purple-50 text-purple-700 hover:bg-purple-100/70' },
+  ];
+  const hasAttentionItems = attentionMetrics.some((m) => m.value > 0);
+
+  const headerAction = (
+    <div className="flex items-center gap-3">
+      <span className="hidden sm:inline-flex items-center rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-500 font-inter">
+        {todayLabel}
+      </span>
+      <Button variant="primary" size="sm" icon={RefreshCw} loading={refreshing} onClick={() => loadDashboard(true)}>
+        Refresh
+      </Button>
+    </div>
+  );
 
   return (
     <AuthLayout title="Admin Dashboard">
       <div className="space-y-6">
-        <div
-          className="relative overflow-hidden rounded-[28px] border border-blue-400/30 px-6 py-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
-          style={{ background: 'linear-gradient(135deg, #2563eb 0%, #2f6af0 52%, #3b82f6 100%)', boxShadow: '0 24px 50px -30px rgba(37,99,235,0.65)' }}
-        >
-<div className="absolute -right-10 -top-10 h-40 w-40 rounded-full bg-white/10 blur-3xl" />
-          <div className="absolute -bottom-10 left-10 h-32 w-32 rounded-full bg-blue-200/20 blur-3xl" />
-          <div className="relative z-10">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-blue-100/80 font-inter">TruMarkZ</p>
-            <h1 className="mt-2 font-sora text-[38px] font-bold leading-none text-white">Super Admin Dashboard</h1>
-            <p className="mt-2 text-sm text-white font-inter">Full platform overview and control</p>
-          </div>
-          <button
-            onClick={() => window.location.reload()}
-            className="relative z-10 flex items-center gap-2 rounded-2xl border border-white/15 bg-white/12 hover:bg-white/18 transition-colors px-4 py-2.5 text-sm font-semibold text-white font-inter self-start sm:self-auto backdrop-blur-sm"
-          >
-            <RefreshCw size={14} />
-            Refresh
-          </button>
-        </div>
+        <PageHeader
+          title="Super Admin Dashboard"
+          subtitle="Monitor platform activity, organizations and verification performance."
+          action={headerAction}
+        />
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          {statCards.map((s) => (
-            <Stat key={s.label} {...s} onClick={() => navigate(s.path)} />
-          ))}
-        </div>
-
-        <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.22 }}>
-          <Card className="relative p-0 overflow-hidden border border-blue-100 bg-white shadow-[0_20px_44px_-34px_rgba(37,99,235,0.25)]">
-            <div className="absolute inset-x-0 top-0 h-[3px] bg-brand-blue/60" />
-            <div className="flex items-center justify-between px-6 py-4 border-b border-blue-100 bg-blue-50">
-              <div>
-                <h3 className="font-sora font-semibold text-blue-950">Verification Summary</h3>
-                <p className="text-xs text-blue-500 font-inter mt-0.5">Live counts from the platform</p>
+        {error && (
+          <Card className="p-5 border-red-100 bg-red-50">
+            <div className="flex items-start gap-3">
+              <AlertTriangle size={18} className="text-red-500 mt-0.5 shrink-0" />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-red-700 font-inter">Couldn't load dashboard data</p>
+                <p className="text-xs text-red-500 font-inter mt-0.5">{error}</p>
               </div>
-              <Button variant="ghost" size="sm" icon={ArrowRight} onClick={() => navigate('/admin/batch-monitor')}>
-                View All
-              </Button>
+              <Button variant="outline" size="sm" onClick={() => loadDashboard(true)}>Retry</Button>
             </div>
-            <div className="p-5 space-y-4">
+          </Card>
+        )}
+
+        {/* KPI row */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+          {loading
+            ? Array.from({ length: 5 }).map((_, i) => <StatCardSkeleton key={i} />)
+            : kpis.map((k, i) => <StatCard key={k.label} {...k} delay={i * 0.04} />)}
+        </div>
+
+        {/* Verification Overview + Needs Attention + Recent Activity */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+          <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
+            <SectionCard title="Verification Overview" subtitle="Live verification distribution">
               {loading ? (
-                <div className="flex items-center justify-center py-8 gap-2 text-blue-400">
-                  <RefreshCw size={18} className="animate-spin" />
-                  <span className="text-sm font-inter">Loading...</span>
+                <div className="flex items-center justify-center py-6">
+                  <SkeletonLoader width="180px" height="180px" circle />
                 </div>
+              ) : stats.totalRecords === 0 ? (
+                <InlineEmpty text="No verification data yet. This will populate once batches are created." />
               ) : (
-                <>
-                  <div className="grid grid-cols-3 gap-3">
-                    {[
-                      { label: 'Verified', value: totalVerified, icon: CheckCircle, tone: 'bg-blue-100 border-blue-200', text: 'text-blue-950', sub: 'text-blue-500' },
-                      { label: 'Pending', value: totalPending, icon: Clock, tone: 'bg-blue-100 border-blue-200', text: 'text-blue-950', sub: 'text-blue-500' },
-                      { label: 'Failed', value: totalFailed, icon: XCircle, tone: 'bg-blue-100 border-blue-200', text: 'text-blue-950', sub: 'text-blue-500' },
-                    ].map((s) => (
-                      <div key={s.label} className={`relative overflow-hidden rounded-[18px] border p-4 text-center shadow-[0_12px_28px_-24px_rgba(37,99,235,0.3)] ${s.tone}`}>
-                        <div className="absolute inset-x-0 top-0 h-[3px] bg-brand-blue/60" />
-                        <s.icon size={18} className={`mx-auto mb-1.5 ${s.text} opacity-80`} />
-                        <p className={`font-sora font-bold text-2xl ${s.text}`}>{s.value}</p>
-                        <p className={`text-xs font-inter mt-0.5 ${s.sub}`}>{s.label}</p>
+                <div className="flex items-center gap-4">
+                  <div className="relative w-[150px] h-[150px] shrink-0">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie data={donutData} dataKey="value" nameKey="name" innerRadius={48} outerRadius={70} strokeWidth={0} paddingAngle={2}>
+                          {donutData.map((d) => <Cell key={d.name} fill={d.color} />)}
+                        </Pie>
+                      </PieChart>
+                    </ResponsiveContainer>
+                    <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                      <span className="font-sora font-bold text-2xl text-brand-dark leading-none">{stats.totalRecords}</span>
+                      <span className="text-[11px] text-gray-400 font-inter mt-0.5">records</span>
+                    </div>
+                  </div>
+                  <div className="flex-1 min-w-0 space-y-3">
+                    {donutData.map((d) => (
+                      <div key={d.name} className="flex items-center justify-between gap-3">
+                        <span className="flex items-center gap-2 text-sm text-brand-dark font-inter">
+                          <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: d.color }} />
+                          {d.name}
+                        </span>
+                        <span className="font-sora font-semibold text-brand-dark">{d.value}</span>
                       </div>
                     ))}
                   </div>
-                  {totalRecords > 0 && (
-                    <div className="space-y-1.5">
-                      <div className="flex justify-between text-xs font-inter text-blue-500">
-                        <span>Overall completion</span>
-                        <span className="text-brand-blue font-semibold">
-                          {Math.round(((totalVerified + totalFailed) / totalRecords) * 100)}%
-                        </span>
-                      </div>
-                      <ProgressBar progress={Math.round(((totalVerified + totalFailed) / totalRecords) * 100)} color="blue" />
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
-          </Card>
-        </motion.div>
-
-        <div className="grid gap-5 xl:grid-cols-[1fr_380px]">
-          <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.28 }}>
-            <Card className="p-0 overflow-hidden border border-blue-100 h-full bg-white shadow-[0_20px_44px_-34px_rgba(37,99,235,0.25)]">
-              <div className="flex items-center justify-between px-6 py-4 border-b border-blue-100 bg-blue-50">
-                <div>
-                  <h3 className="font-sora font-semibold text-blue-950">Recent Batches</h3>
-                  <p className="text-xs text-blue-500 font-inter mt-0.5">Latest activity across all organisations</p>
                 </div>
-                <Button variant="ghost" size="sm" icon={ArrowRight} onClick={() => navigate('/admin/batch-monitor')}>
-                  View All
-                </Button>
-              </div>
-              <div className="p-5 space-y-3">
-                {loading ? (
-                  <div className="flex items-center justify-center py-10 gap-2 text-blue-400">
-                    <RefreshCw size={18} className="animate-spin" />
-                    <span className="text-sm font-inter">Loading batches...</span>
-                  </div>
-                ) : recentBatches.length === 0 ? (
-                  <p className="text-sm text-blue-400 font-inter text-center py-10">No batch data found</p>
-                ) : (
-                  recentBatches.map((batch, i) => {
-                    const progress = batch.total > 0
-                      ? Math.round(((batch.verified + batch.failed) / batch.total) * 100)
-                      : 0;
-                    const statusTone = batch.pending > 0
-                      ? 'bg-brand-blue/[0.06] border-brand-blue/15'
-                      : batch.failed > 0
-                        ? 'bg-blue-100 border-blue-200'
-                        : 'bg-blue-50 border-blue-200';
-
-                    return (
-                      <motion.div
-                        key={batch.id}
-                        initial={{ opacity: 0, x: -8 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{ delay: i * 0.06 }}
-                        className={`rounded-[18px] border p-4 shadow-[0_12px_26px_-24px_rgba(37,99,235,0.28)] ${statusTone}`}
-                      >
-                        <div className="flex items-start justify-between gap-3 mb-3">
-                          <div className="min-w-0">
-                            <p className="text-sm font-semibold text-blue-950 font-inter truncate">{batch.orgName}</p>
-                            <p className="text-xs text-blue-500 font-inter mt-0.5 font-mono">
-                              Batch {batch.id.slice(0, 8)} · {batch.total} records
-                            </p>
-                          </div>
-                          <Badge status={batch.pending > 0 ? 'info' : batch.failed > 0 ? 'default' : 'success'}>
-                            {batch.pending > 0 ? 'In Progress' : batch.failed > 0 ? 'Has Failures' : 'Complete'}
-                          </Badge>
-                        </div>
-                        <ProgressBar progress={progress} color="blue" />
-                        <div className="flex gap-4 mt-2.5">
-                          {[
-                            { label: 'Verified', val: batch.verified, cls: 'text-blue-950 font-semibold' },
-                            { label: 'Pending', val: batch.pending, cls: 'text-brand-blue font-semibold' },
-                            { label: 'Failed', val: batch.failed, cls: 'text-blue-500' },
-                          ].map((s) => (
-                            <span key={s.label} className="text-[11px] font-inter">
-                              <span className={s.cls}>{s.val}</span>
-                              <span className="text-blue-400 ml-1">{s.label}</span>
-                            </span>
-                          ))}
-                        </div>
-                      </motion.div>
-                    );
-                  })
-                )}
-              </div>
-            </Card>
+              )}
+            </SectionCard>
           </motion.div>
 
-          <div className="space-y-4">
-            <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}>
-              <Card className="p-0 overflow-hidden border border-blue-100 bg-white shadow-[0_20px_44px_-34px_rgba(37,99,235,0.25)]">
-                <div className="px-6 py-4 border-b border-blue-100 bg-blue-50">
-                  <h3 className="font-sora font-semibold text-blue-950">Quick Actions</h3>
-                  <p className="text-xs text-blue-500 font-inter mt-0.5">Admin management shortcuts</p>
+          <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.14 }}>
+            <SectionCard title="Needs Attention" subtitle="Items requiring admin action">
+              {loading ? (
+                <div className="space-y-3">
+                  {[1, 2, 3].map((i) => <SkeletonLoader key={i} height="52px" />)}
                 </div>
-                <div className="p-4 space-y-3">
-                  {adminActions.map((action, i) => (
-                    <motion.button
-                      key={action.title}
-                      initial={{ opacity: 0, x: 8 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      transition={{ delay: 0.32 + i * 0.07 }}
-                      onClick={() => navigate(action.path)}
-                      className="w-full flex items-center gap-4 rounded-[18px] border border-blue-200 bg-blue-50 hover:bg-brand-blue hover:border-brand-blue p-4 text-left transition-all group"
+              ) : !hasAttentionItems ? (
+                <p className="text-sm text-gray-400 font-inter text-center py-8">No items currently require attention.</p>
+              ) : (
+                <div className="space-y-2.5">
+                  {attentionMetrics.filter((m) => m.value > 0).map((m) => (
+                    <button
+                      key={m.label}
+                      onClick={() => navigate('/admin/batch-monitor')}
+                      className={`w-full flex items-center justify-between gap-3 rounded-xl px-4 py-3.5 text-left transition-colors ${m.tone}`}
                     >
-                      <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white group-hover:bg-white/20 shrink-0">
-                        <action.icon size={18} className="text-brand-blue group-hover:text-white" />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <p className="text-sm font-semibold text-blue-950 group-hover:text-white font-inter">{action.title}</p>
-                        <p className="text-xs text-blue-500 group-hover:text-blue-100 font-inter mt-0.5 leading-4">{action.description}</p>
-                      </div>
-                      <ArrowRight size={15} className="text-blue-400 group-hover:text-white shrink-0" />
-                    </motion.button>
+                      <span className="text-sm font-medium font-inter">{m.label}</span>
+                      <span className="font-sora font-bold text-lg">{m.value}</span>
+                    </button>
                   ))}
                 </div>
-              </Card>
-            </motion.div>
+              )}
+            </SectionCard>
+          </motion.div>
 
-          </div>
+          <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.18 }}>
+            <SectionCard title="Recent Activity" subtitle="Latest platform events">
+              {loading ? (
+                <div className="space-y-4">
+                  {[1, 2, 3].map((i) => <SkeletonLoader key={i} height="16px" />)}
+                </div>
+              ) : recentActivity.length === 0 ? (
+                <p className="text-sm text-gray-400 font-inter text-center py-8">No recent activity yet.</p>
+              ) : (
+                <div className="space-y-4">
+                  {recentActivity.map((a) => (
+                    <div key={a.id} className="flex items-start gap-3">
+                      <span className={`mt-1.5 w-2 h-2 rounded-full shrink-0 ${a.dot}`} />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-brand-dark font-inter truncate">{a.label}</p>
+                        <p className="text-xs text-gray-400 font-inter truncate">{a.orgName}</p>
+                      </div>
+                      <span className="text-xs text-gray-400 font-inter whitespace-nowrap">{timeAgo(a.time)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </SectionCard>
+          </motion.div>
         </div>
+
+        {/* Recent Batches + Top Organizations */}
+        <div className="grid grid-cols-1 xl:grid-cols-[1fr_320px] gap-5">
+          <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.22 }}>
+            <SectionCard
+              title="Recent Batches"
+              subtitle="Latest batch activity"
+              action={<Button variant="ghost" size="sm" onClick={() => navigate('/admin/batch-monitor')}>View All</Button>}
+              bodyClassName="p-0"
+            >
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-gray-100 text-left">
+                      <th className="px-4 py-3 font-inter font-medium text-gray-400 text-xs uppercase tracking-wide whitespace-nowrap">Batch Name</th>
+                      <th className="px-4 py-3 font-inter font-medium text-gray-400 text-xs uppercase tracking-wide whitespace-nowrap">Organization</th>
+                      <th className="px-4 py-3 font-inter font-medium text-gray-400 text-xs uppercase tracking-wide whitespace-nowrap">Type</th>
+                      <th className="px-4 py-3 font-inter font-medium text-gray-400 text-xs uppercase tracking-wide whitespace-nowrap">Records</th>
+                      <th className="px-4 py-3 font-inter font-medium text-gray-400 text-xs uppercase tracking-wide whitespace-nowrap">Status</th>
+                      <th className="px-4 py-3 font-inter font-medium text-gray-400 text-xs uppercase tracking-wide whitespace-nowrap">Created</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {loading ? (
+                      <TableSkeletonRows cols={6} rows={5} />
+                    ) : recentBatches.length === 0 ? (
+                      <tr>
+                        <td colSpan={6}>
+                          <InlineEmpty text="No verification batches found. Verification activity will appear here once batches are created." />
+                        </td>
+                      </tr>
+                    ) : (
+                      recentBatches.map((b) => {
+                        const meta = getBatchStatusMeta(b.status);
+                        return (
+                          <tr key={b.id} className="border-b border-gray-50 last:border-0 hover:bg-gray-50/60 transition-colors">
+                            <td className="px-4 py-3.5 font-inter text-brand-dark font-medium whitespace-nowrap max-w-[220px] truncate">{b.name}</td>
+                            <td className="px-4 py-3.5 font-inter text-gray-600 whitespace-nowrap max-w-[160px] truncate">{b.orgName}</td>
+                            <td className="px-4 py-3.5 font-inter text-gray-500 whitespace-nowrap">{b.type || '—'}</td>
+                            <td className="px-4 py-3.5 font-inter text-gray-600 whitespace-nowrap">{b.total}</td>
+                            <td className="px-4 py-3.5 whitespace-nowrap"><Badge status={meta.badge}>{meta.label}</Badge></td>
+                            <td className="px-4 py-3.5 font-inter text-gray-500 whitespace-nowrap">{formatDate(b.createdAt)}</td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </SectionCard>
+          </motion.div>
+
+          <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.26 }}>
+            <SectionCard title="Top Organizations" subtitle="Most active by batches">
+              {loading ? (
+                <div className="space-y-4">
+                  {[1, 2, 3].map((i) => <SkeletonLoader key={i} height="38px" />)}
+                </div>
+              ) : topOrganizations.length === 0 ? (
+                <InlineEmpty icon={Building2} text="No organization activity found yet." />
+              ) : (
+                <div className="space-y-4">
+                  {topOrganizations.map((o) => (
+                    <div key={o.key}>
+                      <div className="flex items-center justify-between gap-2 mb-1.5">
+                        <span className="text-sm font-medium text-brand-dark font-inter truncate">{o.orgName}</span>
+                        <span className="text-xs text-gray-400 font-inter whitespace-nowrap">{o.totalBatches} {o.totalBatches === 1 ? 'batch' : 'batches'}</span>
+                      </div>
+                      <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden">
+                        <div
+                          className="h-2 bg-brand-blue rounded-full"
+                          style={{ width: `${Math.max(6, Math.round((o.totalBatches / maxOrgBatches) * 100))}%` }}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </SectionCard>
+          </motion.div>
+        </div>
+
+        {/* Quick Actions */}
+        <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}>
+          <SectionCard title="Quick Actions">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <button
+                onClick={() => navigate('/admin/promote-super-admin')}
+                className="flex items-center gap-3 rounded-xl border border-gray-100 hover:border-brand-blue/30 hover:bg-brand-blue/5 px-4 py-3.5 text-left transition-colors"
+              >
+                <ShieldCheck size={16} className="text-brand-blue shrink-0" />
+                <span className="text-sm font-medium text-brand-dark font-inter">Promote Existing User</span>
+              </button>
+              <button
+                onClick={() => navigate('/admin/create-super-admin')}
+                className="flex items-center gap-3 rounded-xl border border-gray-100 hover:border-brand-blue/30 hover:bg-brand-blue/5 px-4 py-3.5 text-left transition-colors"
+              >
+                <UserPlus size={16} className="text-brand-blue shrink-0" />
+                <span className="text-sm font-medium text-brand-dark font-inter">Create New Super Admin</span>
+              </button>
+            </div>
+          </SectionCard>
+        </motion.div>
       </div>
     </AuthLayout>
   );

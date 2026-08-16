@@ -1,6 +1,8 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { motion } from 'framer-motion';
+import { Area, AreaChart, ResponsiveContainer } from 'recharts';
+import * as XLSX from 'xlsx';
 import { AuthLayout } from '@/components/layout/AuthLayout';
 import { PageHeader } from '@/components/shared/PageHeader';
 import { Card } from '@/components/ui/Card';
@@ -11,8 +13,8 @@ import { Modal } from '@/components/ui/Modal';
 import { verificationAPI, verifiersAPI, sdcAPI, adminAPI, getApiError, triggerBlobDownload } from '@/services/api';
 import { GenerateSDCModal, CertificateDetailModal } from '@/pages/admin/SDCVerification';
 import {
-  ArrowRight, Building2, CheckCircle, ChevronLeft, Clock, Download, Eye, Info,
-  Mail, MoreVertical, Package, Plus, RefreshCw, Send, ShieldCheck, Sparkles, Trash2, User, Users, X, XCircle, Zap,
+  ArrowRight, Building2, Calendar, CheckCircle, ChevronDown, ChevronLeft, ChevronRight, Clock, Download, Eye, Info,
+  Mail, MoreVertical, Package, Plus, RefreshCw, Search, Send, ShieldCheck, Sparkles, Trash2, User, Users, X, XCircle, Zap,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -139,7 +141,7 @@ const formatVerifTypeLabel = (report) =>
 
 const formatCreatedAt = (value) => {
   if (!value) return 'date unavailable';
-  return new Date(value).toLocaleString([], { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+  return new Date(value).toLocaleString([], { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 };
 
 // Batch aggregates come straight from GET /verification/batches — each entry
@@ -732,6 +734,21 @@ export const BatchMonitor = () => {
   const [detailRecord,        setDetailRecord]        = useState(null);
   const [actionMenu, setActionMenu] = useState({ batchId: null, anchorRect: null });
 
+  // Table filters / pagination — all applied client-side over the single
+  // GET /verification/batches response already held in `data`.
+  const [searchTerm,   setSearchTerm]   = useState('');
+  const [statusFilter, setStatusFilter] = useState('all'); // all | in_progress | pending | completed | failed
+  const [dateFrom,     setDateFrom]     = useState('');
+  const [dateTo,       setDateTo]       = useState('');
+  const [showDateRange, setShowDateRange] = useState(false);
+  const [showExportMenu, setShowExportMenu] = useState(false);
+  const [currentPage,  setCurrentPage]  = useState(1);
+  const [pageSize,     setPageSize]     = useState(10);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [orgFilter, statusFilter, searchTerm, dateFrom, dateTo]);
+
   const closeActionMenu = useCallback(() => {
     setActionMenu({ batchId: null, anchorRect: null });
   }, []);
@@ -835,8 +852,40 @@ export const BatchMonitor = () => {
 
   const orgOptions = Array.from(new Set(batches.map((b) => b.orgName).filter(Boolean))).sort((a, b) => a.localeCompare(b));
 
-  const visibleBatches = batches
-    .filter((b) => !orgFilter || b.orgName === orgFilter);
+  // Batch-level status buckets for the quick filter pills. There is no
+  // batch-level "failed" status in the backend (failure only exists per
+  // record), so the Failed pill matches batches with at least one failed
+  // record instead of a status string.
+  const STATUS_FILTERS = {
+    in_progress: (b) => b.status === 'processing' || b.status === 'verification_in_progress',
+    pending: (b) => b.status === 'pending',
+    completed: (b) => b.status === 'verification_completed' || b.status === 'sdc_generated',
+    failed: (b) => b.failed > 0,
+  };
+
+  const searchValue = searchTerm.trim().toLowerCase();
+  const fromTime = dateFrom ? new Date(dateFrom).getTime() : null;
+  const toTime = dateTo ? new Date(`${dateTo}T23:59:59.999`).getTime() : null;
+
+  const visibleBatches = batches.filter((b) => {
+    if (orgFilter && b.orgName !== orgFilter) return false;
+    if (statusFilter !== 'all' && !STATUS_FILTERS[statusFilter]?.(b)) return false;
+    if (searchValue && !`${b.name} ${b.id} ${b.orgName}`.toLowerCase().includes(searchValue)) return false;
+    if (fromTime && (!b.createdAt || new Date(b.createdAt).getTime() < fromTime)) return false;
+    if (toTime && (!b.createdAt || new Date(b.createdAt).getTime() > toTime)) return false;
+    return true;
+  });
+
+  const hasActiveFilters = !!(orgFilter || statusFilter !== 'all' || searchTerm || dateFrom || dateTo);
+  const clearAllFilters = () => {
+    setOrgFilter(''); setStatusFilter('all');
+    setSearchTerm(''); setDateFrom(''); setDateTo('');
+  };
+
+  const totalPages = Math.max(1, Math.ceil(visibleBatches.length / pageSize));
+  const safePage = Math.min(currentPage, totalPages);
+  const paginatedBatches = visibleBatches.slice((safePage - 1) * pageSize, safePage * pageSize);
+
   const selectedBatch = batches.find((b) => b.id === selectedBatchId) || null;
 
   const total    = batches.reduce((s, b) => s + b.total,    0);
@@ -844,11 +893,36 @@ export const BatchMonitor = () => {
   const verified = batches.reduce((s, b) => s + b.verified, 0);
   const failed   = batches.reduce((s, b) => s + b.failed,   0);
 
+  // Real 7-day trend per metric, bucketed by each batch's actual created_at.
+  // (There's no per-status-transition timestamp in the API, so this reflects
+  // "records on batches created that day", not a true state-change history.)
+  const sparkSeries = useMemo(() => {
+    const days = Array.from({ length: 7 }).map((_, i) => {
+      const d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - (6 - i)); return d;
+    });
+    const bucket = (selector) => days.map((day, i) => {
+      const next = new Date(day); next.setDate(day.getDate() + 1);
+      const value = batches.reduce((sum, b) => {
+        if (!b.createdAt) return sum;
+        const t = new Date(b.createdAt).getTime();
+        return (t >= day.getTime() && t < next.getTime()) ? sum + selector(b) : sum;
+      }, 0);
+      return { i, value };
+    });
+    return {
+      total: bucket((b) => b.total),
+      pending: bucket((b) => b.pending),
+      verified: bucket((b) => b.verified),
+      failed: bucket((b) => b.failed),
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, workflowByBatch]);
+
   const statCards = [
-    { label: 'Total Records', value: total,    icon: Users,        accent: 'bg-brand-blue', surface: 'bg-blue-50', text: 'text-brand-blue' },
-    { label: 'Pending Review', value: pending, icon: Clock,        accent: 'bg-brand-blue', surface: 'bg-blue-50', text: 'text-brand-blue' },
-    { label: 'Verified',       value: verified, icon: CheckCircle, accent: 'bg-brand-blue', surface: 'bg-blue-50', text: 'text-brand-blue' },
-    { label: 'Failed',         value: failed,   icon: XCircle,     accent: 'bg-brand-blue', surface: 'bg-blue-50', text: 'text-brand-blue' },
+    { key: 'total',    label: 'Total Records', value: total,    sub: 'Across all batches',    icon: Users,       surface: 'bg-blue-50',   text: 'text-brand-blue', stroke: '#2563eb', spark: sparkSeries.total },
+    { key: 'pending',  label: 'Pending Review', value: pending, sub: 'Awaiting verification',  icon: Clock,       surface: 'bg-orange-50', text: 'text-orange-500', stroke: '#f97316', spark: sparkSeries.pending },
+    { key: 'verified', label: 'Verified',       value: verified, sub: 'Successfully verified', icon: CheckCircle, surface: 'bg-green-50',  text: 'text-green-500',  stroke: '#22c55e', spark: sparkSeries.verified },
+    { key: 'failed',   label: 'Failed',         value: failed,   sub: 'Verification failed',   icon: XCircle,     surface: 'bg-red-50',    text: 'text-red-500',    stroke: '#ef4444', spark: sparkSeries.failed },
   ];
 
   const updateBatchWorkflow = (batchId, patch) => {
@@ -1169,19 +1243,70 @@ export const BatchMonitor = () => {
     }
   };
 
+  // ── Export the currently filtered batch list (not just the current page) ──
+  const handleExport = (format) => {
+    setShowExportMenu(false);
+    if (visibleBatches.length === 0) { toast.error('No batches to export'); return; }
+    const rows = visibleBatches.map((b) => ({
+      'Batch Name': b.name,
+      'Organization': b.orgName,
+      'Records': b.total,
+      'Pending': b.pending,
+      'Verified': b.verified,
+      'Failed': b.failed,
+      'Status': b.statusMeta.label,
+      'Created On': formatCreatedAt(b.createdAt),
+    }));
+    const worksheet = XLSX.utils.json_to_sheet(rows);
+    const stamp = new Date().toISOString().slice(0, 10);
+    if (format === 'csv') {
+      const csv = XLSX.utils.sheet_to_csv(worksheet);
+      triggerBlobDownload(new Blob([csv], { type: 'text/csv;charset=utf-8;' }), `trumarkz-batches-${stamp}.csv`);
+    } else {
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Batches');
+      XLSX.writeFile(workbook, `trumarkz-batches-${stamp}.xlsx`);
+    }
+    toast.success(`Exported ${rows.length} batch${rows.length === 1 ? '' : 'es'}`);
+  };
+
   return (
     <AuthLayout title="Batch Monitor">
       <PageHeader
         title="Verification Batch Monitor"
         subtitle="Review live human and product verification records"
         action={
-          <button
-            onClick={() => fetchData(true)}
-            className={`flex items-center gap-2 text-sm text-gray-500 font-inter hover:text-brand-blue transition-colors ${refreshing ? 'pointer-events-none' : ''}`}
-          >
-            <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />
-            {refreshing ? 'Refreshing...' : 'Refresh'}
-          </button>
+          <div className="flex items-center gap-3">
+            <Button variant="outline" size="sm" icon={RefreshCw} loading={refreshing} onClick={() => fetchData(true)}>
+              Refresh
+            </Button>
+            <div className="relative">
+              <Button variant="primary" size="sm" icon={Download} onClick={() => setShowExportMenu((v) => !v)}>
+                Export
+              </Button>
+              {showExportMenu && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setShowExportMenu(false)} />
+                  <div className="absolute right-0 top-full mt-2 w-48 rounded-xl border border-gray-200 bg-white p-1 shadow-xl z-50">
+                    <button
+                      type="button"
+                      onClick={() => handleExport('xlsx')}
+                      className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-inter text-gray-700 hover:bg-gray-50"
+                    >
+                      <Download size={14} /> Export as Excel (.xlsx)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleExport('csv')}
+                      className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-inter text-gray-700 hover:bg-gray-50"
+                    >
+                      <Download size={14} /> Export as CSV
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
         }
       />
 
@@ -1190,44 +1315,118 @@ export const BatchMonitor = () => {
         {statCards.map((stat) => {
           const Icon = stat.icon;
           return (
-            <Card key={stat.label} className="p-4 overflow-hidden relative">
-              <div className={`absolute inset-x-0 top-0 h-1 ${stat.accent}`} />
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-xs text-gray-500 font-inter">{stat.label}</p>
-                  <p className="font-sora font-bold text-2xl text-brand-dark mt-1">{stat.value}</p>
-                </div>
-                <div className={`w-11 h-11 rounded-xl ${stat.surface} flex items-center justify-center`}>
+            <Card key={stat.key} className="p-4 overflow-hidden">
+              <div className="flex items-start justify-between gap-3">
+                <div className={`w-11 h-11 rounded-xl ${stat.surface} flex items-center justify-center shrink-0`}>
                   <Icon size={20} className={stat.text} />
                 </div>
+                <div className="w-20 h-10 -mr-1 -mt-1">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={stat.spark} margin={{ top: 2, right: 0, left: 0, bottom: 0 }}>
+                      <defs>
+                        <linearGradient id={`spark-${stat.key}`} x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor={stat.stroke} stopOpacity={0.35} />
+                          <stop offset="100%" stopColor={stat.stroke} stopOpacity={0} />
+                        </linearGradient>
+                      </defs>
+                      <Area type="monotone" dataKey="value" stroke={stat.stroke} strokeWidth={1.75} fill={`url(#spark-${stat.key})`} isAnimationActive={false} />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
               </div>
+              <p className="text-xs text-gray-500 font-inter mt-3">{stat.label}</p>
+              <p className="font-sora font-bold text-2xl text-brand-dark mt-0.5">{stat.value}</p>
+              <p className="text-[11px] text-gray-400 font-inter mt-0.5">{stat.sub}</p>
             </Card>
           );
         })}
       </div>
 
       {/* Filter bar */}
-      <Card className="p-4 mb-4">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-          <div>
-            <p className="font-sora font-semibold text-sm text-brand-dark">Batch Queue</p>
-            <p className="text-xs text-gray-400 font-inter mt-1">{visibleBatches.length} of {batches.length} batches shown</p>
+      <Card className="p-4 mb-4 overflow-visible">
+        <div className="flex flex-col xl:flex-row xl:items-center gap-3">
+          <div className="flex items-center gap-2">
+            <Building2 size={14} className="text-gray-400 shrink-0" />
+            <select
+              value={orgFilter}
+              onChange={(e) => setOrgFilter(e.target.value)}
+              className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-semibold font-inter text-gray-600 focus:outline-none focus:ring-2 focus:ring-brand-blue/20 max-w-[200px]"
+            >
+              <option value="">All Organizations</option>
+              {orgOptions.map((org) => (
+                <option key={org} value={org}>{org}</option>
+              ))}
+            </select>
           </div>
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="flex items-center gap-2">
-              <Building2 size={14} className="text-gray-400 shrink-0" />
-              <select
-                value={orgFilter}
-                onChange={(e) => setOrgFilter(e.target.value)}
-                className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-semibold font-inter text-gray-600 focus:outline-none focus:ring-2 focus:ring-brand-blue/20 max-w-[220px]"
-              >
-                <option value="">All Organizations</option>
-                {orgOptions.map((org) => (
-                  <option key={org} value={org}>{org}</option>
-                ))}
-              </select>
-            </div>
+
+          <div className="relative flex-1 min-w-[200px]">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <input
+              type="text"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="Search by batch name or ID..."
+              className="w-full rounded-lg border border-gray-200 bg-white pl-9 pr-3 py-2 text-xs font-inter text-gray-600 focus:outline-none focus:ring-2 focus:ring-brand-blue/20"
+            />
           </div>
+
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setShowDateRange((v) => !v)}
+              className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-semibold font-inter text-gray-600 hover:border-gray-300 whitespace-nowrap"
+            >
+              <Calendar size={14} className="text-gray-400" />
+              {dateFrom || dateTo ? `${dateFrom || '…'} → ${dateTo || '…'}` : 'Date Range'}
+              <ChevronDown size={12} className="text-gray-400" />
+            </button>
+            {showDateRange && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setShowDateRange(false)} />
+                <div className="absolute right-0 top-full mt-2 w-64 rounded-xl border border-gray-200 bg-white p-3 shadow-xl z-50 space-y-2.5">
+                  <div>
+                    <label className="text-[11px] font-semibold text-gray-500 font-inter">From</label>
+                    <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="w-full mt-1 rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs font-inter text-gray-600" />
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-semibold text-gray-500 font-inter">To</label>
+                    <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="w-full mt-1 rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs font-inter text-gray-600" />
+                  </div>
+                  <div className="flex justify-between pt-1">
+                    <button type="button" onClick={() => { setDateFrom(''); setDateTo(''); }} className="text-xs text-gray-400 font-inter hover:text-gray-600">Clear</button>
+                    <button type="button" onClick={() => setShowDateRange(false)} className="text-xs font-semibold text-brand-blue font-inter hover:underline">Done</button>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* Quick status pills */}
+        <div className="flex flex-wrap items-center gap-2 mt-4 pt-4 border-t border-gray-100">
+          {[
+            { key: 'all', label: 'All' },
+            { key: 'in_progress', label: 'In Progress' },
+            { key: 'pending', label: 'Pending' },
+            { key: 'completed', label: 'Verification Completed' },
+            { key: 'failed', label: 'Failed' },
+          ].map((pill) => (
+            <button
+              key={pill.key}
+              type="button"
+              onClick={() => setStatusFilter(pill.key)}
+              className={`rounded-lg px-3.5 py-1.5 text-xs font-semibold font-inter transition-colors ${
+                statusFilter === pill.key ? 'bg-brand-blue text-white' : 'bg-gray-50 text-gray-500 hover:bg-gray-100 border border-gray-200'
+              }`}
+            >
+              {pill.label}
+            </button>
+          ))}
+          {hasActiveFilters && (
+            <button type="button" onClick={clearAllFilters} className="text-xs font-semibold text-brand-blue font-inter hover:underline ml-1">
+              Clear All
+            </button>
+          )}
         </div>
       </Card>
 
@@ -1239,7 +1438,14 @@ export const BatchMonitor = () => {
         </Card>
       ) : visibleBatches.length === 0 ? (
         <Card className="p-10 text-center">
-          <p className="text-sm text-gray-400 font-inter">No verification records found</p>
+          <p className="text-sm text-gray-400 font-inter">
+            {batches.length === 0 ? 'No verification records found' : 'No batches match the current filters'}
+          </p>
+          {hasActiveFilters && batches.length > 0 && (
+            <button type="button" onClick={clearAllFilters} className="mt-2 text-xs font-semibold text-brand-blue font-inter hover:underline">
+              Clear filters
+            </button>
+          )}
         </Card>
       ) : (
         <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }}>
@@ -1252,21 +1458,23 @@ export const BatchMonitor = () => {
               <Badge status="default" className="bg-gray-900 text-white">{visibleBatches.length} batches</Badge>
             </div>
             <div className="overflow-x-auto scrollbar-hidden bg-white">
-              <table className="w-full min-w-[1120px] border-collapse">
+              <table className="w-full min-w-[1180px] border-collapse">
                 <thead>
                   <tr className="bg-gray-50 border-b border-gray-100">
-                    <th className="px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-500 font-inter">Batch</th>
+                    <th className="px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-500 font-inter">Batch Name</th>
+                    <th className="px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-500 font-inter">Organization</th>
                     <th className="px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-500 font-inter">Progress</th>
                     <th className="px-5 py-3 text-center text-[11px] font-semibold uppercase tracking-wide text-gray-500 font-inter">Records</th>
                     <th className="px-5 py-3 text-center text-[11px] font-semibold uppercase tracking-wide text-gray-500 font-inter">Pending</th>
                     <th className="px-5 py-3 text-center text-[11px] font-semibold uppercase tracking-wide text-gray-500 font-inter">Verified</th>
                     <th className="px-5 py-3 text-center text-[11px] font-semibold uppercase tracking-wide text-gray-500 font-inter">Failed</th>
                     <th className="px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-500 font-inter">Status</th>
+                    <th className="px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-500 font-inter">Created On</th>
                     <th className="px-5 py-3 text-center text-[11px] font-semibold uppercase tracking-wide text-gray-500 font-inter">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100 bg-white">
-                  {visibleBatches.map((batch) => {
+                  {paginatedBatches.map((batch) => {
                     const complete = batch.total ? Math.round(((batch.verified + batch.failed) / batch.total) * 100) : 0;
                     return (
                       <tr key={batch.id} className="hover:bg-blue-50/30 transition-colors">
@@ -1276,21 +1484,21 @@ export const BatchMonitor = () => {
                               <Package size={18} />
                             </div>
                             <div className="min-w-0">
-                              <p className="font-sora font-semibold text-lg leading-5 text-brand-dark">{batch.name}</p>
-                              <p className="text-xs text-gray-400 font-inter mt-1 truncate">{batch.orgName}</p>
-                              <p className="text-[11px] text-gray-400 font-inter mt-2">Created {formatCreatedAt(batch.createdAt)}</p>
+                              <p className="font-sora font-semibold text-sm leading-5 text-brand-dark truncate max-w-[220px]">{batch.name}</p>
+                              <p className="text-[11px] text-gray-400 font-inter font-mono mt-1 truncate max-w-[220px]">{batch.id}</p>
                             </div>
                           </div>
                         </td>
-                        <td className="px-5 py-4 w-64">
-                          <ProgressBar progress={complete} height="h-2" />
-                          <div className="grid grid-cols-5 gap-1 mt-3">
-                            {WORKFLOW_STEPS.map((step, index) => {
-                              const activeIndex = WORKFLOW_STEPS.findIndex((item) => item.id === batch.status);
-                              return (
-                                <span key={step.id} className={`h-1.5 rounded-full ${index <= activeIndex ? 'bg-brand-blue' : 'bg-gray-200'}`} />
-                              );
-                            })}
+                        <td className="px-5 py-4">
+                          <div className="flex items-center gap-1.5 text-sm text-gray-600 font-inter">
+                            <Building2 size={13} className="text-gray-400 shrink-0" />
+                            <span className="truncate max-w-[140px]">{batch.orgName}</span>
+                          </div>
+                        </td>
+                        <td className="px-5 py-4 w-40">
+                          <div className="flex items-center gap-2">
+                            <div className="flex-1"><ProgressBar progress={complete} height="h-2" showLabel={false} /></div>
+                            <span className="text-xs font-semibold text-gray-500 font-inter w-9 text-right shrink-0">{complete}%</span>
                           </div>
                         </td>
                         <td className="px-5 py-4 text-center">
@@ -1310,6 +1518,9 @@ export const BatchMonitor = () => {
                             <span className="text-xs font-semibold font-inter">{batch.statusMeta.label}</span>
                             {batch.sharedWithOrganization && <span className="text-[11px] opacity-80 font-inter">Shared with org</span>}
                           </div>
+                        </td>
+                        <td className="px-5 py-4">
+                          <p className="text-xs text-gray-500 font-inter whitespace-nowrap">{formatCreatedAt(batch.createdAt)}</p>
                         </td>
                         <td className="px-5 py-4">
                           <div className="relative flex items-center justify-center min-w-[80px]">
@@ -1334,6 +1545,55 @@ export const BatchMonitor = () => {
                   })}
                 </tbody>
               </table>
+            </div>
+
+            {/* Pagination */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-6 py-4 border-t border-gray-100">
+              <p className="text-xs text-gray-400 font-inter">
+                Showing {(safePage - 1) * pageSize + 1} to {Math.min(safePage * pageSize, visibleBatches.length)} of {visibleBatches.length} results
+              </p>
+              <div className="flex items-center gap-3">
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    disabled={safePage <= 1}
+                    onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                    className="p-1.5 rounded-lg border border-gray-200 text-gray-500 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50"
+                  >
+                    <ChevronLeft size={14} />
+                  </button>
+                  {Array.from({ length: totalPages }).slice(0, 5).map((_, i) => {
+                    const pageNum = i + 1;
+                    return (
+                      <button
+                        key={pageNum}
+                        type="button"
+                        onClick={() => setCurrentPage(pageNum)}
+                        className={`w-7 h-7 rounded-lg text-xs font-semibold font-inter ${
+                          safePage === pageNum ? 'bg-brand-blue text-white' : 'text-gray-500 hover:bg-gray-50 border border-gray-200'
+                        }`}
+                      >
+                        {pageNum}
+                      </button>
+                    );
+                  })}
+                  <button
+                    type="button"
+                    disabled={safePage >= totalPages}
+                    onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                    className="p-1.5 rounded-lg border border-gray-200 text-gray-500 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50"
+                  >
+                    <ChevronRight size={14} />
+                  </button>
+                </div>
+                <select
+                  value={pageSize}
+                  onChange={(e) => setPageSize(Number(e.target.value))}
+                  className="rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-semibold font-inter text-gray-600 focus:outline-none focus:ring-2 focus:ring-brand-blue/20"
+                >
+                  {[10, 25, 50].map((n) => <option key={n} value={n}>{n} / page</option>)}
+                </select>
+              </div>
             </div>
           </Card>
         </motion.div>

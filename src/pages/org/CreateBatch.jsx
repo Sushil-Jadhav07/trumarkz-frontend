@@ -1196,17 +1196,6 @@ export const CreateBatch = () => {
   const [categories, setCategories] = useState([]);
   const [categoriesLoading, setCategoriesLoading] = useState(false);
 
-  // Load categories when product type is selected
-  useEffect(() => {
-    if (batchType === 'product' && categories.length === 0) {
-      setCategoriesLoading(true);
-      verificationAPI.getCategories()
-        .then(({ data }) => setCategories(Array.isArray(data) ? data : []))
-        .catch(() => toast.error('Failed to load product categories'))
-        .finally(() => setCategoriesLoading(false));
-    }
-  }, [batchType]);
-
   // If the user came through Industry -> Verifications -> Template, preserve that
   // context and continue at the final batch creation step.
   useEffect(() => {

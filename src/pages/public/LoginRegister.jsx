@@ -163,10 +163,11 @@ const featureList = [
   { icon: Fingerprint, text: 'Tamper-proof digital credentials' },
 ];
 
+// Only Organization and Individual are self-registerable — Super Admin
+// accounts are provisioned separately and never appear as a register option.
 const roles = [
   { id: 'organization', label: 'Organization', icon: Building2, description: 'Verify workers & issue credentials' },
   { id: 'individual',   label: 'Individual',   icon: User,      description: 'Build your verified Skill Tree' },
-  { id: 'super-admin',  label: 'Super Admin',  icon: Shield,    description: 'Platform control & monitoring' },
 ];
 
 const registerRoutes = { organization: '/org-registration', individual: '/register/individual' };
@@ -238,7 +239,9 @@ export const LoginRegister = () => {
     if (!validate() || submitting) return;
     setSubmitting(true);
     setErrors({});
-    const result = await login(email.trim(), password, userType, rememberMe);
+    // Role is never sent by the frontend — the backend's user_type on the
+    // login response is the single source of truth for redirect/session role.
+    const result = await login(email.trim(), password);
     setSubmitting(false);
     if (!result.success) {
       if (result.requiresVerification) {
@@ -256,16 +259,16 @@ export const LoginRegister = () => {
     try {
       const raw = localStorage.getItem(ROLE_CREDENTIALS_KEY);
       const saved = raw ? JSON.parse(raw) : {};
-      if (rememberMe) saved[userType] = { email: email.trim() };
-      else delete saved[userType];
+      if (rememberMe) saved[result.userType] = { email: email.trim() };
+      else delete saved[result.userType];
       localStorage.setItem(ROLE_CREDENTIALS_KEY, JSON.stringify(saved));
       sessionStorage.removeItem('trumarkz_login_identifier');
       sessionStorage.removeItem('trumarkz_login_role');
     } catch {}
-    if (result.userType === 'super-admin')                                  navigate('/admin/dashboard');
-    else if (result.requiresOnboarding)                                     navigate('/org/onboarding');
-    else if (result.userType === 'individual' || userType === 'individual') navigate('/individual/dashboard');
-    else                                                                    navigate('/dashboard');
+    if (result.userType === 'super-admin')     navigate('/admin/dashboard');
+    else if (result.requiresOnboarding)        navigate('/org/onboarding');
+    else if (result.userType === 'individual') navigate('/individual/dashboard');
+    else                                        navigate('/dashboard');
   };
 
   const handleGoogle = async () => {
@@ -458,15 +461,18 @@ export const LoginRegister = () => {
               </motion.p>
             </div>
 
-            {/* Role selector */}
+            {/* Role selector — registration only. Login no longer asks the user to
+                pick a role; the backend's user_type on the login response decides
+                where to redirect. */}
+            {tab === 'register' && (
             <motion.div
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ ...spring.smooth, delay: 0.3 }}
               className="mb-7"
             >
-              <p className="text-[11px] font-semibold font-inter text-gray-400 uppercase tracking-widest mb-3 text-center">Sign in as</p>
-              <div className="grid grid-cols-3 gap-2">
+              <p className="text-[11px] font-semibold font-inter text-gray-400 uppercase tracking-widest mb-3 text-center">Register as</p>
+              <div className="grid grid-cols-2 gap-2">
                 {roles.map((role) => {
                   const isActive = userType === role.id;
                   return (
@@ -526,6 +532,7 @@ export const LoginRegister = () => {
                 </motion.p>
               </AnimatePresence>
             </motion.div>
+            )}
 
             {/* Form area */}
             <AnimatePresence mode="wait">
@@ -612,59 +619,43 @@ export const LoginRegister = () => {
                     </motion.div>
                   </form>
 
-                  {userType !== 'super-admin' && (
-                    <motion.div
-                      initial={{ opacity: 0, y: 10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ ...spring.soft, delay: 0.26 }}
-                      className="mt-5 space-y-4"
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ ...spring.soft, delay: 0.26 }}
+                    className="mt-5 space-y-4"
+                  >
+                    <div className="relative flex items-center">
+                      <div className="flex-1 border-t border-gray-200" />
+                      <span className="mx-3 text-xs text-gray-400 font-inter bg-white px-1">or continue with</span>
+                      <div className="flex-1 border-t border-gray-200" />
+                    </div>
+                    <motion.button
+                      type="button"
+                      onClick={handleGoogle}
+                      disabled={googleLoading}
+                      whileHover={{ scale: 1.015, y: -1, boxShadow: '0 4px 16px rgba(0,0,0,0.08)' }}
+                      whileTap={{ scale: 0.975, y: 0 }}
+                      transition={spring.snappy}
+                      className="w-full flex items-center justify-center gap-3 py-2.5 px-4 rounded-xl border border-gray-200 bg-white text-brand-dark font-inter text-sm font-medium disabled:opacity-60 cursor-pointer shadow-sm"
                     >
-                      <div className="relative flex items-center">
-                        <div className="flex-1 border-t border-gray-200" />
-                        <span className="mx-3 text-xs text-gray-400 font-inter bg-white px-1">or continue with</span>
-                        <div className="flex-1 border-t border-gray-200" />
-                      </div>
+                      <GoogleIcon />
+                      {googleLoading ? 'Redirecting…' : 'Continue with Google'}
+                    </motion.button>
+                    <p className="text-center text-sm text-gray-500 font-inter">
+                      New to TruMarkZ?{' '}
                       <motion.button
                         type="button"
-                        onClick={handleGoogle}
-                        disabled={googleLoading}
-                        whileHover={{ scale: 1.015, y: -1, boxShadow: '0 4px 16px rgba(0,0,0,0.08)' }}
-                        whileTap={{ scale: 0.975, y: 0 }}
-                        transition={spring.snappy}
-                        className="w-full flex items-center justify-center gap-3 py-2.5 px-4 rounded-xl border border-gray-200 bg-white text-brand-dark font-inter text-sm font-medium disabled:opacity-60 cursor-pointer shadow-sm"
+                        onClick={() => setTab('register')}
+                        whileHover={{ scale: 1.02 }}
+                        whileTap={{ scale: 0.97 }}
+                        transition={spring.micro}
+                        className="text-brand-blue font-semibold hover:underline cursor-pointer"
                       >
-                        <GoogleIcon />
-                        {googleLoading ? 'Redirecting…' : 'Continue with Google'}
+                        Create an account
                       </motion.button>
-                      <p className="text-center text-sm text-gray-500 font-inter">
-                        {userType === 'individual' ? "Don't have an account? " : 'New organization? '}
-                        <motion.button
-                          type="button"
-                          onClick={() => setTab('register')}
-                          whileHover={{ scale: 1.02 }}
-                          whileTap={{ scale: 0.97 }}
-                          transition={spring.micro}
-                          className="text-brand-blue font-semibold hover:underline cursor-pointer"
-                        >
-                          {userType === 'individual' ? 'Register here' : 'Register organization'}
-                        </motion.button>
-                      </p>
-                    </motion.div>
-                  )}
-
-                  {userType === 'super-admin' && (
-                    <motion.div
-                      initial={{ opacity: 0, y: 8 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ ...spring.smooth, delay: 0.24 }}
-                      className="mt-5 flex items-start gap-2.5 bg-amber-50 border border-amber-200 rounded-xl px-3.5 py-3"
-                    >
-                      <Shield size={14} className="text-amber-600 mt-0.5 shrink-0" />
-                      <p className="text-xs text-amber-700 font-inter leading-relaxed">
-                        Restricted access. Sign in from an authorized, secure network only.
-                      </p>
-                    </motion.div>
-                  )}
+                    </p>
+                  </motion.div>
                 </motion.div>
 
               ) : (

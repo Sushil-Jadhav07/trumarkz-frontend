@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, forwardRef, useImperativeHandle } from 'react';
 import { motion } from 'framer-motion';
 import { AuthLayout } from '@/components/layout/AuthLayout';
 import { PageHeader } from '@/components/shared/PageHeader';
@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
 import {
   AlignLeft, BookOpen, Building2, Check, ChevronDown, Clock, DollarSign,
-  Filter, Link, Mail, MapPin, MoreVertical, Pencil, Phone,
+  Link, Mail, MapPin, MoreVertical, Pencil, Phone,
   Plus, RefreshCw, ShieldCheck, Trash2, User, Users, X, Zap,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -244,7 +244,7 @@ const VerifierFields = ({ values, onChange, typeNames = [] }) => (
   </div>
 );
 
-const VerifierDirectory = () => {
+const VerifierDirectory = forwardRef((props, ref) => {
   const [verifiers,  setVerifiers]  = useState([]);
   const [loading,    setLoading]    = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -277,6 +277,11 @@ const VerifierDirectory = () => {
   }, []);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
+
+  useImperativeHandle(ref, () => ({
+    refresh: () => fetchAll(true),
+    openAdd: () => setAddOpen(true),
+  }), [fetchAll]);
 
   useEffect(() => {
     verificationAPI.getVerificationTypes()
@@ -409,18 +414,17 @@ const VerifierDirectory = () => {
       {/* Stats */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-5">
         {[
-          { label: 'Total Verifiers',       value: verifiers.length, icon: Users,     color: 'text-brand-blue',  bg: 'bg-blue-50',   accent: 'bg-brand-blue' },
-          { label: 'Organizations',          value: uniqueOrgs,       icon: Building2, color: 'text-purple-600', bg: 'bg-purple-50', accent: 'bg-purple-500' },
-          { label: 'With Verifier Type',    value: withSpec,         icon: BookOpen,  color: 'text-green-600',  bg: 'bg-green-50',  accent: 'bg-green-500' },
-        ].map(({ label, value, icon: Icon, color, bg, accent }) => (
-          <Card key={label} className="p-4 overflow-hidden relative">
-            <div className={`absolute inset-x-0 top-0 h-1 ${accent}`} />
+          { label: 'Total Verifiers',    value: verifiers.length, icon: Users,     color: 'text-brand-blue',  cardBg: 'bg-blue-50/70 border-blue-100' },
+          { label: 'Organizations',      value: uniqueOrgs,       icon: Building2, color: 'text-purple-600', cardBg: 'bg-purple-50/70 border-purple-100' },
+          { label: 'With Verifier Type', value: withSpec,         icon: BookOpen,  color: 'text-green-600',  cardBg: 'bg-green-50/70 border-green-100' },
+        ].map(({ label, value, icon: Icon, color, cardBg }) => (
+          <Card key={label} className={`p-4 overflow-hidden ${cardBg}`}>
             <div className="flex items-center justify-between gap-3">
               <div>
                 <p className="text-xs text-gray-500 font-inter">{label}</p>
                 <p className="font-sora font-bold text-2xl text-brand-dark mt-1">{value}</p>
               </div>
-              <div className={`w-11 h-11 rounded-xl ${bg} flex items-center justify-center`}>
+              <div className={`w-11 h-11 rounded-xl bg-white flex items-center justify-center shadow-sm`}>
                 <Icon size={20} className={color} />
               </div>
             </div>
@@ -452,9 +456,6 @@ const VerifierDirectory = () => {
               <RefreshCw size={13} className={refreshing ? 'animate-spin' : ''} />
               {refreshing ? 'Refreshing...' : 'Refresh'}
             </button>
-            <Button variant="primary" size="sm" icon={Plus} onClick={() => setAddOpen(true)}>
-              Add Verifier
-            </Button>
           </div>
         </div>
       </Card>
@@ -662,7 +663,7 @@ const VerifierDirectory = () => {
       </Modal>
     </div>
   );
-};
+});
 
 // ── Verification Types Tab ────────────────────────────────────────────────────
 const VT_CATEGORY_TABS = [
@@ -679,7 +680,7 @@ const EMPTY_VT = {
   email_address: '', api_link: '', price: '', timeline: '', industry_type: '',
 };
 
-const VerificationTypes = () => {
+const VerificationTypes = forwardRef((props, ref) => {
   const [allTypes,        setAllTypes]        = useState([]);
   const [loading,         setLoading]         = useState(true);
   const [refreshing,      setRefreshing]      = useState(false);
@@ -721,6 +722,11 @@ const VerificationTypes = () => {
 
   useEffect(() => { fetchTypes(); }, [fetchTypes]);
 
+  useImperativeHandle(ref, () => ({
+    refresh: () => fetchTypes(true),
+    openAdd: () => setModalOpen(true),
+  }), [fetchTypes]);
+
   useEffect(() => {
     if (!actionMenuId) return;
     const close = () => { setActionMenuId(null); setMenuPos(null); };
@@ -750,6 +756,10 @@ const VerificationTypes = () => {
   const total     = allTypes.length;
   const automatic = allTypes.filter((t) => t.label === 'automatic').length;
   const manual    = allTypes.filter((t) => t.label === 'manual').length;
+
+  const industryOptions = Array.from(
+    new Set(allTypes.flatMap((t) => t.industry_type || []))
+  ).sort((a, b) => a.localeCompare(b));
 
   const updateForm  = (field, value) => setForm((prev) => ({ ...prev, [field]: value }));
   const resetForm   = () => setForm(EMPTY_VT);
@@ -881,21 +891,28 @@ const VerificationTypes = () => {
       {/* Stat Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-5">
         {[
-          { label: 'Total Types', value: total,     icon: ShieldCheck, color: 'text-brand-blue', bg: 'bg-blue-50',   accent: 'bg-brand-blue' },
-          { label: 'Automatic',   value: automatic, icon: Zap,         color: 'text-green-600',  bg: 'bg-green-50',  accent: 'bg-green-500' },
-          { label: 'Manual',      value: manual,    icon: Mail,        color: 'text-orange-600', bg: 'bg-orange-50', accent: 'bg-orange-400' },
-        ].map(({ label, value, icon: Icon, color, bg, accent }) => (
-          <Card key={label} className="p-4 overflow-hidden relative">
-            <div className={`absolute inset-x-0 top-0 h-1 ${accent}`} />
+          { label: 'Total Types', value: total,     icon: ShieldCheck, color: 'text-brand-blue',  cardBg: 'bg-blue-50/70 border-blue-100',     share: null },
+          { label: 'Automatic',   value: automatic, icon: Zap,         color: 'text-green-600',   cardBg: 'bg-green-50/70 border-green-100',   share: total ? automatic / total : 0, barColor: 'bg-green-500' },
+          { label: 'Manual',      value: manual,    icon: Mail,        color: 'text-orange-600',  cardBg: 'bg-orange-50/70 border-orange-100', share: total ? manual / total : 0,    barColor: 'bg-orange-400' },
+        ].map(({ label, value, icon: Icon, color, cardBg, share, barColor }) => (
+          <Card key={label} className={`p-4 overflow-hidden ${cardBg}`}>
             <div className="flex items-center justify-between gap-3">
               <div>
                 <p className="text-xs text-gray-500 font-inter">{label}</p>
                 <p className="font-sora font-bold text-2xl text-brand-dark mt-1">{value}</p>
+                <p className="text-[11px] text-gray-400 font-inter mt-0.5">
+                  {label === 'Total Types' ? 'All verification types' : `${label} verification types`}
+                </p>
               </div>
-              <div className={`w-11 h-11 rounded-xl ${bg} flex items-center justify-center`}>
+              <div className="w-11 h-11 rounded-xl bg-white flex items-center justify-center shrink-0 shadow-sm">
                 <Icon size={20} className={color} />
               </div>
             </div>
+            {share !== null && (
+              <div className="w-full h-1.5 bg-white/70 rounded-full overflow-hidden mt-3">
+                <div className={`h-1.5 rounded-full ${barColor}`} style={{ width: `${Math.round(share * 100)}%` }} />
+              </div>
+            )}
           </Card>
         ))}
       </div>
@@ -903,66 +920,57 @@ const VerificationTypes = () => {
       {/* Filters */}
       <Card className="p-4 mb-4">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-          <div className="flex items-center gap-3 flex-wrap">
-            <Filter size={14} className="text-gray-400 shrink-0" />
-            <div className="flex gap-2">
-              {VT_CATEGORY_TABS.map((tab) => (
-                <button
-                  key={tab.value}
-                  onClick={() => setCategoryTab(tab.value)}
-                  className={`px-4 py-2 rounded-lg text-xs font-semibold font-inter transition-all ${
-                    categoryTab === tab.value
-                      ? 'bg-brand-blue text-white shadow-sm'
-                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                  }`}
-                >
-                  {tab.label}
-                </button>
-              ))}
-            </div>
-            <div className="w-px h-5 bg-gray-200" />
-            <div className="flex gap-2">
-              {VT_LABEL_TABS.map((tab) => (
-                <button
-                  key={tab.value}
-                  onClick={() => setLabelFilter((prev) => (prev === tab.value ? '' : tab.value))}
-                  className={`px-4 py-2 rounded-lg text-xs font-semibold font-inter transition-all ${
-                    labelFilter === tab.value
-                      ? tab.value === 'automatic'
-                        ? 'bg-green-600 text-white shadow-sm'
-                        : 'bg-orange-500 text-white shadow-sm'
-                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                  }`}
-                >
-                  {tab.label}
-                </button>
-              ))}
-            </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            {VT_CATEGORY_TABS.map((tab) => (
+              <button
+                key={tab.value}
+                onClick={() => setCategoryTab(tab.value)}
+                className={`px-4 py-2 rounded-lg text-xs font-semibold font-inter transition-all ${
+                  categoryTab === tab.value
+                    ? 'bg-brand-blue text-white shadow-sm'
+                    : 'bg-gray-50 text-gray-600 border border-gray-200 hover:bg-gray-100'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+            {VT_LABEL_TABS.map((tab) => (
+              <button
+                key={tab.value}
+                onClick={() => setLabelFilter((prev) => (prev === tab.value ? '' : tab.value))}
+                className={`px-4 py-2 rounded-lg text-xs font-semibold font-inter transition-all ${
+                  labelFilter === tab.value
+                    ? tab.value === 'automatic'
+                      ? 'bg-green-600 text-white shadow-sm'
+                      : 'bg-orange-500 text-white shadow-sm'
+                    : 'bg-gray-50 text-gray-600 border border-gray-200 hover:bg-gray-100'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
           </div>
-          <div className="flex items-center gap-2">
-            <div className="relative">
-              <input
+          <div className="flex items-end gap-2">
+            <div>
+              <label className="block text-[11px] font-semibold text-gray-400 font-inter mb-1">Filter by industry</label>
+              <select
                 value={industryFilter}
                 onChange={(e) => setIndustryFilter(e.target.value)}
-                placeholder="Filter by industry..."
-                className="rounded-xl border border-gray-200 px-3 py-2 pr-8 text-xs font-inter focus:outline-none focus:ring-2 focus:ring-brand-blue/30 w-52"
-              />
-              {industryFilter && (
-                <button onClick={() => setIndustryFilter('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
-                  <X size={13} />
-                </button>
-              )}
+                className="rounded-xl border border-gray-200 px-3 py-2 text-xs font-semibold font-inter text-gray-600 focus:outline-none focus:ring-2 focus:ring-brand-blue/30 w-52 bg-white"
+              >
+                <option value="">All Industries</option>
+                {industryOptions.map((ind) => (
+                  <option key={ind} value={ind}>{ind}</option>
+                ))}
+              </select>
             </div>
             <button
               onClick={() => fetchTypes(true)}
-              className={`flex items-center gap-1.5 text-xs text-gray-500 font-inter hover:text-brand-blue transition-colors px-2 py-2 ${refreshing ? 'pointer-events-none' : ''}`}
+              className={`flex items-center gap-1.5 text-xs text-gray-500 font-inter hover:text-brand-blue transition-colors border border-gray-200 rounded-xl px-3 py-2 ${refreshing ? 'pointer-events-none' : ''}`}
             >
               <RefreshCw size={13} className={refreshing ? 'animate-spin' : ''} />
               {refreshing ? 'Refreshing...' : 'Refresh'}
             </button>
-            <Button variant="primary" size="sm" icon={Plus} onClick={() => setModalOpen(true)}>
-              Add Type
-            </Button>
           </div>
         </div>
       </Card>
@@ -1342,7 +1350,7 @@ const VerificationTypes = () => {
       </Modal>
     </div>
   );
-};
+});
 
 // ── Page tabs ─────────────────────────────────────────────────────────────────
 const TABS = [
@@ -1351,14 +1359,41 @@ const TABS = [
 ];
 
 // ── Main Export ───────────────────────────────────────────────────────────────
+const TAB_META = {
+  directory: {
+    title: 'Verifier Directory',
+    subtitle: 'Manage verifier entities used across the platform',
+    addLabel: 'Add Verifier',
+  },
+  types: {
+    title: 'Verification Types',
+    subtitle: 'Manage verification types used across the platform',
+    addLabel: 'Add Type',
+  },
+};
+
 export const Verifiers = () => {
   const [activeTab, setActiveTab] = useState('directory');
+  const directoryRef = useRef(null);
+  const typesRef = useRef(null);
+  const activeRef = activeTab === 'directory' ? directoryRef : typesRef;
+  const meta = TAB_META[activeTab];
 
   return (
     <AuthLayout title="Verifiers">
       <PageHeader
-        title="Verifiers"
-        subtitle="Manage verifier entities and verification types used across the platform"
+        title={meta.title}
+        subtitle={meta.subtitle}
+        action={
+          <div className="flex items-center gap-3">
+            <Button variant="outline" size="sm" icon={RefreshCw} onClick={() => activeRef.current?.refresh()}>
+              Refresh
+            </Button>
+            <Button variant="primary" size="sm" icon={Plus} onClick={() => activeRef.current?.openAdd()}>
+              {meta.addLabel}
+            </Button>
+          </div>
+        }
       />
 
       {/* Tab bar */}
@@ -1379,7 +1414,9 @@ export const Verifiers = () => {
         ))}
       </div>
 
-      {activeTab === 'directory' ? <VerifierDirectory /> : <VerificationTypes />}
+      {activeTab === 'directory'
+        ? <VerifierDirectory ref={directoryRef} />
+        : <VerificationTypes ref={typesRef} />}
     </AuthLayout>
   );
 };

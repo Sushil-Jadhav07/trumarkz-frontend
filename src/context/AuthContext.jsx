@@ -120,7 +120,9 @@ export const AuthProvider = ({ children }) => {
   }, [buildUser]);
 
   // ── Login ──────────────────────────────────────────────────────────────────
-  const login = useCallback(async (email, password, selectedRole = 'organization') => {
+  // Role is no longer selected on the frontend — the backend's user_type on
+  // the login response is the single source of truth for where to route.
+  const login = useCallback(async (email, password) => {
     try {
       tokenHelpers.remove();
 
@@ -129,17 +131,10 @@ export const AuthProvider = ({ children }) => {
       const accessToken = data.access_token || data.token;
       if (!accessToken) return { success: false, error: 'Login response did not include an access token.' };
 
-      const returnedType = normalizeUserType(data.user_type, selectedRole);
-
-      // Validate the returned role matches what the user selected
-      if (selectedRole === 'super-admin' && returnedType !== 'super-admin') {
-        return { success: false, error: 'This account does not have Super Admin access.' };
-      }
-      if (selectedRole !== 'super-admin' && returnedType === 'super-admin') {
-        return { success: false, error: 'Please select the "Super Admin" role to sign in with this account.' };
-      }
-      if (returnedType !== selectedRole) {
-        return { success: false, error: `This account is registered as "${returnedType}". Please select the correct role and try again.` };
+      const returnedType = normalizeUserType(data.user_type, null);
+      if (!returnedType) {
+        console.error('[Auth] Login succeeded but returned an unrecognized user_type:', data.user_type);
+        return { success: false, error: 'Unable to determine your account type. Please contact support.' };
       }
 
       persistAuthData({ ...data, access_token: accessToken }, returnedType);

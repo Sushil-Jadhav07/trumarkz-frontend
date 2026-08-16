@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import * as XLSX from 'xlsx';
 import { AuthLayout } from '@/components/layout/AuthLayout';
 import { PageHeader } from '@/components/shared/PageHeader';
 import { Card } from '@/components/ui/Card';
@@ -12,7 +13,7 @@ import { authAPI, verificationAPI, sdcAPI, adminAPI, getApiError } from '@/servi
 import {
   Search, ShieldCheck, Users, ChevronRight, CheckCircle, Clock, XCircle,
   ArrowLeft, FileText, QrCode, Eye, ChevronDown, Sparkles, RefreshCw, AlertCircle, Building2,
-  Copy, Anchor, Star,
+  Copy, Anchor, Star, Layers, Download,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -1181,6 +1182,29 @@ const SDCVerification = () => {
   const totalVerified = orgs.reduce((s, o) => s + o.batches.reduce((s2, b) => s2 + b.verified, 0), 0);
   const totalGenerated = orgs.reduce((s, o) => s + o.batches.filter((b) => b.sdcStatus === 'generated').length, 0);
 
+  // Exports the currently loaded org/batch summary — every row is real data
+  // already held in `orgs` (no extra API calls).
+  const handleExportReport = () => {
+    const rows = orgs.flatMap((org) =>
+      org.batches.map((b) => ({
+        'Organization': org.orgName,
+        'Batch Name': b.name,
+        'Records': b.total,
+        'Verified': b.verified,
+        'Pending': b.pending,
+        'Failed': b.failed,
+        'SDC Status': b.sdcStatus === 'generated' ? 'Generated' : 'Not Generated',
+        'Created On': formatDate(b.createdAt),
+      }))
+    );
+    if (rows.length === 0) { toast.error('No batches to export'); return; }
+    const worksheet = XLSX.utils.json_to_sheet(rows);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'SDC Report');
+    XLSX.writeFile(workbook, `trumarkz-sdc-report-${new Date().toISOString().slice(0, 10)}.xlsx`);
+    toast.success(`Exported ${rows.length} batch${rows.length === 1 ? '' : 'es'}`);
+  };
+
   const patchBatchInState = (batchId, patch) => {
     setOrgs((prev) => prev.map((o) => ({
       ...o,
@@ -1321,18 +1345,35 @@ const SDCVerification = () => {
   return (
     <AuthLayout title="SDC Verification">
       <div className="w-full px-2 sm:px-4 lg:px-1">
-        <PageHeader title="SDC Verification" subtitle="Generate and track Signed Digital Certificates, organized by organization and batch" />
+        <PageHeader
+          title="SDC Verification"
+          subtitle="Generate and track Signed Digital Certificates, organized by organization and batch"
+          action={
+            <div className="flex items-center gap-3">
+              <Button variant="outline" size="sm" icon={Download} onClick={handleExportReport}>
+                Export Report
+              </Button>
+            </div>
+          }
+        />
 
         <div className="grid grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
           {[
-            { label: 'Organizations', value: orgs.length, color: 'text-brand-dark', bg: 'bg-gray-50' },
-            { label: 'Total Batches', value: totalBatches, color: 'text-brand-blue', bg: 'bg-blue-50' },
-            { label: 'Verified Records', value: `${totalVerified}/${totalRecords}`, color: 'text-green-600', bg: 'bg-green-50' },
-            { label: 'SDC Generated', value: `${totalGenerated}/${totalBatches}`, color: 'text-orange-500', bg: 'bg-orange-50' },
+            { label: 'Organizations', value: orgs.length, icon: Building2, color: 'text-brand-dark', iconColor: 'text-slate-500', bg: 'bg-gray-50' },
+            { label: 'Total Batches', value: totalBatches, icon: Layers, color: 'text-brand-blue', iconColor: 'text-brand-blue', bg: 'bg-blue-50' },
+            { label: 'Verified Records', value: `${totalVerified}/${totalRecords}`, icon: CheckCircle, color: 'text-green-600', iconColor: 'text-green-600', bg: 'bg-green-50' },
+            { label: 'SDC Generated', value: `${totalGenerated}/${totalBatches}`, icon: Sparkles, color: 'text-orange-500', iconColor: 'text-orange-500', bg: 'bg-orange-50' },
           ].map((s) => (
             <Card key={s.label} className={`p-4 ${s.bg}`}>
-              <p className={`text-3xl font-bold font-sora ${s.color}`}>{s.value}</p>
-              <p className="text-xs text-gray-500 font-inter mt-1">{s.label}</p>
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className={`text-3xl font-bold font-sora ${s.color}`}>{s.value}</p>
+                  <p className="text-xs text-gray-500 font-inter mt-1">{s.label}</p>
+                </div>
+                <div className="w-10 h-10 rounded-xl bg-white flex items-center justify-center shrink-0 shadow-sm">
+                  <s.icon size={18} className={s.iconColor} />
+                </div>
+              </div>
             </Card>
           ))}
         </div>
