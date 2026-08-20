@@ -13,6 +13,17 @@ export const WelcomeKYC = () => {
   const regType = sessionStorage.getItem('trumarkz_reg_type');
   const isIndividual = regType === 'individual';
 
+  React.useEffect(() => {
+    const redirectTimer = setTimeout(() => {
+      sessionStorage.removeItem('trumarkz_reg_type');
+      sessionStorage.removeItem('trumarkz_otp_email');
+      sessionStorage.removeItem('trumarkz_verified_email');
+      navigate(isIndividual ? '/login?type=individual' : '/login?type=organization', { replace: true });
+    }, 1200);
+
+    return () => clearTimeout(redirectTimer);
+  }, [isIndividual, navigate]);
+
   const verifiedItems = [
     { label: 'Email verified successfully', icon: Mail },
     { label: 'Registration completed', icon: UserCheck },
@@ -23,12 +34,7 @@ export const WelcomeKYC = () => {
     sessionStorage.removeItem('trumarkz_otp_email');
     sessionStorage.removeItem('trumarkz_verified_email');
 
-    if (isIndividual) {
-      navigate('/login?type=individual');
-    } else {
-      // Org: go to login, onboarding happens after first login
-      navigate('/login?type=organization');
-    }
+    navigate(isIndividual ? '/login?type=individual' : '/login?type=organization', { replace: true });
   };
 
   return (

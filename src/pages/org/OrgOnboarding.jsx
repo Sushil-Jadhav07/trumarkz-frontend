@@ -19,6 +19,10 @@ const INDUSTRY_OPTIONS = [
   'Non-Profit', 'Government', 'Other',
 ];
 
+// Backend now stores industry_type as a single string, not a list — reuse
+// the card-style single-select pattern from OrgRegistration.jsx's "What
+// does your organization verify?" picker instead of a multi-select dropdown.
+
 const USE_CASE_OPTIONS = [
   {
     key: 'primary',
@@ -39,7 +43,7 @@ export const OrgOnboarding = () => {
   const { completeOnboarding } = useAuth();
 
   const [form, setForm] = useState({
-    industryType: [],
+    industryType: '',
     gstin: '',
     businessRegNumber: '',
     addressLine1: '',
@@ -53,7 +57,7 @@ export const OrgOnboarding = () => {
 
   const validate = () => {
     const newErrors = {};
-    if (form.industryType.length === 0) newErrors.industryType = 'Please select at least one industry type';
+    if (!form.industryType.trim()) newErrors.industryType = 'Please select an industry type';
     if (!form.gstin.trim()) newErrors.gstin = 'GSTIN is required';
     else if (form.gstin.trim().length !== 15) newErrors.gstin = 'GSTIN must be exactly 15 characters';
     if (!form.businessRegNumber.trim()) newErrors.businessRegNumber = 'Business registration number is required';
@@ -81,13 +85,9 @@ export const OrgOnboarding = () => {
     navigate('/dashboard');
   };
 
-  const toggleIndustry = (industry) => {
-    setForm(prev => ({
-      ...prev,
-      industryType: prev.industryType.includes(industry)
-        ? prev.industryType.filter(i => i !== industry)
-        : [...prev.industryType, industry],
-    }));
+  const selectIndustry = (industry) => {
+    setForm(prev => ({ ...prev, industryType: industry }));
+    setIndustryOpen(false);
     if (errors.industryType) setErrors(prev => ({ ...prev, industryType: '' }));
   };
 
@@ -136,10 +136,8 @@ export const OrgOnboarding = () => {
                   errors.industryType ? 'border-red-400 bg-red-50' : 'border-gray-200 bg-white hover:border-brand-blue'
                 }`}
               >
-                <span className={form.industryType.length ? 'text-brand-dark' : 'text-gray-400'}>
-                  {form.industryType.length
-                    ? `${form.industryType.length} selected: ${form.industryType.slice(0, 2).join(', ')}${form.industryType.length > 2 ? '…' : ''}`
-                    : 'Select industry type(s)'}
+                <span className={form.industryType ? 'text-brand-dark' : 'text-gray-400'}>
+                  {form.industryType || 'Select an industry type'}
                 </span>
                 {industryOpen ? <ChevronUp size={16} className="text-gray-400" /> : <ChevronDown size={16} className="text-gray-400" />}
               </button>
@@ -155,11 +153,11 @@ export const OrgOnboarding = () => {
                     <button
                       key={industry}
                       type="button"
-                      onClick={() => toggleIndustry(industry)}
+                      onClick={() => selectIndustry(industry)}
                       className="w-full flex items-center justify-between px-4 py-2.5 hover:bg-gray-50 text-sm font-inter text-brand-dark transition-colors"
                     >
                       <span>{industry}</span>
-                      {form.industryType.includes(industry) && <CheckCircle size={16} className="text-brand-blue" />}
+                      {form.industryType === industry && <CheckCircle size={16} className="text-brand-blue" />}
                     </button>
                   ))}
                 </motion.div>

@@ -23,6 +23,7 @@ const BASE_FIELDS = [
   { key: 'dob',           label: 'Date of Birth', hint: 'YYYY-MM-DD' },
   { key: 'aadhar_number', label: 'Aadhar Number' },
   { key: 'pan_number',    label: 'PAN Number' },
+  { key: 'license_number', label: 'License Number' },
   { key: 'gender',        label: 'Gender' },
 ];
 
@@ -338,7 +339,8 @@ export const DownloadTemplate = () => {
   const [downloading,    setDownloading]    = useState(false);
   const [baseToggles,    setBaseToggles]    = useState({
     full_name: true, email: true, phone_number: true,
-    dob: true, aadhar_number: true, pan_number: true, gender: true,
+    dob: true, aadhar_number: true, pan_number: true,
+    license_number: true, gender: true,
   });
   const [batchNameValue, setBatchNameValue] = useState(() => {
     const d = new Date();

@@ -13,7 +13,7 @@ import { CertificateDetailModal } from '@/pages/admin/SDCVerification';
 import {
   ChevronLeft, ChevronRight, CheckCircle, Clock, Download,
   Eye, FileText, Info, Layers, Package, RefreshCw, Upload,
-  User, XCircle, Play, BarChart3, Building2, ShieldCheck, Globe, Award,
+  User, XCircle, Play, BarChart3, Building2, ShieldCheck, Globe, Award, AlertTriangle,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -262,7 +262,12 @@ const BatchDetailModal = ({ batchId, batchName, onClose }) => {
     setCertsLoading(true);
     try {
       const orgId   = sdcInfo?.org_id || undefined;
-      const spaceId = sdcInfo?.space_id || user?.humanSpaceId || user?.productSpaceId || user?.warrantySpaceId || undefined;
+      // Falls back to the org's own first configured Dhiway space if this
+      // batch's own verification_progress.sdc doesn't have one recorded yet.
+      // dhiways_details replaced the old per-kind human/product/warranty
+      // space id fields with a flat array — there's no "kind" to match on
+      // anymore, so this just uses the first entry.
+      const spaceId = sdcInfo?.space_id || user?.dhiwaysDetails?.[0]?.space_id || undefined;
 
       const allRecords = [];
       let page = 1;
@@ -305,7 +310,7 @@ const BatchDetailModal = ({ batchId, batchName, onClose }) => {
     } finally {
       setCertsLoading(false);
     }
-  }, [user?.humanSpaceId, user?.productSpaceId, user?.warrantySpaceId]);
+  }, [user?.dhiwaysDetails]);
 
   useEffect(() => {
     if (!batchId) return;
@@ -736,6 +741,7 @@ const BatchDetailModal = ({ batchId, batchName, onClose }) => {
 // ── Main Page ─────────────────────────────────────────────────────────────────
 export const BatchStatus = () => {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [batches,      setBatches]      = useState([]);
   const [loading,      setLoading]      = useState(true);
   const [refreshing,   setRefreshing]   = useState(false);
@@ -743,6 +749,17 @@ export const BatchStatus = () => {
   const [page,         setPage]         = useState(0);
   const [selectedId,   setSelectedId]   = useState(null);
   const [selectedName, setSelectedName] = useState('');
+  const [showGstGate,  setShowGstGate]  = useState(false);
+
+  // Orgs must have a verified GSTIN before creating batches. (Superadmin
+  // approval used to be a second gate here too, but the backend removed
+  // that requirement from the authorization flow entirely — org_approved
+  // no longer blocks anything.)
+  const gstVerified = !!user?.gstVerified;
+  const handleNewBatchClick = () => {
+    if (gstVerified) navigate('/org/create-batch');
+    else setShowGstGate(true);
+  };
 
   const fetchData = useCallback(async (showRefresh = false) => {
     if (showRefresh) setRefreshing(true);
@@ -855,7 +872,7 @@ export const BatchStatus = () => {
                 <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />
                 {refreshing ? 'Refreshing…' : 'Refresh'}
               </button>
-              <Button variant="primary" size="sm" icon={Upload} onClick={() => navigate('/org/create-batch')}>
+              <Button variant="primary" size="sm" icon={Upload} onClick={handleNewBatchClick}>
                 New Batch
               </Button>
             </div>
@@ -1013,7 +1030,7 @@ export const BatchStatus = () => {
                     : 'Create your first verification batch to get started.'}
                 </p>
               </div>
-              <Button variant="primary" size="sm" icon={Upload} onClick={() => navigate('/org/create-batch')}>
+              <Button variant="primary" size="sm" icon={Upload} onClick={handleNewBatchClick}>
                 New Batch
               </Button>
             </div>
@@ -1164,6 +1181,35 @@ export const BatchStatus = () => {
         batchName={selectedName}
         onClose={() => { setSelectedId(null); setSelectedName(''); }}
       />
+
+      <Modal isOpen={showGstGate} onClose={() => setShowGstGate(false)} title="GST Verification Required" size="sm">
+        <div className="space-y-4">
+          <div className="flex items-start gap-3 rounded-xl border border-amber-100 bg-amber-50 p-4">
+            <AlertTriangle size={18} className="mt-0.5 shrink-0 text-amber-500" />
+            <div>
+              <p className="font-inter text-sm font-semibold text-amber-800">
+                Verify your GSTIN before creating batches
+              </p>
+              <p className="mt-1 font-inter text-xs text-amber-700">
+                {user?.gstin
+                  ? 'Your GSTIN is on file but hasn’t been verified yet. Verify it from your profile to start creating verification batches.'
+                  : 'Add and verify your organization’s GSTIN from your profile to start creating verification batches.'}
+              </p>
+            </div>
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" size="sm" onClick={() => setShowGstGate(false)}>Cancel</Button>
+            <Button
+              variant="primary"
+              size="sm"
+              icon={ShieldCheck}
+              onClick={() => { setShowGstGate(false); navigate('/account/profile'); }}
+            >
+              Go to Profile
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </AuthLayout>
   );
 };

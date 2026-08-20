@@ -10,11 +10,12 @@ import { Badge } from '@/components/ui/Badge';
 import { ProgressBar } from '@/components/ui/ProgressBar';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
+import { CustomSelect } from '@/components/ui/CustomSelect';
 import { verificationAPI, verifiersAPI, sdcAPI, adminAPI, getApiError, triggerBlobDownload } from '@/services/api';
 import { GenerateSDCModal, CertificateDetailModal } from '@/pages/admin/SDCVerification';
 import {
   ArrowRight, Building2, Calendar, CheckCircle, ChevronDown, ChevronLeft, ChevronRight, Clock, Download, Eye, Info,
-  Mail, MoreVertical, Package, Plus, RefreshCw, Search, Send, ShieldCheck, Sparkles, Trash2, User, Users, X, XCircle, Zap,
+  Layers, Mail, MoreVertical, Package, Plus, RefreshCw, Search, Send, ShieldCheck, Sparkles, Trash2, User, Users, X, XCircle, Zap,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -169,6 +170,9 @@ const normaliseApiBatch = (b) => {
     records,
     total, pending, verified, failed,
     rawStatus: b.status || 'pending',
+    // 'human' | 'product' | 'warranty' — now a required field on batch
+    // creation; null for older batches created before it existed.
+    batchType: b.batch_type || null,
     latestCreatedAt: createdAt,
     sdcInfo: b.verification_progress?.sdc || null,
   };
@@ -706,6 +710,8 @@ export const BatchMonitor = () => {
   const [selectedBatchId, setSelectedBatchId] = useState(null);
   const [workflowByBatch, setWorkflowByBatch] = useState(() => getStoredWorkflow());
   const [orgSpaceMap, setOrgSpaceMap] = useState({}); // org_id -> that org's own Dhiway Space ID (Profile page)
+  const [confirmDeleteUserId, setConfirmDeleteUserId] = useState(null);
+  const [deletingUserId, setDeletingUserId] = useState(null);
 
   // Action loading states
   const [resending, setResending] = useState(null); // request token being resent
@@ -738,6 +744,7 @@ export const BatchMonitor = () => {
   // GET /verification/batches response already held in `data`.
   const [searchTerm,   setSearchTerm]   = useState('');
   const [statusFilter, setStatusFilter] = useState('all'); // all | in_progress | pending | completed | failed
+  const [batchTypeFilter, setBatchTypeFilter] = useState(''); // '' | human | product | warranty
   const [dateFrom,     setDateFrom]     = useState('');
   const [dateTo,       setDateTo]       = useState('');
   const [showDateRange, setShowDateRange] = useState(false);
@@ -747,7 +754,7 @@ export const BatchMonitor = () => {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [orgFilter, statusFilter, searchTerm, dateFrom, dateTo]);
+  }, [orgFilter, statusFilter, batchTypeFilter, searchTerm, dateFrom, dateTo]);
 
   const closeActionMenu = useCallback(() => {
     setActionMenu({ batchId: null, anchorRect: null });
@@ -870,15 +877,16 @@ export const BatchMonitor = () => {
   const visibleBatches = batches.filter((b) => {
     if (orgFilter && b.orgName !== orgFilter) return false;
     if (statusFilter !== 'all' && !STATUS_FILTERS[statusFilter]?.(b)) return false;
+    if (batchTypeFilter && b.batchType !== batchTypeFilter) return false;
     if (searchValue && !`${b.name} ${b.id} ${b.orgName}`.toLowerCase().includes(searchValue)) return false;
     if (fromTime && (!b.createdAt || new Date(b.createdAt).getTime() < fromTime)) return false;
     if (toTime && (!b.createdAt || new Date(b.createdAt).getTime() > toTime)) return false;
     return true;
   });
 
-  const hasActiveFilters = !!(orgFilter || statusFilter !== 'all' || searchTerm || dateFrom || dateTo);
+  const hasActiveFilters = !!(orgFilter || statusFilter !== 'all' || batchTypeFilter || searchTerm || dateFrom || dateTo);
   const clearAllFilters = () => {
-    setOrgFilter(''); setStatusFilter('all');
+    setOrgFilter(''); setStatusFilter('all'); setBatchTypeFilter('');
     setSearchTerm(''); setDateFrom(''); setDateTo('');
   };
 
@@ -1110,6 +1118,30 @@ export const BatchMonitor = () => {
       setLoadingReports(false);
     }
   }, [refreshSdcCertificates]);
+
+  // Superadmin-only: permanently removes one customer from the currently
+  // open batch. Updates batchDetail locally (removes the row, decrements the
+  // count shown in the "N records" badge) and refreshes the outer batch list
+  // so its total_users/status stay in sync with what the backend recomputed.
+  const handleDeleteBatchUser = useCallback(async (batchId, record) => {
+    const batchUserId = record.id || record.user_id;
+    if (!batchUserId) return;
+    setDeletingUserId(batchUserId);
+    try {
+      await verificationAPI.deleteBatchUser(batchId, batchUserId);
+      toast.success('Customer removed from batch');
+      setBatchDetail((prev) => prev ? {
+        ...prev,
+        users: (prev.users || []).filter((u) => (u.id || u.user_id) !== batchUserId),
+      } : prev);
+      setConfirmDeleteUserId(null);
+      fetchData();
+    } catch (err) {
+      toast.error(getApiError(err, 'Failed to delete customer'));
+    } finally {
+      setDeletingUserId(null);
+    }
+  }, [fetchData]);
 
   // Smart Send needs actual per-user records to assign — the list endpoint
   // (GET /verification/batches) never returns a `users` array, only the
@@ -1347,16 +1379,30 @@ export const BatchMonitor = () => {
         <div className="flex flex-col xl:flex-row xl:items-center gap-3">
           <div className="flex items-center gap-2">
             <Building2 size={14} className="text-gray-400 shrink-0" />
-            <select
+            <CustomSelect
               value={orgFilter}
-              onChange={(e) => setOrgFilter(e.target.value)}
-              className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-semibold font-inter text-gray-600 focus:outline-none focus:ring-2 focus:ring-brand-blue/20 max-w-[200px]"
-            >
-              <option value="">All Organizations</option>
-              {orgOptions.map((org) => (
-                <option key={org} value={org}>{org}</option>
-              ))}
-            </select>
+              onChange={setOrgFilter}
+              className="w-full max-w-[200px]"
+              options={[
+                { value: '', label: 'All Organizations' },
+                ...orgOptions.map((org) => ({ value: org, label: org })),
+              ]}
+            />
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Layers size={14} className="text-gray-400 shrink-0" />
+            <CustomSelect
+              value={batchTypeFilter}
+              onChange={setBatchTypeFilter}
+              className="w-full max-w-[160px]"
+              options={[
+                { value: '', label: 'All Batch Types' },
+                { value: 'human', label: 'Human' },
+                { value: 'product', label: 'Product' },
+                { value: 'warranty', label: 'Warranty' },
+              ]}
+            />
           </div>
 
           <div className="relative flex-1 min-w-[200px]">
@@ -1586,13 +1632,12 @@ export const BatchMonitor = () => {
                     <ChevronRight size={14} />
                   </button>
                 </div>
-                <select
+                <CustomSelect
                   value={pageSize}
-                  onChange={(e) => setPageSize(Number(e.target.value))}
-                  className="rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-semibold font-inter text-gray-600 focus:outline-none focus:ring-2 focus:ring-brand-blue/20"
-                >
-                  {[10, 25, 50].map((n) => <option key={n} value={n}>{n} / page</option>)}
-                </select>
+                  onChange={setPageSize}
+                  className="w-24"
+                  options={[10, 25, 50].map((n) => ({ value: n, label: `${n} / page` }))}
+                />
               </div>
             </div>
           </Card>
@@ -2030,6 +2075,7 @@ export const BatchMonitor = () => {
                             <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase text-gray-500 font-inter">Type</th>
                             <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase text-gray-500 font-inter">Status</th>
                             <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase text-gray-500 font-inter w-56">Certificate</th>
+                            <th className="px-4 py-2.5 text-right text-[11px] font-semibold uppercase text-gray-500 font-inter w-40">Actions</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-100">
@@ -2038,6 +2084,7 @@ export const BatchMonitor = () => {
                             const Icon = product ? Package : User;
                             const status = statusBadge(record.verification_status);
                             const sdcMatch = matchSdcRecord(record);
+                            const batchUserId = record.id || record.user_id;
                             return (
                               <tr key={record.id || record.user_id || record.entity_id} className="hover:bg-gray-50/70 transition-colors">
                                 <td className="px-4 py-3.5">
@@ -2079,6 +2126,38 @@ export const BatchMonitor = () => {
                                     </div>
                                   ) : (
                                     <span className="text-xs text-gray-300 font-inter">-</span>
+                                  )}
+                                </td>
+                                <td className="px-4 py-3.5 text-right">
+                                  {confirmDeleteUserId === batchUserId ? (
+                                    <div className="flex items-center justify-end gap-1.5">
+                                      <span className="text-xs text-gray-400 font-inter">Delete?</span>
+                                      <button
+                                        type="button"
+                                        disabled={deletingUserId === batchUserId}
+                                        onClick={() => handleDeleteBatchUser(selectedBatch.id, record)}
+                                        className="rounded-md px-2 py-1 text-xs font-semibold font-inter text-white bg-red-500 hover:bg-red-600 disabled:opacity-50 transition-colors"
+                                      >
+                                        {deletingUserId === batchUserId ? '…' : 'Yes'}
+                                      </button>
+                                      <button
+                                        type="button"
+                                        disabled={deletingUserId === batchUserId}
+                                        onClick={() => setConfirmDeleteUserId(null)}
+                                        className="rounded-md px-2 py-1 text-xs font-semibold font-inter text-gray-500 hover:bg-gray-100 disabled:opacity-50 transition-colors"
+                                      >
+                                        No
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      title="Permanently delete this customer from the batch"
+                                      onClick={() => setConfirmDeleteUserId(batchUserId)}
+                                      className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold font-inter text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors"
+                                    >
+                                      <Trash2 size={12} /> Delete
+                                    </button>
                                   )}
                                 </td>
                               </tr>

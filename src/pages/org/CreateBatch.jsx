@@ -176,6 +176,7 @@ const SingleHumanModal = ({ isOpen, onClose, onSuccess, selectedIndustry, select
     try {
       const { data } = await verificationAPI.uploadSingleHuman({
         ...form,
+        batch_type: 'human',
         industry_type: getIndustryTypeList(selectedIndustry),
         verification_types: getVerificationApiTypes(selectedVerifications),
         credential_visibility: selectedPermission || 'private',
@@ -285,6 +286,7 @@ const SingleProductModal = ({ isOpen, onClose, onSuccess, categories, selectedCa
     setLoading(true);
     try {
       const { data } = await verificationAPI.uploadSingleProduct({
+        batch_type: 'product',
         category_id: categoryId,
         product_name: productName,
         custom_fields,
@@ -451,6 +453,7 @@ const HumanBulkPanel = ({ onResult, selectedIndustry, selectedVerifications, sel
         batchName.trim(),
         description.trim(),
         {
+          batchType: 'human',
           industryType: getIndustryTypeList(selectedIndustry),
           verificationTypes: getVerificationApiTypes(selectedVerifications),
           credentialVisibility: selectedPermission || 'private',
@@ -754,6 +757,7 @@ const ProductBulkPanel = ({ categories, onResult, selectedCategory, selectedServ
         selectedCategory?.title || '',
         description.trim(),
         {
+          batchType: 'product',
           verificationTypes: getProductVerificationTypes(selectedService),
           credentialVisibility: visibility,
           docProductNames: validDocs.map((e) => e.productName.trim()),
@@ -1246,6 +1250,33 @@ export const CreateBatch = () => {
   const handleSingleSuccess = (data) => {
     setSingleResults((prev) => [data, ...prev]);
   };
+
+  // Orgs must have a verified GSTIN before creating batches — safety net in
+  // case this page is reached directly (e.g. by URL) rather than through the
+  // "New Batch" button's own gate on /org/batch-status.
+  if (!user?.gstVerified) {
+    return (
+      <AuthLayout title="Create Batch">
+        <div className="w-full mx-auto lg:max-w-none">
+          <PageHeader title="Create Verification Batch" subtitle="Start a verification flow for people or products" />
+          <div className="mx-auto mt-10 max-w-md rounded-2xl border border-amber-100 bg-amber-50 p-6 text-center">
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-amber-100">
+              <AlertTriangle size={22} className="text-amber-500" />
+            </div>
+            <p className="mt-4 font-sora text-base font-semibold text-amber-800">GST Verification Required</p>
+            <p className="mt-1.5 font-inter text-sm text-amber-700">
+              {user?.gstin
+                ? "Your GSTIN hasn't been verified yet. Verify it from your profile to start creating verification batches."
+                : "Add and verify your organization's GSTIN from your profile to start creating verification batches."}
+            </p>
+            <Button variant="primary" size="md" className="mt-5" icon={ShieldCheck} onClick={() => navigate('/account/profile')}>
+              Go to Profile
+            </Button>
+          </div>
+        </div>
+      </AuthLayout>
+    );
+  }
 
   // Step 1: Choose batch type (skipped when the org's service type is already known)
   if (!batchType) {

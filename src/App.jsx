@@ -39,7 +39,6 @@ import IndividualRegistration from '@/pages/individual/IndividualRegistration';
 import OTPVerification from '@/pages/org/OTPVerification';
 import WelcomeKYC from '@/pages/org/WelcomeKYC';
 import OrgOnboarding from '@/pages/org/OrgOnboarding';
-import PendingApproval from '@/pages/org/PendingApproval';
 import OrgDashboard from '@/pages/org/OrgDashboard';
 import SelectIndustry from '@/pages/org/SelectIndustry';
 import SelectVerifications from '@/pages/org/SelectVerifications';
@@ -161,7 +160,6 @@ const AnimatedRoutes = () => {
           <Route path="/onboarding" element={<ProtectedRoute><OrgOnboarding /></ProtectedRoute>} />
           <Route path="/dashboard" element={<ProtectedRoute><DashboardRedirect /></ProtectedRoute>} />
           <Route path="/org/onboarding" element={<ProtectedRoute><OrgOnboarding /></ProtectedRoute>} />
-          <Route path="/org/pending-approval" element={<PendingApproval />} />
           <Route path="/org/dashboard" element={<ProtectedRoute><OrgDashboard /></ProtectedRoute>} />
           <Route path="/org/industry" element={<SelectIndustry />} />
           <Route path="/org/verifications" element={<SelectVerifications />} />

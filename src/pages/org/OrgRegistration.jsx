@@ -6,9 +6,8 @@ import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { StepWizard } from '@/components/ui/StepWizard';
 import { Card } from '@/components/ui/Card';
-import { Building2, Mail, Phone, Lock, ArrowLeft, ArrowRight, ChevronDown } from 'lucide-react';
+import { Building2, Mail, Phone, Lock, ArrowLeft, ArrowRight } from 'lucide-react';
 import { SERVICE_TYPE_OPTIONS } from '@/data/serviceTypeOptions';
-import { ID_FIELDS_BY_SERVICE_TYPE } from '@/data/spaceSchemaFields';
 import toast from 'react-hot-toast';
 
 export const OrgRegistration = () => {
@@ -22,13 +21,9 @@ export const OrgRegistration = () => {
     password: '',
     confirmPassword: '',
     serviceType: '', // 'human' | 'product'
-    humanSpaceId: '', // optional, only for orgs that already have one
-    productSpaceId: '', // optional, only for orgs that already have one
-    warrantySpaceId: '', // optional, only for orgs that already have one
   });
   const [errors, setErrors] = useState({});
   const [submitting, setSubmitting] = useState(false);
-  const [showAdvanced, setShowAdvanced] = useState(false);
 
   const validate = () => {
     const newErrors = {};
@@ -159,34 +154,6 @@ export const OrgRegistration = () => {
                 <p className="text-xs text-red-500 font-inter mt-1.5">{errors.serviceType}</p>
               )}
             </div>
-
-            <button
-              type="button"
-              onClick={() => setShowAdvanced((v) => !v)}
-              className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-brand-dark font-inter"
-            >
-              <ChevronDown size={14} className={`transition-transform ${showAdvanced ? 'rotate-180' : ''}`} />
-              Advanced (optional)
-            </button>
-
-            {showAdvanced && (
-              <>
-                {!form.serviceType && (
-                  <p className="text-xs text-gray-400 font-inter">
-                    Select a verification type above to set an existing space ID.
-                  </p>
-                )}
-                {(ID_FIELDS_BY_SERVICE_TYPE[form.serviceType] || []).map(({ key, label }) => (
-                  <Input
-                    key={key}
-                    label={`${label} (optional)`}
-                    placeholder="Leave blank unless your organization already has one"
-                    value={form[key]}
-                    onChange={e => updateField(key, e.target.value)}
-                  />
-                ))}
-              </>
-            )}
 
             <Button type="submit" variant="primary" size="lg" className="w-full" disabled={submitting}>
               {submitting ? 'Sending OTP...' : 'Create Account & Send OTP'} <ArrowRight size={18} />

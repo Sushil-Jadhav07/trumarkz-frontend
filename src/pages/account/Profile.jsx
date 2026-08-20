@@ -8,11 +8,11 @@ import { useAuth } from '@/context/AuthContext';
 import { authAPI, getApiError } from '@/services/api';
 import {
   Mail, Phone, Building2, Save,
-  CheckCircle, FileText, MapPin, RefreshCw, Shield,
-  Calendar, Hash, Briefcase, Pencil, X, Database, Layers,
+  CheckCircle, FileText, MapPin, RefreshCw, Shield, ShieldCheck, ShieldOff, AlertTriangle,
+  Calendar, Hash, Briefcase, Pencil, X, Database, Layers, Star,
 } from 'lucide-react';
 import { SERVICE_TYPE_OPTIONS } from '@/data/serviceTypeOptions';
-import { ID_FIELDS_BY_SERVICE_TYPE } from '@/data/spaceSchemaFields';
+import { DhiwaysDetailsEditor } from '@/components/shared/DhiwaysDetailsEditor';
 import toast from 'react-hot-toast';
 
 const roleLabels = {
@@ -103,16 +103,22 @@ export const Profile = () => {
   const [personalDraft, setPersonalDraft] = useState({ organizationName: '', phoneNumber: '' });
   const [savingPersonal, setSavingPersonal] = useState(false);
 
-  // Organization Details card — Service Type, Space ID(s), GSTIN, business
+  // Organization Details card — Service Type, Dhiway spaces, GSTIN, business
   // reg number and address are all editable together in one Save.
   const [editingOrg, setEditingOrg] = useState(false);
   const [orgDraft, setOrgDraft] = useState({
-    serviceType: '', humanSpaceId: '', productSpaceId: '', warrantySpaceId: '',
+    serviceType: '', dhiwaysDetails: [],
     gstin: '', businessRegNumber: '', addressLine1: '', addressLine2: '', addressLine3: '',
   });
   const [savingOrg, setSavingOrg] = useState(false);
 
-  const idFields = ID_FIELDS_BY_SERVICE_TYPE[editingOrg ? orgDraft.serviceType : user?.serviceType] || [];
+  // GSTIN verification (POST /auth/me/verify-gst) — separate from the
+  // Organization Details save above, since it hits its own endpoint and can
+  // run independently of editing the rest of the card.
+  const [verifyingGst, setVerifyingGst] = useState(false);
+  const [gstMismatch, setGstMismatch] = useState(null); // { legal_name, trade_name } when the registry name didn't match
+  const [unverifyingGst, setUnverifyingGst] = useState(false);
+  const [confirmingUnverifyGst, setConfirmingUnverifyGst] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -149,15 +155,14 @@ export const Profile = () => {
   const startEditOrg = () => {
     setOrgDraft({
       serviceType: user?.serviceType || '',
-      humanSpaceId: user?.humanSpaceId || '',
-      productSpaceId: user?.productSpaceId || '',
-      warrantySpaceId: user?.warrantySpaceId || '',
+      dhiwaysDetails: (user?.dhiwaysDetails || []).map((row) => ({ ...row })),
       gstin: user?.gstin || '',
       businessRegNumber: user?.businessRegNumber || '',
       addressLine1: user?.addressLine1 || '',
       addressLine2: user?.addressLine2 || '',
       addressLine3: user?.addressLine3 || '',
     });
+    setGstMismatch(null);
     setEditingOrg(true);
   };
   const cancelOrg = () => setEditingOrg(false);
@@ -208,26 +213,14 @@ export const Profile = () => {
   const saveOrg = async () => {
     setSavingOrg(true);
     try {
-      const calls = [];
       const updates = {};
+      const profilePayload = {};
 
       if (orgDraft.serviceType && orgDraft.serviceType !== user?.serviceType) {
-        calls.push(authAPI.updateServiceType(orgDraft.serviceType));
+        profilePayload.serviceType = orgDraft.serviceType;
         updates.serviceType = orgDraft.serviceType;
       }
 
-      const idFieldsForDraft = ID_FIELDS_BY_SERVICE_TYPE[orgDraft.serviceType] || [];
-      if (idFieldsForDraft.length) {
-        const idPayload = {};
-        idFieldsForDraft.forEach(({ key }) => {
-          const value = orgDraft[key].trim();
-          idPayload[key] = value;
-          updates[key] = value;
-        });
-        calls.push(authAPI.updateSpaceIds(idPayload));
-      }
-
-      const profilePayload = {};
       ORG_DETAIL_FIELD_KEYS.forEach((key) => {
         const value = orgDraft[key].trim();
         if (value !== (user?.[key] || '')) {
@@ -235,19 +228,78 @@ export const Profile = () => {
           updates[key] = value;
         }
       });
-      if (Object.keys(profilePayload).length > 0) {
-        calls.push(authAPI.updateOwnProfile(profilePayload));
+
+      const cleanedDhiwaysDetails = orgDraft.dhiwaysDetails
+        .map((row) => ({ space_id: (row.space_id || '').trim(), schema_id: (row.schema_id || '').trim() }))
+        .filter((row) => row.space_id || row.schema_id);
+      if (JSON.stringify(cleanedDhiwaysDetails) !== JSON.stringify(user?.dhiwaysDetails || [])) {
+        profilePayload.dhiwaysDetails = cleanedDhiwaysDetails;
+        updates.dhiwaysDetails = cleanedDhiwaysDetails;
       }
 
-      await Promise.all(calls);
-      updateUserProfile(updates);
-      if (calls.length > 0) await refreshUser();
+      const hasChanges = Object.keys(profilePayload).length > 0;
+      if (hasChanges) {
+        await authAPI.updateOwnProfile(profilePayload);
+        updateUserProfile(updates);
+        await refreshUser();
+      }
       setEditingOrg(false);
       toast.success('Organization details updated');
     } catch (err) {
       toast.error(getApiError(err, 'Failed to save changes'));
     } finally {
       setSavingOrg(false);
+    }
+  };
+
+  const handleVerifyGst = async () => {
+    if (!user?.gstin) { toast.error('Add a GSTIN before verifying'); return; }
+    setVerifyingGst(true);
+    setGstMismatch(null);
+    try {
+      const { data } = await authAPI.verifyGst();
+      if (data.gst_verified) {
+        updateUserProfile({ gstVerified: true });
+        toast.success(data.message || 'GSTIN verified successfully');
+        await refreshUser();
+      } else {
+        // 200 but not a match — not an error, show what the registry has on file.
+        setGstMismatch({
+          legalName: data.legal_name,
+          tradeName: data.trade_name,
+          message: data.message,
+        });
+        toast.error(data.message || "GSTIN registry name doesn't match your organization name");
+      }
+    } catch (err) {
+      const status = err?.response?.status;
+      if (status === 502) {
+        // Documented behavior: 502 means the GST registry/provider itself is
+        // unreachable, not a problem with the GSTIN or our request.
+        toast.error(
+          `${getApiError(err, 'GST verification service failed')} — the GST registry is temporarily unreachable. Please try again in a few minutes.`,
+          { duration: 6000 }
+        );
+      } else {
+        toast.error(getApiError(err, 'Failed to verify GSTIN. Please try again.'));
+      }
+    } finally {
+      setVerifyingGst(false);
+    }
+  };
+
+  const handleUnverifyGst = async () => {
+    setUnverifyingGst(true);
+    try {
+      await authAPI.unverifyGst();
+      updateUserProfile({ gstVerified: false });
+      await refreshUser();
+      toast.success('GST verification revoked');
+    } catch (err) {
+      toast.error(getApiError(err, 'Failed to revoke GST verification'));
+    } finally {
+      setUnverifyingGst(false);
+      setConfirmingUnverifyGst(false);
     }
   };
 
@@ -427,23 +479,53 @@ export const Profile = () => {
                   )}
                   <div className="border-t border-gray-50" />
 
-                  {idFields.map((field) => (
-                    <React.Fragment key={field.key}>
-                      {editingOrg ? (
-                        <FieldInput
-                          icon={Database}
-                          label={field.label}
-                          value={orgDraft[field.key]}
-                          onChange={(v) => updateOrgDraft(field.key, v)}
-                          disabled={savingOrg}
-                          placeholder="Leave blank unless your organization already has one"
-                        />
-                      ) : (
-                        <DetailRow icon={Database} label={field.label} value={user?.[field.key]} />
-                      )}
-                      <div className="border-t border-gray-50" />
-                    </React.Fragment>
-                  ))}
+                  {editingOrg ? (
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 font-inter mb-1.5">Dhiway Spaces</label>
+                      <DhiwaysDetailsEditor
+                        value={orgDraft.dhiwaysDetails}
+                        onChange={(rows) => updateOrgDraft('dhiwaysDetails', rows)}
+                        disabled={savingOrg}
+                        onSetDefault={async (row) => {
+                          try {
+                            await authAPI.setDhiwayDefault({ spaceId: row.space_id, schemaId: row.schema_id });
+                            toast.success('Default Dhiway space updated');
+                            refreshUser();
+                          } catch (err) {
+                            toast.error(getApiError(err, 'Failed to set default'));
+                            throw err;
+                          }
+                        }}
+                      />
+                    </div>
+                  ) : (
+                    <div className="flex items-start gap-3">
+                      <div className="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center shrink-0 mt-0.5">
+                        <Database size={14} className="text-gray-400" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[11px] text-gray-400 font-inter uppercase tracking-wide mb-1">Dhiway Spaces</p>
+                        {(user?.dhiwaysDetails || []).length > 0 ? (
+                          <div className="space-y-0.5">
+                            {user.dhiwaysDetails.map((row, i) => (
+                              <p key={i} className="text-sm font-medium text-brand-dark font-inter break-words flex items-center gap-1.5">
+                                {row.space_id || '—'}
+                                <span className="text-gray-400 font-normal"> / schema: {row.schema_id || '—'}</span>
+                                {row.default && (
+                                  <span className="inline-flex items-center gap-0.5 text-[10px] font-semibold text-amber-600 bg-amber-50 rounded-full px-1.5 py-0.5">
+                                    <Star size={9} className="fill-current" /> Default
+                                  </span>
+                                )}
+                              </p>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="text-sm font-medium text-brand-dark font-inter">—</p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                  <div className="border-t border-gray-50" />
 
                   {editingOrg ? (
                     <FieldInput
@@ -454,7 +536,72 @@ export const Profile = () => {
                       disabled={savingOrg}
                     />
                   ) : (
-                    <DetailRow icon={FileText} label="GSTIN" value={user?.gstin} />
+                    <div className="flex items-start gap-3">
+                      <div className="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center shrink-0 mt-0.5">
+                        <FileText size={14} className="text-gray-400" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center justify-between gap-3 flex-wrap">
+                          <div>
+                            <p className="text-[11px] text-gray-400 font-inter uppercase tracking-wide mb-0.5">GSTIN</p>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <p className="text-sm font-medium text-brand-dark font-inter">{user?.gstin || '—'}</p>
+                              {user?.gstin && (
+                                user?.gstVerified ? (
+                                  <span className="flex items-center gap-1 text-[11px] text-green-700 bg-green-50 rounded-full px-2 py-0.5 font-inter font-medium">
+                                    <ShieldCheck size={11} /> Verified
+                                  </span>
+                                ) : (
+                                  <span className="flex items-center gap-1 text-[11px] text-orange-600 bg-orange-50 rounded-full px-2 py-0.5 font-inter font-medium">
+                                    <AlertTriangle size={11} /> Not Verified
+                                  </span>
+                                )
+                              )}
+                            </div>
+                          </div>
+                          {user?.gstin && !user?.gstVerified && (
+                            <Button variant="outline" size="sm" icon={ShieldCheck} loading={verifyingGst} onClick={handleVerifyGst}>
+                              Verify GSTIN
+                            </Button>
+                          )}
+                          {user?.gstin && user?.gstVerified && (
+                            confirmingUnverifyGst ? (
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs text-gray-500 font-inter">Revoke verification?</span>
+                                <Button variant="danger" size="sm" loading={unverifyingGst} onClick={handleUnverifyGst}>
+                                  Yes, revoke
+                                </Button>
+                                <Button variant="outline" size="sm" disabled={unverifyingGst} onClick={() => setConfirmingUnverifyGst(false)}>
+                                  Cancel
+                                </Button>
+                              </div>
+                            ) : (
+                              <Button variant="outline" size="sm" icon={ShieldOff} onClick={() => setConfirmingUnverifyGst(true)}>
+                                Unverify
+                              </Button>
+                            )
+                          )}
+                        </div>
+                        {gstMismatch && (
+                          <div className="flex items-start gap-2.5 mt-2.5 p-3 rounded-xl bg-red-50 border border-red-100">
+                            <AlertTriangle size={15} className="text-red-500 shrink-0 mt-0.5" />
+                            <div className="min-w-0">
+                              <p className="text-xs font-semibold text-red-700 font-inter">
+                                {gstMismatch.message || 'This GSTIN is invalid for your organization'}
+                              </p>
+                              <p className="text-xs text-red-600 font-inter mt-0.5 leading-relaxed">
+                                The GST registry has this number registered under{' '}
+                                <strong>
+                                  {[gstMismatch.legalName, gstMismatch.tradeName].filter(Boolean).join(' / ') || 'a different name'}
+                                </strong>
+                                {user?.name ? ` — it doesn't match your organization name ("${user.name}").` : ', which does not match your organization name.'}
+                                {' '}Double-check the GSTIN, or update your organization name, then verify again.
+                              </p>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
                   )}
                   <div className="border-t border-gray-50" />
                   {editingOrg ? (

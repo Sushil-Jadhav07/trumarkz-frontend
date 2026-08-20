@@ -13,8 +13,8 @@ export const OTPVerification = () => {
   const navigate = useNavigate();
   const { verifyOTP, resendOTP } = useAuth();
 
-  const email = sessionStorage.getItem('trumarkz_otp_email') || '';
-  const regType = sessionStorage.getItem('trumarkz_reg_type') || 'org';
+  const [email] = useState(() => sessionStorage.getItem('trumarkz_otp_email') || '');
+  const [regType] = useState(() => sessionStorage.getItem('trumarkz_reg_type') || 'org');
   const isOrg = regType === 'org' || regType === 'organization';
 
   const [otp, setOtp] = useState('');
@@ -23,14 +23,17 @@ export const OTPVerification = () => {
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [resending, setResending] = useState(false);
+  const [successState, setSuccessState] = useState(false);
   const timerRef = useRef(null);
+  const redirectRef = useRef(null);
 
   useEffect(() => {
+    if (successState) return;
     if (!email) {
       toast.error('Session expired. Please register again.');
-      navigate(isOrg ? '/org-registration' : '/register/individual');
+      navigate(isOrg ? '/org-registration' : '/register/individual', { replace: true });
     }
-  }, [email]);
+  }, [email, isOrg, navigate, successState]);
 
   useEffect(() => {
     if (timer > 0) {
@@ -40,6 +43,10 @@ export const OTPVerification = () => {
     }
     return () => clearTimeout(timerRef.current);
   }, [timer]);
+
+  useEffect(() => () => {
+    clearTimeout(redirectRef.current);
+  }, []);
 
   const handleVerify = async () => {
     if (otp.length !== 6) { setError('Please enter all 6 digits'); return; }
@@ -54,15 +61,17 @@ export const OTPVerification = () => {
       return;
     }
 
-    toast.success('Email verified successfully!');
-
+    setSuccessState(true);
+    setError('');
+    toast.success(result.message || 'Email verified successfully!');
     sessionStorage.setItem('trumarkz_verified_email', email);
-    sessionStorage.removeItem('trumarkz_otp_email');
-    navigate('/login', { replace: true });
+    redirectRef.current = setTimeout(() => {
+      navigate('/welcome', { replace: true });
+    }, 900);
   };
 
   const handleResend = async () => {
-    if (!canResend || resending || !email) return;
+    if (!canResend || resending || !email || successState) return;
     setResending(true);
     const result = await resendOTP(email);
     setResending(false);
@@ -114,7 +123,7 @@ export const OTPVerification = () => {
               value={otp}
               onChange={val => { setOtp(val); setError(''); }}
               error={!!error}
-              disabled={!email}
+              disabled={!email || successState}
             />
             {error && (
               <p className="text-center text-xs text-red-500 font-inter mt-2 flex items-center justify-center gap-1">
@@ -128,9 +137,9 @@ export const OTPVerification = () => {
             size="lg"
             className="w-full mb-4"
             onClick={handleVerify}
-            disabled={submitting || !email || otp.length !== 6}
+            disabled={submitting || successState || !email || otp.length !== 6}
           >
-            {submitting ? 'Verifying...' : 'Verify OTP'}
+            {successState ? 'Verified' : submitting ? 'Verifying...' : 'Verify OTP'}
           </Button>
 
           {/* Resend */}
@@ -138,7 +147,7 @@ export const OTPVerification = () => {
             {canResend ? (
               <button
                 onClick={handleResend}
-                disabled={resending}
+                disabled={resending || successState}
                 className="inline-flex items-center gap-1.5 text-sm text-brand-blue font-inter hover:underline disabled:opacity-60"
               >
                 <RefreshCw size={14} className={resending ? 'animate-spin' : ''} />
@@ -156,7 +165,7 @@ export const OTPVerification = () => {
 
           <div className="mt-4 text-center">
             <button
-              onClick={() => navigate(backRoute)}
+              onClick={() => navigate(backRoute, { replace: true })}
               className="text-sm text-brand-blue font-inter hover:underline inline-flex items-center gap-1"
             >
               <ArrowLeft size={14} /> Back to Registration

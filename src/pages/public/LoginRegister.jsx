@@ -251,8 +251,12 @@ export const LoginRegister = () => {
         navigate('/verify-otp');
         return;
       }
-      setErrors({ form: result.error || 'Login failed' });
-      toast.error(result.error || 'Login failed');
+      // Login is now only blocked by is_active=false (a real admin
+      // deactivation) — a pending, not-yet-approved org (org_approved=false)
+      // logs in fine, so "deactivated" no longer needs to hedge about approval.
+      const message = result.error || 'Login failed';
+      setErrors({ form: message });
+      toast.error(message);
       return;
     }
     toast.success('Welcome back!');
@@ -267,6 +271,9 @@ export const LoginRegister = () => {
     } catch {}
     if (result.userType === 'super-admin')     navigate('/admin/dashboard');
     else if (result.requiresOnboarding)        navigate('/org/onboarding');
+    // A pending (not-yet-approved) org goes straight to the normal dashboard
+    // like any other org — org_approved only gates batch creation (see the
+    // in-app gate on /org/create-batch), not general access.
     else if (result.userType === 'individual') navigate('/individual/dashboard');
     else                                        navigate('/dashboard');
   };
@@ -301,6 +308,36 @@ export const LoginRegister = () => {
             <div className="absolute bottom-0 left-0 w-[400px] h-[400px] rounded-full bg-brand-blue/8 blur-3xl translate-y-1/3 -translate-x-1/3" />
             <div className="absolute inset-0 opacity-[0.04]"
               style={{ backgroundImage: 'radial-gradient(circle, #ffffff 1px, transparent 1px)', backgroundSize: '28px 28px' }} />
+            <div
+              className="absolute inset-0"
+              aria-hidden="true"
+              style={{
+                backgroundImage: 'url(/assets/6613575_17930.jpg)',
+                backgroundSize: '140% auto',
+                backgroundPosition: 'right top',
+                backgroundRepeat: 'no-repeat',
+                transform: 'scaleX(-1)',
+                filter: 'invert(1) brightness(1.3) contrast(1.1)',
+                mixBlendMode: 'screen',
+                opacity: 0.35,
+                WebkitMaskImage: 'radial-gradient(ellipse 68% 62% at 80% 30%, #000 25%, transparent 75%)',
+                maskImage: 'radial-gradient(ellipse 68% 62% at 80% 30%, #000 25%, transparent 75%)',
+              }}
+            />
+            <div
+              className="absolute inset-0"
+              aria-hidden="true"
+              style={{
+                backgroundImage: 'url(/assets/bottom-dots.png)',
+                backgroundSize: '100% auto',
+                backgroundPosition: 'bottom center',
+                backgroundRepeat: 'no-repeat',
+                mixBlendMode: 'screen',
+                opacity: 0.22,
+                WebkitMaskImage: 'linear-gradient(to top, #000 0%, #000 35%, transparent 85%)',
+                maskImage: 'linear-gradient(to top, #000 0%, #000 35%, transparent 85%)',
+              }}
+            />
           </div>
 
           <div className="relative z-10 flex flex-col h-full p-10 xl:p-12">

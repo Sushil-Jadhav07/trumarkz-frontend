@@ -63,18 +63,26 @@ export const AuthProvider = ({ children }) => {
     return {
       id: data.id,
       organizationId: data.organization_id || data.org_id || null,
-      name: data.full_name || data.organization_name || '',
+      // /auth/me returns the org's name under `org_name`, not `organization_name`
+      // (confirmed live — other endpoints like /auth/users and
+      // /verification/batches do use organization_name, so don't "fix" those).
+      name: data.full_name || data.org_name || '',
       email: data.email || '',
       phoneNumber: data.phone_number || '',
-      organization: data.organization_name || '',
+      organization: data.org_name || '',
       userType,
       role: userType,
       onboardingCompleted: data.onboarding_completed,
       emailVerified: data.email_verified,
       isActive: data.is_active,
+      // org_approved no longer gates anything (backend removed it from the
+      // authorization flow entirely) — kept only as informational metadata
+      // for the superadmin's "Approve" action in the User List.
+      orgApproved: !!data.org_approved,
       storagePath: data.storage_path,
       industryType: data.industry_type,
       gstin: data.gstin,
+      gstVerified: !!data.gst_verified,
       businessRegNumber: data.business_reg_number,
       addressLine1: data.address_line1,
       addressLine2: data.address_line2,
@@ -82,11 +90,9 @@ export const AuthProvider = ({ children }) => {
       useCases: data.use_cases,
       createdAt: data.created_at,
       serviceType: data.service_type || '',
-      humanSpaceId: data.human_space_id || '',
-      productSpaceId: data.product_space_id || '',
-      // Backend field is spelled "warrenty_space_id" (confirmed live) — kept
-      // as warrantySpaceId in JS for readability, mapped from the typo'd key.
-      warrantySpaceId: data.warrenty_space_id || '',
+      // Replaces the old flat human_space_id / product_space_id /
+      // warrenty_space_id fields — now a free-form array of { space_id, schema_id }.
+      dhiwaysDetails: data.dhiways_details || [],
     };
   }, []);
 
@@ -223,7 +229,8 @@ export const AuthProvider = ({ children }) => {
       const { data } = await authAPI.completeOnboarding(formData);
       // Refresh user profile after onboarding
       const { data: profile } = await authAPI.getCurrentUser();
-      setUser(buildUser(profile));
+      const builtUser = buildUser(profile);
+      setUser(builtUser);
       return { success: true, message: data.message };
     } catch (err) {
       return { success: false, error: getErrorMessage(err, 'Onboarding failed. Please try again.') };
@@ -316,7 +323,12 @@ export const AuthProvider = ({ children }) => {
       if (fallback.email) localStorage.setItem('email', fallback.email);
 
       let userType = normalizeUserType(fallback.userType, getPendingGoogleUserType());
-      let requiresOnboarding = fallback.requiresOnboarding;
+      // Default to requiring onboarding for orgs unless the callback URL
+      // explicitly said otherwise (true or false) — this is the safer
+      // fallback direction if the fresh /auth/me fetch below also fails,
+      // so a brand-new org can't silently land on the dashboard with an
+      // incomplete profile just because the redirect omitted the param.
+      let requiresOnboarding = fallback.requiresOnboarding ?? (userType === 'organization');
       let builtUser = {
         id: fallback.userId || '',
         name: '',

@@ -93,8 +93,15 @@ api.interceptors.request.use(
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    const isLoginRequest = error.config?.url?.includes('/auth/login');
-    if (error.response?.status === 401 && !isLoginRequest) {
+    // Was only exempting `/auth/login` here, but the request interceptor
+    // above exempts the FULL public-endpoint list (verify-otp, resend-otp,
+    // signup, forgot/reset-password, google...). That mismatch meant a 401
+    // from e.g. an expired OTP on /auth/verify-otp — a normal business-logic
+    // error on a page where the user isn't even logged in yet — was treated
+    // as "your session died," wiping storage and hard-redirecting to /login
+    // mid-registration. Use the same exemption list as the request
+    // interceptor so only a REAL authenticated-request 401 triggers this.
+    if (error.response?.status === 401 && !isPublicAuthEndpoint(error.config?.url)) {
       clearAuthStorage();
       if (window.location.pathname !== '/login') window.location.replace('/login');
     }
@@ -141,43 +148,17 @@ export const authAPI = {
       phone_number: data.phoneNumber ? data.phoneNumber.trim() : undefined,
       password: data.password,
       service_type: data.serviceType || undefined,
-      human_space_id: data.humanSpaceId ? data.humanSpaceId.trim() : undefined,
-      product_space_id: data.productSpaceId ? data.productSpaceId.trim() : undefined,
-      warrenty_space_id: data.warrantySpaceId ? data.warrantySpaceId.trim() : undefined,
     }),
 
-  // PATCH /auth/me/service-type — set what the org deals in ('human' or 'product').
-  updateServiceType: (serviceType) =>
-    api.patch('/auth/me/service-type', { service_type: serviceType }),
-
-  // PATCH /auth/me/dhiway-space — org saves/updates its per-kind space ids
-  // (human_space_id, product_space_id, warrenty_space_id — note the backend's
-  // field is spelled "warrenty", confirmed against the live schema; do not
-  // "fix" this spelling without re-checking the live swagger first). Only
-  // keys present in `data` are sent, so omit a key to leave it untouched;
-  // pass '' to clear it.
-  updateSpaceIds: (() => {
-    const KEY_MAP = {
-      humanSpaceId: 'human_space_id',
-      productSpaceId: 'product_space_id',
-      warrantySpaceId: 'warrenty_space_id',
-    };
-    return (data = {}) => {
-      const payload = {};
-      Object.entries(KEY_MAP).forEach(([jsKey, wireKey]) => {
-        if (jsKey in data) payload[wireKey] = data[jsKey] ? data[jsKey].trim() : null;
-      });
-      return api.patch('/auth/me/dhiway-space', payload);
-    };
-  })(),
-
   // PATCH /auth/me — org self-service profile fields (organization name, full
-  // name, phone, GSTIN, business reg number, address lines). Only keys
-  // present in `data` are sent, mirroring updateSpaceIds, so callers control
-  // exactly which fields go out (send only what actually changed).
+  // name, phone, GSTIN, business reg number, address lines, service type,
+  // industry type, dhiways_details). Only keys present in `data` are sent,
+  // so callers control exactly which fields go out (send only what changed).
   updateOwnProfile: (() => {
     const KEY_MAP = {
-      organizationName: 'organization_name',
+      // PATCH /auth/me expects `org_name`, not `organization_name` — confirmed
+      // against the live GET /auth/me response, which returns org_name.
+      organizationName: 'org_name',
       fullName: 'full_name',
       phoneNumber: 'phone_number',
       gstin: 'gstin',
@@ -185,6 +166,9 @@ export const authAPI = {
       addressLine1: 'address_line1',
       addressLine2: 'address_line2',
       addressLine3: 'address_line3',
+      serviceType: 'service_type',
+      industryType: 'industry_type',
+      dhiwaysDetails: 'dhiways_details',
     };
     return (data = {}) => {
       const payload = {};
@@ -194,6 +178,34 @@ export const authAPI = {
       return api.patch('/auth/me', payload);
     };
   })(),
+
+  // POST /auth/me/verify-gst — checks a GSTIN against the GST registry; if
+  // the registered legal/trade name matches this org's org_name, marks the
+  // org verified (gst_verified -> true) and saves the GSTIN to the profile.
+  // Pass a gstin to verify a specific number, or omit it to verify the one
+  // already saved on the profile. A name mismatch is NOT an error — it's a
+  // 200 with gst_verified: false plus the registry's legal_name/trade_name
+  // so the caller can show what didn't match. Only a 502 (registry
+  // unreachable) is a real failure.
+  verifyGst: (gstin) => api.post('/auth/me/verify-gst', gstin ? { gstin } : {}),
+
+  // POST /auth/me/unverify-gst — self-service: org revokes its own GST
+  // verification. Resets gst_verified=false and clears gst_details, keeps
+  // the saved gstin string and everything else untouched.
+  unverifyGst: () => api.post('/auth/me/unverify-gst'),
+
+  // POST /auth/organizations/{org_id}/unverify-gst — superadmin-only
+  // equivalent, targeting any organization by id.
+  unverifyGstForOrg: (orgId) => api.post(`/auth/organizations/${orgId}/unverify-gst`),
+
+  // POST /auth/dhiway/set-default — marks one existing { space_id, schema_id }
+  // pair in dhiways_details as the default (server clears the flag on any
+  // other entry). Only works on a pair the org already has saved — a
+  // not-yet-saved row added in the editor UI will 404 until it's persisted.
+  // Org acts on its own account when org_id is omitted; superadmin passes
+  // org_id to act on another organization's behalf.
+  setDhiwayDefault: ({ spaceId, schemaId, orgId } = {}) =>
+    api.post('/auth/dhiway/set-default', cleanObject({ space_id: spaceId, schema_id: schemaId, org_id: orgId || undefined })),
 
   signupIndividual: (data) =>
     api.post('/auth/signup/individual', {
@@ -266,6 +278,15 @@ export const authAPI = {
   createUser: (payload) => api.post('/auth/users', cleanObject(payload)),
   updateUser: (userId, payload) => api.patch(`/auth/users/${userId}`, payload),
   deactivateUser: (userId) => api.delete(`/auth/users/${userId}`),
+  // DELETE /auth/users/{user_id}/permanent — superadmin only, irreversible.
+  // Distinct from deactivateUser above, which is a reversible soft-delete.
+  permanentlyDeleteUser: (userId) => api.delete(`/auth/users/${userId}/permanent`),
+  // POST /auth/organizations/approve — sets org_approved=true. The backend
+  // removed org_approved from its authorization checks entirely, so this is
+  // now purely a record-keeping flag (surfaced as an "Approved" badge/action
+  // in the User List), not an access gate. `org_id` body key confirmed
+  // against the backend team's contract doc.
+  approveOrganization: (orgId) => api.post('/auth/organizations/approve', { org_id: orgId }),
   promoteSuperAdmin: (email) => api.post('/auth/promote-super-admin', { email }),
   createSuperAdmin: (payload) => api.post('/auth/create-super-admin', payload),
   getOrganizationIndustryType: (orgId) => api.get(`/auth/organization/${orgId}/industry-type`),
@@ -280,6 +301,10 @@ export const adminAPI = {
   createUser: authAPI.createUser,
   updateUser: authAPI.updateUser,
   deactivateUser: authAPI.deactivateUser,
+  permanentlyDeleteUser: authAPI.permanentlyDeleteUser,
+  approveOrganization: authAPI.approveOrganization,
+  unverifyGstForOrg: authAPI.unverifyGstForOrg,
+  setDhiwayDefault: authAPI.setDhiwayDefault,
   promoteSuperAdmin: authAPI.promoteSuperAdmin,
   createSuperAdmin: (payload) =>
     authAPI.createSuperAdmin(
@@ -299,6 +324,7 @@ export const verificationAPI = {
     verificationApi.post(
       '/verification/single/human',
       cleanObject({
+        batch_type: data.batch_type || 'human',
         full_name: data.full_name?.trim(),
         phone_number: data.phone_number?.trim(),
         email: data.email?.trim(),
@@ -322,6 +348,7 @@ export const verificationAPI = {
     verificationApi.post(
       '/verification/single/product',
       cleanObject({
+        batch_type: data.batch_type || 'product',
         category_id: data.category_id,
         product_name: data.product_name?.trim(),
         custom_fields: data.custom_fields || {},
@@ -341,6 +368,9 @@ export const verificationAPI = {
 
     files.forEach((file) => formData.append('files', file));
     formData.append('batch_name', batchName);
+    // Caller-supplied, not hardcoded — this endpoint is used for both human
+    // and product OCR bulk uploads.
+    appendFormValue(formData, 'batch_type', options.batchType || options.batch_type);
     appendFormValue(formData, 'description', options.description);
     appendFormValue(formData, 'industry_type', options.industryType || options.industry_type);
     appendFormValue(formData, 'verification_types', options.verificationTypes || options.verification_types);
@@ -384,6 +414,7 @@ export const verificationAPI = {
 
     formData.append('file', file);
     formData.append('batch_name', batchName);
+    formData.append('batch_type', options.batchType || options.batch_type || 'human');
     appendFormValue(formData, 'description', description);
     appendFormValue(formData, 'industry_type', options.industryType || options.industry_type);
     appendFormValue(formData, 'verification_types', options.verificationTypes || options.verification_types);
@@ -415,6 +446,7 @@ export const verificationAPI = {
 
     formData.append('file', file);
     formData.append('batch_name', batchName);
+    formData.append('batch_type', options.batchType || options.batch_type || 'product');
     appendFormValue(formData, 'description', description);
     appendFormValue(formData, 'industry_type', industryType || options.industryType || options.industry_type);
     appendFormValue(
@@ -504,6 +536,12 @@ export const verificationAPI = {
 
   getBatches: () => verificationApi.get('/verification/batches'),
   getBatchDetails: (batchId) => verificationApi.get(`/verification/batches/${batchId}`),
+  // DELETE /verification/batches/{batch_id}/users/{batch_user_id} —
+  // superadmin only. Permanently removes one customer from a batch (cascades
+  // their documents/audit logs) without touching the batch or its other
+  // records; batch.total_users and status are recomputed server-side.
+  deleteBatchUser: (batchId, batchUserId) =>
+    verificationApi.delete(`/verification/batches/${batchId}/users/${batchUserId}`),
 
   getVerificationTypes: (filters = {}) => {
     const params = new URLSearchParams();
@@ -620,6 +658,7 @@ export const verificationAPI = {
 
     formData.append('file', file);
     formData.append('batch_name', batchName);
+    formData.append('batch_type', 'warranty');
     if (description) formData.append('description', description);
 
     // Document attachments
@@ -652,9 +691,9 @@ export const verificationAPI = {
 export const sdcAPI = {
   // POST /sdc/batches/{batch_id}/generate — create + auto-issue in one call.
   // Body is normally just {publish, active}. org_id is fixed backend-side and
-  // must NEVER be sent. space_id normally comes from the org's own per-kind
-  // space id (set via authAPI.updateSpaceIds, falling back to a config
-  // default) and schema_id resolves from the batch's industry — both
+  // must NEVER be sent. space_id normally comes from the org's own
+  // dhiways_details (set via authAPI.updateOwnProfile, falling back to a
+  // config default) and schema_id resolves from the batch's industry — both
   // can optionally be passed here to override that resolution, but that's a
   // testing-only escape hatch, not part of the normal admin flow.
   generateBatchSDC: (batchId, payload = {}) =>
