@@ -1,0 +1,1404 @@
+import { useCallback, useEffect, useState } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { useNavigate } from 'react-router-dom';
+import { AuthLayout } from '@/components/layout/AuthLayout';
+import { PageHeader } from '@/components/shared/PageHeader';
+import { Button } from '@/components/ui/Button';
+import { Badge } from '@/components/ui/Badge';
+import { ProgressBar } from '@/components/ui/ProgressBar';
+import { Modal } from '@/components/ui/Modal';
+import { verificationAPI, sdcAPI, getApiError } from '@/services/api';
+import { useAuth } from '@/context/AuthContext';
+import { resolveDhiwaySpaceId } from '@/utils/dhiway';
+import { CertificateDetailModal } from '@/pages/admin/SDCVerification';
+import {
+  ChevronLeft, ChevronRight, CheckCircle, Clock, Download,
+  Eye, FileText, Info, Layers, Package, RefreshCw, Upload,
+  User, XCircle, Play, BarChart3, Building2, ShieldCheck, Globe, Award, AlertTriangle, Search,
+} from 'lucide-react';
+import toast from 'react-hot-toast';
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+const formatVerifType = (t) => {
+  if (UUID_RE.test(t)) return t.slice(0, 8).toUpperCase() + '…';
+  return t.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+};
+
+const isUUID = (t) => UUID_RE.test(t);
+
+const isProductRecord = (r) =>
+  r?.entity_type === 'product' || !!r?.product_name || !!r?.category_name;
+
+const getRecordTitle = (r) =>
+  r?.product_name || r?.full_name || r?.email || r?.id || r?.user_id || r?.entity_id || 'Record';
+
+const getRecordSubtitle = (r) =>
+  isProductRecord(r)
+    ? r?.category_name || 'Product verification'
+    : [r?.email, r?.phone_number].filter(Boolean).join(' · ') || 'Human verification';
+
+const getRecordKey = (r) => r?.id || r?.user_id || r?.entity_id;
+
+const VERIFIED_RECORD_STATUSES = new Set(['approved', 'verified']);
+const FAILED_RECORD_STATUSES = new Set(['rejected', 'failed']);
+const PENDING_RECORD_STATUSES = new Set([
+  'pending',
+  'pending_verification',
+  'processing',
+  'verification_in_progress',
+  'doc_uploaded',
+  'awaiting_review',
+]);
+
+const classifyRecordStatus = (status) => {
+  const value = String(status || '').trim().toLowerCase();
+  if (VERIFIED_RECORD_STATUSES.has(value)) return 'verified';
+  if (FAILED_RECORD_STATUSES.has(value)) return 'failed';
+  if (!value || PENDING_RECORD_STATUSES.has(value)) return 'pending';
+  return 'pending';
+};
+
+const summarizeRecordCounts = (records = []) => (
+  records.reduce((acc, record) => {
+    const bucket = classifyRecordStatus(record?.verification_status ?? record?.status);
+    acc[bucket] += 1;
+    return acc;
+  }, { verified: 0, failed: 0, pending: 0 })
+);
+
+const hasRenderableRecords = (batch) =>
+  !!batch && (batch.total > 0 || batch.records.length > 0);
+
+const recordStatusBadge = (status) => {
+  if (status === 'approved') return { variant: 'success', label: 'Approved' };
+  if (status === 'verified') return { variant: 'success', label: 'Verified' };
+  if (status === 'rejected' || status === 'failed') return { variant: 'error',   label: 'Rejected' };
+  return                            { variant: 'pending',  label: 'Pending' };
+};
+
+const sdcStatusLabel = (status) => {
+  if (status === 'sdc_created')   return 'Certificates Issued';
+  if (status === 'draft_created') return 'Certificates Drafted';
+  return 'Certificate Pending';
+};
+
+// Real backend batch statuses (BatchListResponse.status / BatchDetailResponse.status)
+// — derived server-side, monotonic, only ever moves forward through this list.
+const BATCH_STATUS_META = {
+  pending: {
+    label:      'Pending',
+    dot:        'bg-amber-400',
+    tone:       'bg-amber-50 text-amber-700 border-amber-200',
+    headerBg:   'bg-amber-50 border-amber-100',
+    iconBg:     'bg-amber-100',
+    iconColor:  'text-amber-600',
+    icon:       Clock,
+  },
+  processing: {
+    label:      'Processing',
+    dot:        'bg-blue-400',
+    tone:       'bg-blue-50 text-blue-700 border-blue-200',
+    headerBg:   'bg-blue-50 border-blue-100',
+    iconBg:     'bg-blue-100',
+    iconColor:  'text-blue-600',
+    icon:       Play,
+  },
+  verification_in_progress: {
+    label:      'Verification In Progress',
+    dot:        'bg-blue-500',
+    tone:       'bg-blue-50 text-blue-700 border-blue-200',
+    headerBg:   'bg-blue-50 border-blue-100',
+    iconBg:     'bg-blue-100',
+    iconColor:  'text-blue-600',
+    icon:       ShieldCheck,
+  },
+  verification_completed: {
+    label:      'Verification Completed',
+    dot:        'bg-green-500',
+    tone:       'bg-green-50 text-green-700 border-green-200',
+    headerBg:   'bg-green-50 border-green-100',
+    iconBg:     'bg-green-100',
+    iconColor:  'text-green-600',
+    icon:       CheckCircle,
+  },
+  sdc_generated: {
+    label:      'SDC Generated',
+    dot:        'bg-emerald-500',
+    tone:       'bg-emerald-50 text-emerald-700 border-emerald-200',
+    headerBg:   'bg-emerald-50 border-emerald-100',
+    iconBg:     'bg-emerald-100',
+    iconColor:  'text-emerald-600',
+    icon:       Award,
+  },
+  // Warranty batches are auto-approved on upload (batch.status = "approved")
+  // — no verification pipeline to move through, so this is a terminal state
+  // like sdc_generated rather than a step in the pending→...→completed chain.
+  approved: {
+    label:      'Approved',
+    dot:        'bg-emerald-500',
+    tone:       'bg-emerald-50 text-emerald-700 border-emerald-200',
+    headerBg:   'bg-emerald-50 border-emerald-100',
+    iconBg:     'bg-emerald-100',
+    iconColor:  'text-emerald-600',
+    icon:       CheckCircle,
+  },
+};
+
+const FILTER_OPTIONS = [
+  { value: '',                          label: 'All',                       icon: Layers },
+  { value: 'pending',                   label: 'Pending',                   icon: Clock },
+  { value: 'processing',                label: 'Processing',                icon: Play },
+  { value: 'verification_in_progress',  label: 'Verification In Progress',  icon: ShieldCheck },
+  { value: 'verification_completed',    label: 'Verification Completed',    icon: CheckCircle },
+  { value: 'sdc_generated',              label: 'SDC Generated',            icon: Award },
+  { value: 'approved',                  label: 'Approved',                  icon: CheckCircle },
+];
+
+const PAGE_SIZE = 10;
+
+const normaliseBatch = (b) => {
+  if (!b || typeof b !== 'object') return null;
+  const id       = b.batch_id || b.id || '';
+  const records  = Array.isArray(b.users) ? b.users : [];
+  const total    = records.length > 0 ? records.length : Number(b.total_users ?? b.total ?? 0);
+  const summaryVerified = Number(b.approved ?? b.approved_count ?? 0);
+  const summaryFailed   = Number(b.rejected ?? b.rejected_count ?? 0);
+  const hasRecordStatuses = records.some((record) => record?.verification_status != null || record?.status != null);
+  const recordCounts = hasRecordStatuses ? summarizeRecordCounts(records) : null;
+  const verified = recordCounts ? recordCounts.verified : summaryVerified;
+  const failed   = recordCounts ? recordCounts.failed : summaryFailed;
+  const pending  = recordCounts ? recordCounts.pending : Math.max(0, total - verified - failed);
+  const status   = b.status || 'pending';
+  // Normalise verificationTypes — API may return strings or objects
+  const rawTypes = b.verification_types || [];
+  const verificationTypes = rawTypes.map((t) =>
+    typeof t === 'string' ? t : (t?.name || t?.label || t?.id || String(t))
+  );
+  return {
+    id,
+    name:                 b.batch_name || b.name || `Batch ${String(id).slice(0, 8)}`,
+    // 'human' | 'product' | 'warranty' — routes "View Details" to the
+    // dedicated warranty status page instead of the generic detail modal.
+    batchType:            b.batch_type || null,
+    total, verified, failed, pending, status,
+    statusMeta:           BATCH_STATUS_META[status] || BATCH_STATUS_META.pending,
+    createdAt:            b.created_at || b.createdAt,
+    excelPath:            b.excel_storage_path || null,
+    reportPaths:          Array.isArray(b.report_storage_paths) ? b.report_storage_paths : [],
+    description:          b.description || '',
+    industryType:         Array.isArray(b.industry_type) ? b.industry_type : [],
+    verificationTypes,
+    credentialVisibility: b.credential_visibility || '',
+    verificationProgress: b.verification_progress || {},
+    records,
+  };
+};
+
+// API returns [{ org_id, organization_name, batches: [...] }] — one entry per org,
+// with the actual batch list nested under `.batches`.
+const extractBatchList = (data) => {
+  const groups = Array.isArray(data) ? data : [data];
+  return groups.flatMap((g) => {
+    if (Array.isArray(g?.batches)) return g.batches;
+    if (Array.isArray(g?.items)) return g.items;
+    if (Array.isArray(g)) return g;
+    if (g && typeof g === 'object' && (g.batch_id || g.id)) return [g];
+    return [];
+  });
+};
+
+const formatDate = (v) => {
+  if (!v) return '—';
+  const d = new Date(v);
+  return Number.isNaN(d.getTime())
+    ? v
+    : d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+};
+
+// ── Stagger variants ──────────────────────────────────────────────────────────
+const listContainer = {
+  hidden: {},
+  show:   { transition: { staggerChildren: 0.07 } },
+};
+const listItem = {
+  hidden: { opacity: 0, y: 14 },
+  show:   { opacity: 1, y: 0, transition: { duration: 0.28, ease: 'easeOut' } },
+};
+
+// ── Segmented progress bar ────────────────────────────────────────────────────
+const SegmentedBar = ({ total, verified, failed, pending }) => {
+  const vPct = total > 0 ? (verified / total) * 100 : 0;
+  const fPct = total > 0 ? (failed   / total) * 100 : 0;
+  const pPct = total > 0 ? (pending  / total) * 100 : 0;
+  return (
+    <div className="flex h-3 w-full overflow-hidden rounded-full bg-gray-100">
+      <motion.div
+        initial={{ width: 0 }}
+        animate={{ width: `${vPct}%` }}
+        transition={{ duration: 0.9, ease: 'easeOut' }}
+        className="h-full bg-green-500"
+      />
+      <motion.div
+        initial={{ width: 0 }}
+        animate={{ width: `${fPct}%` }}
+        transition={{ duration: 0.9, ease: 'easeOut', delay: 0.1 }}
+        className="h-full bg-red-400"
+      />
+      <motion.div
+        initial={{ width: 0 }}
+        animate={{ width: `${pPct}%` }}
+        transition={{ duration: 0.9, ease: 'easeOut', delay: 0.2 }}
+        className="h-full bg-amber-300"
+      />
+    </div>
+  );
+};
+
+// ── Batch Detail Modal ────────────────────────────────────────────────────────
+const BatchDetailModal = ({ batchId, batchName, onClose }) => {
+  const { user } = useAuth();
+  const [detail,  setDetail]  = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [sdcByRecordId, setSdcByRecordId] = useState({});
+  const [certsLoading, setCertsLoading] = useState(false);
+  const [downloadingId, setDownloadingId] = useState(null);
+  const [detailRecord, setDetailRecord] = useState(null);
+  const instanceKey = 'de';
+
+  // Matches this batch's records against the Dhiway record list by
+  // email/title (same approach used on the admin Batch Monitor / SDC
+  // Verification pages) — org_id/space_id come straight from THIS batch's own
+  // verification_progress.sdc (recorded at generation time), which is the
+  // authoritative source for exactly which Dhiway org/space its certificates
+  // actually live in — more reliable than guessing from the org's current
+  // profile setting, which could differ or have changed since generation.
+  const refreshCertificates = useCallback(async (records, sdcInfo, batchType) => {
+    if (!records?.length) return;
+    setCertsLoading(true);
+    try {
+      const orgId   = sdcInfo?.org_id || undefined;
+      // Falls back to the org's configured Dhiway space for this batch type if
+      // this batch's own verification_progress.sdc doesn't have one recorded
+      // yet. Typed configs are preferred so warranty/product batches do not
+      // accidentally reuse human spaces.
+      const spaceId = sdcInfo?.space_id || resolveDhiwaySpaceId(user?.dhiwaysDetails, batchType || sdcInfo?.batch_type || 'human');
+
+      const allRecords = [];
+      let page = 1;
+      let hasMore = true;
+      while (hasMore) {
+        const { data } = await sdcAPI.getRecords({ active: 1, page, pageSize: 100, org_id: orgId, space_id: spaceId });
+        const pageRecords = Array.isArray(data?.records) ? data.records : [];
+        allRecords.push(...pageRecords);
+        const totalPages = Number(data?.totalPages || data?.total_pages || 0);
+        hasMore = totalPages > 0 ? page < totalPages : pageRecords.length === 100;
+        page += 1;
+      }
+      const byId = {};
+      records.forEach((record) => {
+        // Confirmed via the live batch-details response: each user is keyed
+        // by `user_id`, not `id` — check all three since the shape can vary.
+        const recordId = getRecordKey(record);
+        const recordEmail = record?.email?.trim().toLowerCase();
+        const recordName = getRecordTitle(record)?.trim().toLowerCase();
+        const match = allRecords.find((item) => {
+          const recipients = (item?.recipients || []).map((v) => v?.trim().toLowerCase()).filter(Boolean);
+          const itemTitle = item?.title?.trim().toLowerCase();
+          return (recordEmail && recipients.includes(recordEmail)) || (recordName && itemTitle === recordName);
+        });
+        if (match?.publicId && recordId) {
+          byId[recordId] = {
+            id: match.id, publicId: match.publicId, title: match.title,
+            recipients: Array.isArray(match.recipients) ? match.recipients : [],
+            anchorTime: match.anchorTime || null, revoked: !!match.revoked,
+            issued: !!match.anchorTime && !match.revoked,
+            active: !!match.active, latest: !!match.latest, edited: !!match.edited,
+            createdAt: match.createdAt || null, updatedAt: match.updatedAt || null,
+          };
+        }
+      });
+      setSdcByRecordId(byId);
+    } catch (err) {
+      setSdcByRecordId({});
+      toast.error(getApiError(err, 'Failed to fetch SDC records'));
+    } finally {
+      setCertsLoading(false);
+    }
+  }, [user?.dhiwaysDetails]);
+
+  useEffect(() => {
+    if (!batchId) return;
+    setLoading(true);
+    setDetail(null);
+    setSdcByRecordId({});
+    verificationAPI.getBatchDetails(batchId)
+      .then(({ data }) => {
+        const normalised = normaliseBatch(data);
+        setDetail(normalised);
+        const sdcInfo = normalised?.verificationProgress?.sdc;
+        if (sdcInfo?.status) {
+          refreshCertificates(normalised.records, sdcInfo, normalised.batchType);
+        }
+      })
+      .catch((err) => toast.error(getApiError(err, 'Failed to load batch details')))
+      .finally(() => setLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [batchId]);
+
+  // Opens a blank tab synchronously (same tick as the click) and redirects it
+  // once the URL arrives — awaiting the fetch first and only then calling
+  // window.open gets silently blocked by most browsers.
+  const handleDownloadCertificate = async (publicId) => {
+    setDownloadingId(publicId);
+    const win = window.open('', '_blank');
+    if (win) win.opener = null;
+    try {
+      const { data } = await sdcAPI.getRecord(publicId, instanceKey);
+      if (data?.pdf) {
+        if (win) win.location.href = data.pdf;
+      } else {
+        win?.close();
+        toast.error('No PDF link on this certificate yet');
+      }
+    } catch (err) {
+      win?.close();
+      toast.error(getApiError(err, 'Failed to fetch certificate'));
+    } finally {
+      setDownloadingId(null);
+    }
+  };
+
+  const meta = detail?.statusMeta || BATCH_STATUS_META.pending;
+  const StatusIcon = meta.icon;
+  const sdc = detail?.verificationProgress?.sdc || null;
+  const pct = detail && detail.total > 0
+    ? Math.round(((detail.verified + detail.failed) / detail.total) * 100)
+    : 0;
+
+  const hasDownloads = detail?.excelPath || detail?.reportPaths?.length > 0;
+  const hasMeta      = detail &&
+    (detail.industryType.length > 0 || detail.verificationTypes.length > 0 || detail.credentialVisibility);
+
+  return (
+    <>
+    <Modal isOpen={!!batchId} onClose={onClose} title={`${batchName} — Details`} size="4xl">
+      {loading ? (
+        <div className="flex flex-col items-center justify-center gap-3 py-16">
+          <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-brand-blue/10 bg-brand-blue/5">
+            <RefreshCw size={20} className="animate-spin text-brand-blue" />
+          </div>
+          <p className="font-inter text-sm text-gray-400">Loading batch details…</p>
+        </div>
+      ) : !detail ? (
+        <div className="flex flex-col items-center justify-center gap-3 py-12">
+          <div className="flex h-12 w-12 items-center justify-center rounded-xl border border-red-100 bg-red-50">
+            <XCircle size={22} className="text-red-500" />
+          </div>
+          <p className="font-inter text-sm text-gray-500">Failed to load details.</p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+
+          {/* ── Status banner ─────────────────────────────────────────────── */}
+          <div className={`rounded-2xl border p-5 ${meta.headerBg}`}>
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex items-start gap-4">
+                <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-xl ${meta.iconBg}`}>
+                  <StatusIcon size={22} className={meta.iconColor} />
+                </div>
+                <div className="min-w-0">
+                  <p className="font-inter text-[10px] font-bold uppercase tracking-[0.2em] text-gray-400">
+                    Batch Status
+                  </p>
+                  <h3 className="mt-1 font-sora text-2xl font-bold text-brand-dark">{meta.label}</h3>
+                  {detail.id && (
+                    <p className="mt-1 font-mono text-[11px] text-gray-400 break-all">{detail.id}</p>
+                  )}
+                  {detail.description && (
+                    <p className="mt-2 font-inter text-xs leading-5 text-gray-500 max-w-md">
+                      {detail.description}
+                    </p>
+                  )}
+                  {sdc && (
+                    <p className="mt-2 font-inter text-[11px] text-gray-400">
+                      {sdcStatusLabel(sdc.status)}
+                      {sdc.created_at ? ` · ${sdc.created_at}` : ''}
+                      {sdc.issued_count ? ` · ${sdc.issued_count} issued` : ''}
+                    </p>
+                  )}
+                </div>
+              </div>
+              <div className="flex shrink-0 flex-col items-end gap-1.5">
+                <div className={`flex items-center gap-1.5 rounded-xl border px-3 py-2 ${meta.tone}`}>
+                  <div className={`h-1.5 w-1.5 rounded-full ${meta.dot}`} />
+                  <span className="font-inter text-xs font-semibold">{meta.label}</span>
+                </div>
+                {sdc && (
+                  <div className="flex items-center gap-1.5 rounded-xl border border-blue-100 bg-blue-50 px-3 py-2 text-brand-blue">
+                    <Award size={12} />
+                    <span className="font-inter text-xs font-semibold">{sdcStatusLabel(sdc.status)}</span>
+                  </div>
+                )}
+                {sdc && (
+                  <button
+                    type="button"
+                    onClick={() => refreshCertificates(detail.records, detail.verificationProgress?.sdc, detail.batchType)}
+                    disabled={certsLoading}
+                    className="flex items-center gap-1 font-inter text-[11px] font-semibold text-brand-blue hover:opacity-70 disabled:opacity-50"
+                  >
+                    <RefreshCw size={11} className={certsLoading ? 'animate-spin' : ''} /> Refresh Certificates
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* ── Stats row ─────────────────────────────────────────────────── */}
+          <motion.div
+            variants={listContainer}
+            initial="hidden"
+            animate="show"
+            className="grid grid-cols-4 gap-2.5"
+          >
+            {[
+              {
+                label:   'Total',
+                value:   detail.total,
+                icon:    Layers,
+                surface: 'bg-brand-blue/5 border-brand-blue/10',
+                num:     'text-brand-blue',
+                ico:     'text-brand-blue',
+              },
+              {
+                label:   'Verified',
+                value:   detail.verified,
+                icon:    CheckCircle,
+                surface: 'bg-green-50 border-green-100',
+                num:     'text-green-600',
+                ico:     'text-green-500',
+              },
+              {
+                label:   'Pending',
+                value:   detail.pending,
+                icon:    Clock,
+                surface: 'bg-amber-50 border-amber-100',
+                num:     'text-amber-600',
+                ico:     'text-amber-500',
+              },
+              {
+                label:   'Failed',
+                value:   detail.failed,
+                icon:    XCircle,
+                surface: 'bg-red-50 border-red-100',
+                num:     'text-red-500',
+                ico:     'text-red-400',
+              },
+            ].map((s) => (
+              <motion.div
+                key={s.label}
+                variants={listItem}
+                className={`rounded-xl border p-4 ${s.surface}`}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <p className="font-inter text-[10px] font-semibold uppercase tracking-[0.12em] text-gray-400">
+                    {s.label}
+                  </p>
+                  <s.icon size={13} className={s.ico} />
+                </div>
+                <p className={`mt-2 font-sora text-3xl font-bold leading-none ${s.num}`}>
+                  {s.value}
+                </p>
+              </motion.div>
+            ))}
+          </motion.div>
+
+          {/* ── Segmented progress ────────────────────────────────────────── */}
+          <div className="rounded-2xl border border-gray-100 bg-white p-5">
+            <div className="mb-3 flex items-center justify-between gap-4">
+              <p className="font-sora text-sm font-semibold text-brand-dark">Verification Progress</p>
+              <div className="flex items-baseline gap-1.5">
+                <span className="font-sora text-xl font-bold text-brand-dark">{pct}%</span>
+                <span className="font-inter text-xs text-gray-400">
+                  · {detail.verified + detail.failed} of {detail.total} processed
+                </span>
+              </div>
+            </div>
+            <SegmentedBar
+              total={detail.total}
+              verified={detail.verified}
+              failed={detail.failed}
+              pending={detail.pending}
+            />
+            <div className="mt-3 flex flex-wrap items-center gap-x-6 gap-y-1.5">
+              {[
+                { color: 'bg-green-500', label: 'Verified', count: detail.verified },
+                { color: 'bg-amber-300', label: 'Pending',  count: detail.pending },
+                { color: 'bg-red-400',   label: 'Failed',   count: detail.failed },
+              ].map((leg) => (
+                <div key={leg.label} className="flex items-center gap-1.5">
+                  <div className={`h-2.5 w-2.5 rounded-sm ${leg.color}`} />
+                  <span className="font-inter text-xs text-gray-500">
+                    {leg.label}{' '}
+                    <span className="font-semibold text-brand-dark">{leg.count}</span>
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* ── Meta info ─────────────────────────────────────────────────── */}
+          {hasMeta && (
+            <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white">
+              <div className="flex divide-x divide-gray-100">
+                {detail.industryType.length > 0 && (
+                  <div className="flex-1 p-4">
+                    <div className="mb-3 flex items-center gap-2">
+                      <Building2 size={13} className="text-gray-400" />
+                      <p className="font-inter text-[10px] font-bold uppercase tracking-[0.16em] text-gray-400">
+                        Industries
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {detail.industryType.map((t) => (
+                        <span
+                          key={t}
+                          className="rounded-lg border border-brand-blue/15 bg-brand-blue/8 px-2.5 py-1 font-inter text-[11px] font-semibold text-brand-blue"
+                          style={{ backgroundColor: 'rgb(37 99 235 / 0.07)' }}
+                        >
+                          {t}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {detail.verificationTypes.length > 0 && (
+                  <div className="flex-1 p-4">
+                    <div className="mb-3 flex items-center gap-2">
+                      <ShieldCheck size={13} className="text-gray-400" />
+                      <p className="font-inter text-[10px] font-bold uppercase tracking-[0.16em] text-gray-400">
+                        Verification Types
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {detail.verificationTypes.map((t) => (
+                        <span
+                          key={t}
+                          title={t}
+                          className={`rounded-lg px-2.5 py-1 font-inter text-[11px] font-semibold ${
+                            isUUID(t)
+                              ? 'border border-gray-200 bg-gray-50 font-mono text-gray-500'
+                              : 'border border-gray-200 bg-gray-50 text-brand-dark'
+                          }`}
+                        >
+                          {formatVerifType(t)}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {detail.credentialVisibility && (
+                  <div className="min-w-[120px] p-4">
+                    <div className="mb-3 flex items-center gap-2">
+                      <Globe size={13} className="text-gray-400" />
+                      <p className="font-inter text-[10px] font-bold uppercase tracking-[0.16em] text-gray-400">
+                        Visibility
+                      </p>
+                    </div>
+                    <span className="rounded-lg border border-brand-blue/20 bg-brand-blue/5 px-2.5 py-1.5 font-inter text-[11px] font-semibold text-brand-blue capitalize">
+                      {detail.credentialVisibility}
+                    </span>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* ── Downloads ─────────────────────────────────────────────────── */}
+          {hasDownloads && (
+            <div className="rounded-2xl border border-gray-100 bg-white p-4">
+              <p className="mb-3 font-inter text-[10px] font-bold uppercase tracking-[0.16em] text-gray-400">
+                Downloads
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {detail.excelPath && (
+                  <a
+                    href={detail.excelPath}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-2 rounded-xl border border-green-200 bg-green-50 px-3 py-2 font-inter text-xs font-semibold text-green-700 transition-colors hover:bg-green-100"
+                  >
+                    <FileText size={12} />
+                    Excel Template
+                  </a>
+                )}
+                {detail.reportPaths.map((path, i) => (
+                  <a
+                    key={i}
+                    href={path}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-2 rounded-xl border border-brand-blue/15 bg-brand-blue/5 px-3 py-2 font-inter text-xs font-semibold text-brand-blue transition-colors hover:bg-brand-blue/10"
+                  >
+                    <Download size={12} />
+                    Report {i + 1}
+                  </a>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* ── Records table ─────────────────────────────────────────────── */}
+          {detail.records.length > 0 && (
+            <div className="overflow-hidden rounded-2xl border border-gray-100">
+              <div className="flex items-center justify-between border-b border-gray-100 px-5 py-3.5">
+                <p className="font-sora text-sm font-semibold text-brand-dark">Records</p>
+                <span className="rounded-lg border border-gray-100 bg-gray-50 px-2.5 py-1 font-inter text-[11px] font-medium text-gray-500">
+                  {detail.records.length} total
+                </span>
+              </div>
+              <div className="max-h-72 overflow-y-auto">
+                <table className="w-full min-w-[680px]">
+                  <thead className="sticky top-0 z-10 border-b border-gray-100 bg-white">
+                    <tr>
+                      <th className="px-5 py-3 text-left font-inter text-[10px] font-bold uppercase tracking-[0.12em] text-gray-400">
+                        Record
+                      </th>
+                      <th className="px-5 py-3 text-left font-inter text-[10px] font-bold uppercase tracking-[0.12em] text-gray-400">
+                        Status
+                      </th>
+                      <th className="px-5 py-3 text-left font-inter text-[10px] font-bold uppercase tracking-[0.12em] text-gray-400 w-56">
+                        Certificate
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {detail.records.map((record, i) => {
+                      const Icon = isProductRecord(record) ? Package : User;
+                      const sb   = recordStatusBadge(record.verification_status);
+                      const sdcMatch = sdcByRecordId[getRecordKey(record)] || null;
+                      return (
+                        <motion.tr
+                          key={getRecordKey(record)}
+                          initial={{ opacity: 0 }}
+                          animate={{ opacity: 1 }}
+                          transition={{ delay: i * 0.04 }}
+                          className="border-b border-gray-50 transition-colors last:border-0 hover:bg-gray-50/60"
+                        >
+                          <td className="px-5 py-3.5">
+                            <div className="flex items-center gap-3">
+                              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-brand-blue/10 bg-brand-blue/5">
+                                <Icon size={14} className="text-brand-blue" />
+                              </div>
+                              <div className="min-w-0">
+                                <p className="truncate font-inter text-sm font-semibold text-brand-dark">
+                                  {getRecordTitle(record)}
+                                </p>
+                                <p className="truncate font-inter text-xs text-gray-400">
+                                  {getRecordSubtitle(record)}
+                                </p>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-5 py-3.5">
+                            <Badge status={sb.variant}>{sb.label}</Badge>
+                          </td>
+                          <td className="px-5 py-3.5">
+                            {sdcMatch?.issued ? (
+                              <div className="flex items-center gap-2">
+                                <Badge status="info">Ready</Badge>
+                                <div className="flex items-center gap-0.5 rounded-lg border border-gray-100 bg-gray-50 p-0.5">
+                                  <button
+                                    type="button"
+                                    disabled={downloadingId === sdcMatch.publicId}
+                                    onClick={() => handleDownloadCertificate(sdcMatch.publicId)}
+                                    className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold font-inter text-brand-blue transition-colors hover:bg-white hover:shadow-sm disabled:opacity-50"
+                                  >
+                                    <Download size={12} className={downloadingId === sdcMatch.publicId ? 'animate-spin' : ''} /> Download
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setDetailRecord(record)}
+                                    className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold font-inter text-gray-500 transition-colors hover:bg-white hover:text-brand-blue hover:shadow-sm"
+                                  >
+                                    <Info size={12} /> Detail
+                                  </button>
+                                </div>
+                              </div>
+                            ) : sdcMatch ? (
+                              <Badge status="pending">Draft</Badge>
+                            ) : (
+                              <span className="text-xs text-gray-300 font-inter">-</span>
+                            )}
+                          </td>
+                        </motion.tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </Modal>
+
+    <CertificateDetailModal
+      record={detailRecord}
+      sdcMatch={detailRecord ? sdcByRecordId[getRecordKey(detailRecord)] || null : null}
+      instanceKey={instanceKey}
+      onClose={() => setDetailRecord(null)}
+    />
+    </>
+  );
+};
+
+// ── Warranty product status (approve/reject outcome — distinct from the
+// batch-level BATCH_STATUS_META above) ─────────────────────────────────────
+const WARRANTY_PRODUCT_STATUS_META = {
+  pending:  { label: 'Pending',  tone: 'bg-amber-50 text-amber-700 border-amber-200',    icon: Clock },
+  approved: { label: 'Approved', tone: 'bg-emerald-50 text-emerald-700 border-emerald-200', icon: CheckCircle },
+  rejected: { label: 'Rejected', tone: 'bg-red-50 text-red-600 border-red-200',          icon: XCircle },
+};
+
+// ── Warranty Detail Modal — same popup pattern as BatchDetailModal above,
+// but fetches from the dedicated warranty endpoint (warranty batches carry
+// product/serial/warranty-date records, not the generic verification shape). ─
+const WarrantyDetailModal = ({ batchId, batchName, onClose }) => {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState('');
+
+  useEffect(() => {
+    if (!batchId) return;
+    setLoading(true);
+    setData(null);
+    setSearch('');
+    verificationAPI.getWarrantyStatus(batchId)
+      .then(({ data: resp }) => setData(resp))
+      .catch((err) => toast.error(getApiError(err, 'Failed to load warranty status')))
+      .finally(() => setLoading(false));
+  }, [batchId]);
+
+  const products = data?.products || [];
+
+  // The backend's own `summary` counts can go stale/zero on older batches —
+  // when its total doesn't add up to the actual product count, derive the
+  // counts from the products themselves instead of trusting it.
+  const derivedSummary = products.reduce((acc, p) => {
+    const status = p.warranty_status || 'approved';
+    if (status === 'pending') acc.pending += 1;
+    else if (status === 'rejected') acc.rejected += 1;
+    else acc.approved += 1;
+    return acc;
+  }, { pending: 0, approved: 0, rejected: 0 });
+  const rawSummary = data?.summary || null;
+  const summaryIsConsistent = rawSummary &&
+    Number(rawSummary.pending ?? 0) + Number(rawSummary.approved ?? 0) + Number(rawSummary.rejected ?? 0) === products.length;
+  const summary = summaryIsConsistent ? rawSummary : derivedSummary;
+
+  const filtered = search.trim()
+    ? products.filter((p) =>
+        [p.product_name, p.serial_number]
+          .filter(Boolean)
+          .some((v) => v.toLowerCase().includes(search.toLowerCase()))
+      )
+    : products;
+
+  const tiles = [
+    { label: 'Pending',  value: summary?.pending  ?? 0, cls: 'bg-amber-50 border-amber-200 text-amber-700' },
+    { label: 'Approved', value: summary?.approved ?? 0, cls: 'bg-emerald-50 border-emerald-200 text-emerald-700' },
+    { label: 'Rejected', value: summary?.rejected ?? 0, cls: 'bg-red-50 border-red-200 text-red-600' },
+  ];
+
+  return (
+    <Modal isOpen={!!batchId} onClose={onClose} title={`${batchName} — Warranty Status`} size="4xl">
+      {loading ? (
+        <div className="flex flex-col items-center justify-center gap-3 py-16">
+          <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-brand-blue/10 bg-brand-blue/5">
+            <RefreshCw size={20} className="animate-spin text-brand-blue" />
+          </div>
+          <p className="font-inter text-sm text-gray-400">Loading warranty status…</p>
+        </div>
+      ) : !data ? (
+        <div className="flex flex-col items-center justify-center gap-3 py-12">
+          <div className="flex h-12 w-12 items-center justify-center rounded-xl border border-red-100 bg-red-50">
+            <XCircle size={22} className="text-red-500" />
+          </div>
+          <p className="font-inter text-sm text-gray-500">Failed to load details.</p>
+        </div>
+      ) : (
+        <div className="space-y-4">
+
+          <div className="grid grid-cols-3 gap-3">
+            {tiles.map((t) => (
+              <div key={t.label} className={`rounded-2xl border p-4 ${t.cls}`}>
+                <p className="font-sora font-bold text-2xl leading-none">{t.value}</p>
+                <p className="font-inter text-xs font-medium mt-1 opacity-80">{t.label}</p>
+              </div>
+            ))}
+          </div>
+
+          <div className="max-w-sm">
+            <div className="relative">
+              <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search product or serial…"
+                className="w-full rounded-xl border border-gray-200 bg-white py-2.5 pl-9 pr-3 font-inter text-sm text-brand-dark outline-none transition-all placeholder:text-gray-400 focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/15"
+              />
+            </div>
+          </div>
+
+          <div className="overflow-hidden rounded-2xl border border-blue-100">
+            {filtered.length === 0 ? (
+              <div className="py-12 text-center">
+                <p className="font-inter text-sm text-gray-400">No products found</p>
+              </div>
+            ) : (
+              <div className="max-h-[45vh] overflow-y-auto">
+                <table className="w-full min-w-[680px] font-inter">
+                  <thead className="sticky top-0">
+                    <tr className="border-b border-blue-100 bg-blue-50/80">
+                      {['Product', 'Serial Number', 'Warranty Start', 'Warranty End', 'Status', 'Reason'].map((h) => (
+                        <th key={h} className="px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-brand-blue/70">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filtered.map((product, i) => {
+                      const statusMeta = WARRANTY_PRODUCT_STATUS_META[product.warranty_status] || WARRANTY_PRODUCT_STATUS_META.approved;
+                      const StatusIcon = statusMeta.icon;
+                      return (
+                        <tr key={product.product_id || product.id || i} className="border-b border-blue-50 last:border-0 hover:bg-blue-50/30 transition-colors">
+                          <td className="px-5 py-3.5">
+                            <div className="flex items-center gap-2.5">
+                              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-brand-blue/10">
+                                <Package size={13} className="text-brand-blue" />
+                              </div>
+                              <div className="min-w-0">
+                                <p className="text-sm font-semibold text-brand-dark truncate">{product.product_name || '—'}</p>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-5 py-3.5 text-xs font-mono text-gray-500">{product.serial_number || '—'}</td>
+                          <td className="px-5 py-3.5 text-xs text-gray-500">{formatDate(product.warranty_start_date)}</td>
+                          <td className="px-5 py-3.5 text-xs text-gray-500">{formatDate(product.warranty_end_date)}</td>
+                          <td className="px-5 py-3.5">
+                            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[11px] font-semibold font-inter ${statusMeta.tone}`}>
+                              <StatusIcon size={11} />
+                              {statusMeta.label}
+                            </span>
+                          </td>
+                          <td className="px-5 py-3.5 text-xs text-gray-400 max-w-[160px]">
+                            <span className="line-clamp-2">{product.warranty_reason || '—'}</span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+        </div>
+      )}
+    </Modal>
+  );
+};
+
+// ── Main Page ─────────────────────────────────────────────────────────────────
+export const BatchStatus = () => {
+  const navigate = useNavigate();
+  const { user } = useAuth();
+  const [batches,      setBatches]      = useState([]);
+  const [loading,      setLoading]      = useState(true);
+  const [refreshing,   setRefreshing]   = useState(false);
+  const [statusFilter, setStatusFilter] = useState('');
+  const [page,         setPage]         = useState(0);
+  const [selectedId,   setSelectedId]   = useState(null);
+  const [selectedName, setSelectedName] = useState('');
+  const [selectedWarrantyId,   setSelectedWarrantyId]   = useState(null);
+  const [selectedWarrantyName, setSelectedWarrantyName] = useState('');
+  const [showGstGate,  setShowGstGate]  = useState(false);
+
+  // Orgs must have a verified GSTIN before creating batches. (Superadmin
+  // approval used to be a second gate here too, but the backend removed
+  // that requirement from the authorization flow entirely — org_approved
+  // no longer blocks anything.)
+  const gstVerified = !!user?.gstVerified;
+  const handleNewBatchClick = () => {
+    if (gstVerified) navigate('/org/create-batch');
+    else setShowGstGate(true);
+  };
+
+  const fetchData = useCallback(async (showRefresh = false) => {
+    if (showRefresh) setRefreshing(true);
+    else setLoading(true);
+    try {
+      const { data } = await verificationAPI.getBatches();
+      const list = extractBatchList(data);
+      setBatches(list.map(normaliseBatch).filter(hasRenderableRecords));
+    } catch (err) {
+      toast.error(getApiError(err, 'Failed to fetch batches'));
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, []);
+
+  useEffect(() => { fetchData(); }, [fetchData]);
+  useEffect(() => {
+    const t = setInterval(() => fetchData(true), 30000);
+    return () => clearInterval(t);
+  }, [fetchData]);
+
+  const filtered   = statusFilter ? batches.filter((b) => b.status === statusFilter) : batches;
+  const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
+  const paged      = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+
+  const totalRecords  = batches.reduce((s, b) => s + b.total,    0);
+  const totalPending  = batches.reduce((s, b) => s + b.pending,  0);
+  const totalVerified = batches.reduce((s, b) => s + b.verified, 0);
+  const totalFailed   = batches.reduce((s, b) => s + b.failed,   0);
+  const overallPct    = totalRecords > 0
+    ? Math.round(((totalVerified + totalFailed) / totalRecords) * 100)
+    : 0;
+
+  const filterCounts = {
+    '':                          batches.length,
+    pending:                     batches.filter((b) => b.status === 'pending').length,
+    processing:                  batches.filter((b) => b.status === 'processing').length,
+    verification_in_progress:   batches.filter((b) => b.status === 'verification_in_progress').length,
+    verification_completed:     batches.filter((b) => b.status === 'verification_completed').length,
+    sdc_generated:                batches.filter((b) => b.status === 'sdc_generated').length,
+    approved:                    batches.filter((b) => b.status === 'approved').length,
+  };
+
+  const statCards = [
+    {
+      label:      'Total Records',
+      value:      totalRecords,
+      sub:        `across ${batches.length} batch${batches.length !== 1 ? 'es' : ''}`,
+      icon:       Layers,
+      surface:    'bg-brand-blue border-brand-blue',
+      iconBg:     'bg-white/15',
+      iconColor:  'text-white',
+      labelColor: 'text-white/65',
+      valueColor: 'text-white',
+      subColor:   'text-white/55',
+    },
+    {
+      label:      'Verified',
+      value:      totalVerified,
+      sub:        totalRecords > 0 ? `${Math.round((totalVerified / totalRecords) * 100)}% of total` : '—',
+      icon:       CheckCircle,
+      surface:    'bg-white border-gray-100',
+      iconBg:     'bg-green-50',
+      iconColor:  'text-green-600',
+      labelColor: 'text-gray-400',
+      valueColor: 'text-brand-dark',
+      subColor:   'text-green-600',
+    },
+    {
+      label:      'Pending',
+      value:      totalPending,
+      sub:        totalRecords > 0 ? `${Math.round((totalPending / totalRecords) * 100)}% of total` : '—',
+      icon:       Clock,
+      surface:    'bg-white border-gray-100',
+      iconBg:     'bg-amber-50',
+      iconColor:  'text-amber-600',
+      labelColor: 'text-gray-400',
+      valueColor: 'text-brand-dark',
+      subColor:   'text-amber-600',
+    },
+    {
+      label:      'Failed',
+      value:      totalFailed,
+      sub:        totalRecords > 0 ? `${Math.round((totalFailed / totalRecords) * 100)}% of total` : '—',
+      icon:       XCircle,
+      surface:    'bg-white border-gray-100',
+      iconBg:     'bg-red-50',
+      iconColor:  'text-red-500',
+      labelColor: 'text-gray-400',
+      valueColor: 'text-brand-dark',
+      subColor:   'text-red-500',
+    },
+  ];
+
+  return (
+    <AuthLayout title="Batch Status">
+      <div className="mx-auto w-full space-y-5 lg:max-w-none">
+
+        {/* ── Page header ── */}
+        <PageHeader
+          title="Verification Batches"
+          subtitle="Monitor verification status across all your batches in real time"
+          action={
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => fetchData(true)}
+                disabled={refreshing}
+                className="inline-flex items-center gap-1.5 rounded-xl border border-gray-200 bg-white px-3 py-2 font-inter text-sm font-medium text-brand-dark transition-colors hover:bg-gray-50 disabled:opacity-60"
+              >
+                <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />
+                {refreshing ? 'Refreshing…' : 'Refresh'}
+              </button>
+              <Button variant="primary" size="sm" icon={Upload} onClick={handleNewBatchClick}>
+                New Batch
+              </Button>
+            </div>
+          }
+        />
+
+        {/* ── Stat cards ── */}
+        {!loading && batches.length > 0 && (
+          <motion.div
+            variants={listContainer}
+            initial="hidden"
+            animate="show"
+            className="grid grid-cols-2 gap-4 lg:grid-cols-4"
+          >
+            {statCards.map((s) => (
+              <motion.div
+                key={s.label}
+                variants={listItem}
+                className={`rounded-2xl border p-5 ${s.surface}`}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className={`font-inter text-[10px] font-semibold uppercase tracking-[0.14em] ${s.labelColor}`}>
+                      {s.label}
+                    </p>
+                    <p className={`mt-2 font-sora text-3xl font-bold leading-none ${s.valueColor}`}>
+                      {s.value.toLocaleString()}
+                    </p>
+                    <p className={`mt-2 font-inter text-xs ${s.subColor}`}>{s.sub}</p>
+                  </div>
+                  <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${s.iconBg}`}>
+                    <s.icon size={18} className={s.iconColor} />
+                  </div>
+                </div>
+              </motion.div>
+            ))}
+          </motion.div>
+        )}
+
+        {/* ── Overall progress ── */}
+        {!loading && batches.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.3, duration: 0.3, ease: 'easeOut' }}
+            className="rounded-2xl border border-gray-100 bg-white p-5"
+          >
+            <div className="mb-4 flex items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="flex h-9 w-9 items-center justify-center rounded-xl border border-brand-blue/10 bg-brand-blue/5">
+                  <BarChart3 size={16} className="text-brand-blue" />
+                </div>
+                <div>
+                  <p className="font-inter text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-400">
+                    Pipeline Overview
+                  </p>
+                  <p className="font-sora text-sm font-semibold text-brand-dark">
+                    Overall Verification Progress
+                  </p>
+                </div>
+              </div>
+              <div className="text-right">
+                <p className="font-sora text-2xl font-bold text-brand-dark">{overallPct}%</p>
+                <p className="font-inter text-[11px] text-gray-400">
+                  {totalVerified + totalFailed} / {totalRecords} processed
+                </p>
+              </div>
+            </div>
+            <SegmentedBar
+              total={totalRecords}
+              verified={totalVerified}
+              failed={totalFailed}
+              pending={totalPending}
+            />
+            <div className="mt-3 flex flex-wrap items-center gap-x-6 gap-y-2">
+              {[
+                { color: 'bg-green-500', label: 'Verified', count: totalVerified },
+                { color: 'bg-amber-300', label: 'Pending',  count: totalPending },
+                { color: 'bg-red-400',   label: 'Failed',   count: totalFailed },
+              ].map((leg) => (
+                <div key={leg.label} className="flex items-center gap-1.5">
+                  <div className={`h-2.5 w-2.5 rounded-sm ${leg.color}`} />
+                  <span className="font-inter text-xs text-gray-500">
+                    {leg.label} —{' '}
+                    <span className="font-medium text-brand-dark">{leg.count}</span>
+                  </span>
+                </div>
+              ))}
+            </div>
+          </motion.div>
+        )}
+
+        {/* ── Filter tabs ── */}
+        <div className="flex items-center gap-1 rounded-xl border border-gray-100 bg-white p-1.5">
+          {FILTER_OPTIONS.map((opt) => {
+            const isActive = statusFilter === opt.value;
+            const count    = filterCounts[opt.value] ?? 0;
+            return (
+              <button
+                key={opt.value}
+                onClick={() => { setStatusFilter(opt.value); setPage(0); }}
+                className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-2 font-inter text-xs font-medium transition-all ${
+                  isActive
+                    ? 'bg-brand-blue text-white'
+                    : 'text-gray-500 hover:bg-gray-50 hover:text-brand-dark'
+                }`}
+              >
+                <opt.icon size={12} />
+                {opt.label}
+                <span className={`rounded-md px-1.5 py-0.5 text-[10px] font-bold leading-none ${
+                  isActive ? 'bg-white/20 text-white' : 'bg-gray-100 text-gray-500'
+                }`}>
+                  {count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* ── Batch table ── */}
+        <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white">
+          <div className="flex items-center justify-between border-b border-gray-100 bg-gray-50/70 px-5 py-3.5">
+            <p className="font-sora text-sm font-semibold text-brand-dark">
+              Batches
+              {statusFilter && (
+                <span className="ml-2 font-inter text-xs font-normal text-gray-400">
+                  · {FILTER_OPTIONS.find((o) => o.value === statusFilter)?.label}
+                </span>
+              )}
+            </p>
+            {!loading && (
+              <span className="font-inter text-xs text-gray-400">
+                {filtered.length} batch{filtered.length !== 1 ? 'es' : ''}
+              </span>
+            )}
+          </div>
+
+          {loading && (
+            <div className="flex flex-col items-center justify-center gap-3 p-16">
+              <RefreshCw size={24} className="animate-spin text-brand-blue" />
+              <p className="font-inter text-sm text-gray-400">Loading batches…</p>
+            </div>
+          )}
+
+          {!loading && paged.length === 0 && (
+            <div className="flex flex-col items-center justify-center gap-4 p-16 text-center">
+              <div className="flex h-12 w-12 items-center justify-center rounded-xl border border-gray-100 bg-gray-50">
+                <Layers size={20} className="text-gray-400" />
+              </div>
+              <div>
+                <p className="font-sora text-sm font-semibold text-brand-dark">No batches found</p>
+                <p className="mt-1 font-inter text-xs text-gray-400">
+                  {statusFilter
+                    ? 'Try a different filter or create a new batch.'
+                    : 'Create your first verification batch to get started.'}
+                </p>
+              </div>
+              <Button variant="primary" size="sm" icon={Upload} onClick={handleNewBatchClick}>
+                New Batch
+              </Button>
+            </div>
+          )}
+
+          {!loading && paged.length > 0 && (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[680px]">
+                <thead>
+                  <tr className="border-b border-gray-100">
+                    <th className="px-5 py-3 text-left font-inter text-[10px] font-bold uppercase tracking-[0.1em] text-gray-400">
+                      Batch
+                    </th>
+                    <th className="hidden px-5 py-3 text-left font-inter text-[10px] font-bold uppercase tracking-[0.1em] text-gray-400 sm:table-cell">
+                      Progress
+                    </th>
+                    <th className="px-5 py-3 text-center font-inter text-[10px] font-bold uppercase tracking-[0.1em] text-gray-400">
+                      Records
+                    </th>
+                    <th className="px-5 py-3 text-left font-inter text-[10px] font-bold uppercase tracking-[0.1em] text-gray-400">
+                      Status
+                    </th>
+                    <th className="px-5 py-3 text-right font-inter text-[10px] font-bold uppercase tracking-[0.1em] text-gray-400">
+                      Action
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <AnimatePresence mode="sync">
+                    {paged.map((batch, index) => {
+                      const pct  = batch.total > 0
+                        ? Math.round(((batch.verified + batch.failed) / batch.total) * 100)
+                        : 0;
+                      const bm = batch.statusMeta;
+                      return (
+                        <motion.tr
+                          key={batch.id}
+                          initial={{ opacity: 0, y: 6 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0 }}
+                          transition={{ delay: index * 0.04, duration: 0.22, ease: 'easeOut' }}
+                          className="border-b border-gray-50 transition-colors last:border-0 hover:bg-gray-50/60"
+                        >
+                          <td className="px-5 py-4">
+                            <div className="flex items-center gap-3">
+                              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-brand-blue/10 bg-brand-blue/5">
+                                <Package size={16} className="text-brand-blue" />
+                              </div>
+                              <div className="min-w-0">
+                                <p className="truncate font-inter text-sm font-semibold text-brand-dark">
+                                  {batch.name}
+                                </p>
+                                <p className="truncate font-inter text-xs text-gray-400">
+                                  {formatDate(batch.createdAt)}
+                                </p>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="hidden w-48 px-5 py-4 sm:table-cell">
+                            <ProgressBar progress={pct} height="h-1.5" showLabel={false} />
+                            <p className="mt-1.5 font-inter text-[11px] text-gray-400">
+                              {pct}% · {batch.verified}/{batch.total} verified
+                            </p>
+                          </td>
+                          <td className="px-5 py-4 text-center">
+                            <div className="inline-flex min-w-[2.5rem] items-center justify-center rounded-lg border border-gray-100 bg-gray-50 px-2.5 py-1">
+                              <span className="font-sora text-sm font-bold text-brand-dark">{batch.total}</span>
+                            </div>
+                          </td>
+                          <td className="px-5 py-4">
+                            <div className={`inline-flex items-center gap-1.5 rounded-xl border px-3 py-1.5 ${bm.tone}`}>
+                              <div className={`h-1.5 w-1.5 rounded-full ${bm.dot}`} />
+                              <span className="font-inter text-xs font-semibold">{bm.label}</span>
+                            </div>
+                          </td>
+                          <td className="px-5 py-4 text-right">
+                            <button
+                              onClick={() => {
+                                if (batch.batchType === 'warranty') {
+                                  setSelectedWarrantyId(batch.id); setSelectedWarrantyName(batch.name);
+                                } else {
+                                  setSelectedId(batch.id); setSelectedName(batch.name);
+                                }
+                              }}
+                              className="inline-flex items-center gap-1.5 rounded-xl border border-brand-blue/20 bg-brand-blue/5 px-3 py-1.5 font-inter text-xs font-semibold text-brand-blue transition-all hover:bg-brand-blue hover:text-white"
+                            >
+                              <Eye size={12} />
+                              View Details
+                            </button>
+                          </td>
+                        </motion.tr>
+                      );
+                    })}
+                  </AnimatePresence>
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        {/* ── Pagination ── */}
+        {totalPages > 1 && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: 0.25 }}
+            className="flex items-center justify-between rounded-xl border border-gray-100 bg-white px-4 py-3"
+          >
+            <p className="font-inter text-xs text-gray-400">
+              Page <span className="font-semibold text-brand-dark">{page + 1}</span> of {totalPages}
+              <span className="mx-2 text-gray-200">·</span>
+              {filtered.length} batches
+            </p>
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={() => setPage((p) => Math.max(0, p - 1))}
+                disabled={page === 0}
+                className="flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 bg-white text-brand-dark transition-colors hover:bg-gray-50 disabled:opacity-40"
+              >
+                <ChevronLeft size={14} />
+              </button>
+              {Array.from({ length: Math.min(totalPages, 5) }, (_, i) => {
+                const p = totalPages <= 5
+                  ? i
+                  : Math.max(0, Math.min(page - 2, totalPages - 5)) + i;
+                return (
+                  <button
+                    key={p}
+                    onClick={() => setPage(p)}
+                    className={`h-8 w-8 rounded-lg font-inter text-xs font-medium transition-colors ${
+                      page === p
+                        ? 'bg-brand-blue text-white'
+                        : 'border border-gray-200 bg-white text-gray-500 hover:bg-gray-50'
+                    }`}
+                  >
+                    {p + 1}
+                  </button>
+                );
+              })}
+              <button
+                onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+                disabled={page >= totalPages - 1}
+                className="flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 bg-white text-brand-dark transition-colors hover:bg-gray-50 disabled:opacity-40"
+              >
+                <ChevronRight size={14} />
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </div>
+
+      <BatchDetailModal
+        batchId={selectedId}
+        batchName={selectedName}
+        onClose={() => { setSelectedId(null); setSelectedName(''); }}
+      />
+
+      <WarrantyDetailModal
+        batchId={selectedWarrantyId}
+        batchName={selectedWarrantyName}
+        onClose={() => { setSelectedWarrantyId(null); setSelectedWarrantyName(''); }}
+      />
+
+      <Modal isOpen={showGstGate} onClose={() => setShowGstGate(false)} title="GST Verification Required" size="sm">
+        <div className="space-y-4">
+          <div className="flex items-start gap-3 rounded-xl border border-amber-100 bg-amber-50 p-4">
+            <AlertTriangle size={18} className="mt-0.5 shrink-0 text-amber-500" />
+            <div>
+              <p className="font-inter text-sm font-semibold text-amber-800">
+                Verify your GSTIN before creating batches
+              </p>
+              <p className="mt-1 font-inter text-xs text-amber-700">
+                {user?.gstin
+                  ? 'Your GSTIN is on file but hasn’t been verified yet. Verify it from your profile to start creating verification batches.'
+                  : 'Add and verify your organization’s GSTIN from your profile to start creating verification batches.'}
+              </p>
+            </div>
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" size="sm" onClick={() => setShowGstGate(false)}>Cancel</Button>
+            <Button
+              variant="primary"
+              size="sm"
+              icon={ShieldCheck}
+              onClick={() => { setShowGstGate(false); navigate('/account/profile'); }}
+            >
+              Go to Profile
+            </Button>
+          </div>
+        </div>
+      </Modal>
+    </AuthLayout>
+  );
+};
+
+export default BatchStatus;
