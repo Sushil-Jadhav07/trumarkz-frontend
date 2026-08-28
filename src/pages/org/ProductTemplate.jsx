@@ -63,8 +63,14 @@ export const ProductTemplate = () => {
     setProductBatchData,
   } = useApp();
 
+  // Warranty's fixed-field list is read straight from the backend's own
+  // generated template (see the effect below) instead of trusting the
+  // hardcoded WARRANTY_SERVICE_HEADERS to still match it — that constant
+  // already drifted out of sync with the real backend once before.
+  const [warrantyHeaders, setWarrantyHeaders] = useState(null);
+
   const serviceHeaders = selectedProductService?.id === 'warranty'
-    ? WARRANTY_SERVICE_HEADERS
+    ? (warrantyHeaders || WARRANTY_SERVICE_HEADERS)
     : VERIFICATION_SERVICE_HEADERS;
 
   // custom extra headers (excluding product_name which is fixed)
@@ -154,6 +160,30 @@ export const ProductTemplate = () => {
   }, [excelFile]);
 
   const isWarranty = selectedProductService?.id === 'warranty';
+
+  // Pulls the real column list out of the backend's own warranty-template
+  // .xlsx (same file "Download Template" fetches) instead of trusting the
+  // hardcoded WARRANTY_SERVICE_HEADERS to still match it. Falls back to that
+  // constant silently on failure — nothing here blocks the flow.
+  useEffect(() => {
+    if (!isWarranty) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data } = await verificationAPI.downloadWarrantyTemplate();
+        const buf = await data.arrayBuffer();
+        const wb = XLSX.read(buf, { type: 'array' });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json(ws, { header: 1 });
+        const headers = (rows[0] || []).map((h) => sanitizeKey(h)).filter(Boolean);
+        if (!cancelled && headers.length > 0) setWarrantyHeaders(headers);
+      } catch {
+        // silent — serviceHeaders already falls back to WARRANTY_SERVICE_HEADERS
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [isWarranty]);
+
   const [batchNameValue, setBatchNameValue] = useState(() => {
     const d = new Date();
     const sector = selectedProductSector?.title || 'Product';
