@@ -138,10 +138,26 @@ const normalizeMatchKey = (value) => String(value || '').trim().toLowerCase();
 
 const getProductSerialNumber = (record) =>
   record?.serial_number ||
+  record?.serial_no ||
   record?.custom_fields?.serial_number ||
+  record?.custom_fields?.serial_no ||
   record?.customFields?.serial_number ||
+  record?.customFields?.serial_no ||
   record?.metadata?.serial_number ||
+  record?.metadata?.serial_no ||
   '';
+
+// The certificate's own structured credential data (credentialSubject.serial_no)
+// is the authoritative, identity-based association key confirmed live against
+// Dhiway — prefer it over `title`, which only works if the org's Dhiway schema
+// happens to echo the serial number into the title field.
+const getCertificateSerialNumber = (rec) =>
+  rec?.credential?.credentialSubject?.serial_no ||
+  rec?.credentialSubject?.serial_no ||
+  rec?.record?.credentialSubject?.serial_no ||
+  rec?.credential?.credentialSubject?.serial_number ||
+  rec?.credentialSubject?.serial_number ||
+  null;
 
 // verification_type_label is just "Manual"/"Automatic" (a category, per the
 // submitted-reports docs) — not a display name. The readable name has to
@@ -793,6 +809,7 @@ const WarrantyDetailModal = ({ batchId, batchName, orgId, spaceId, onClose }) =>
         sdcAPI.getRecord(publicId)
           .then(({ data: rec }) => ({
             id: rec?.id, publicId: rec?.publicId || publicId, title: rec?.title,
+            serialNo: getCertificateSerialNumber(rec),
             recipients: Array.isArray(rec?.recipients) ? rec.recipients : [],
             anchorTime: rec?.anchorTime || null,
             revoked: !!rec?.revoked,
@@ -811,45 +828,40 @@ const WarrantyDetailModal = ({ batchId, batchName, orgId, spaceId, onClose }) =>
     setSdcRecords(matched);
 
     // certificate_ids only confirms "these belong to this batch" — it
-    // doesn't pair each one to a specific product, AND it can carry more
-    // entries than there are products (seen live: a 1-product batch with 2
-    // certificate_ids after being regenerated — each "Regenerate SDC" seems
-    // to add a new cert rather than replacing the old one). Blindly taking
-    // array order risked always pairing the stale first-ever-generated
-    // certificate instead of the current one, so sort newest-first and pair
-    // from there — non-revoked/undated certs are treated as most recent
-    // since they're more likely to be a fresh draft than dated old ones.
+    // doesn't pair each one to a specific product, and array position is
+    // NOT a reliable pairing key (verified live: a 5-record batch had
+    // products and certificate_ids come back in different orders, silently
+    // cross-wiring every certificate to the wrong product). The only
+    // reliable association is by identity: each product's own serial number
+    // against the certificate's own credentialSubject.serial_no. A product
+    // that can't be matched this way is left unpaired (shows no certificate)
+    // rather than guessed at by position — never assign one product's
+    // certificate to another just because arrays came back in some order.
     const freshProducts = resp?.products || [];
     const approvedProducts = freshProducts.filter((p) => (p.warranty_status || 'approved') === 'approved');
-    const certByTitle = new Map();
+
+    const certsBySerial = new Map();
+    const certsByTitle = new Map();
     matched.forEach((cert) => {
-      const titleKey = normalizeMatchKey(cert?.title);
-      if (titleKey && !certByTitle.has(titleKey)) certByTitle.set(titleKey, cert);
-    });
-    const byId = {};
-    let directMatchCount = 0;
-    approvedProducts.forEach((product) => {
-      const productId = product.product_id || product.id;
-      const serial = normalizeMatchKey(getProductSerialNumber(product));
-      const cert = serial ? certByTitle.get(serial) : null;
-      if (cert && productId) {
-        byId[productId] = cert;
-        directMatchCount += 1;
-      }
+      const serialKey = normalizeMatchKey(cert.serialNo);
+      if (serialKey && !certsBySerial.has(serialKey)) certsBySerial.set(serialKey, cert);
+      // Fallback only — some certificates predate the Dhiway schema update
+      // that started echoing serial_no into credentialSubject, so title
+      // (when the org's schema happens to mirror serial_no there) is kept
+      // as a secondary identity-based match, never a positional one.
+      const titleKey = normalizeMatchKey(cert.title);
+      if (titleKey && !certsByTitle.has(titleKey)) certsByTitle.set(titleKey, cert);
     });
 
-    if (directMatchCount === 0 && approvedProducts.length > 0 && matched.length > 0) {
-      const sortedByRecency = [...matched].sort((a, b) => {
-        const aTime = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-        const bTime = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-        return bTime - aTime;
-      });
-      approvedProducts.forEach((product, i) => {
-        const cert = sortedByRecency[i];
-        const productId = product.product_id || product.id;
-        if (cert && productId) byId[productId] = cert;
-      });
-    }
+    const byId = {};
+    approvedProducts.forEach((product) => {
+      const productId = product.product_id || product.id;
+      if (!productId) return;
+      const serial = normalizeMatchKey(getProductSerialNumber(product));
+      if (!serial) return;
+      const cert = certsBySerial.get(serial) || certsByTitle.get(serial);
+      if (cert) byId[productId] = cert;
+    });
 
     setSdcByProductId(byId);
   }, []);
