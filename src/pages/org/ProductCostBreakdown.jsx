@@ -1,12 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowRight, CheckSquare, Package, ReceiptText, RefreshCw } from 'lucide-react';
+import { ArrowRight, CheckCircle, CheckSquare, Package, ReceiptText, RefreshCw } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { AuthLayout } from '@/components/layout/AuthLayout';
 import { PageHeader } from '@/components/shared/PageHeader';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { StepWizard } from '@/components/ui/StepWizard';
+import { WarrantyDocumentCell } from '@/components/shared/WarrantyDocumentCell';
 import { useApp } from '@/context/AppContext';
 import {
   PRODUCT_VERIFICATION_STEPS,
@@ -33,6 +34,11 @@ export const ProductCostBreakdown = () => {
   const [allTypes, setAllTypes] = useState([]);
   const [typesLoading, setTypesLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+
+  // Set once the warranty batch is created and the upload response already
+  // includes the created BatchUsers — lets the org attach documents right
+  // here (keyed by the real batch_user_id) instead of navigating away first.
+  const [warrantyUpload, setWarrantyUpload] = useState(null);
 
   const isWarranty = selectedProductService?.id === 'warranty';
   const activeTemplate = selectedProductTemplate || PRODUCT_CERTIFICATE_TEMPLATES[0].id;
@@ -105,6 +111,16 @@ export const ProductCostBreakdown = () => {
   const recordCount = productBatchData?.recordCount || 0;
   const totalCost = selectedChecks.reduce((sum, item) => sum + ((item.price || 0) * recordCount), 0);
 
+  const reloadWarrantyProducts = useCallback(async () => {
+    if (!warrantyUpload?.batchId) return;
+    try {
+      const { data } = await verificationAPI.getWarrantyStatus(warrantyUpload.batchId);
+      setWarrantyUpload((current) => (current ? { ...current, products: data?.products || [] } : current));
+    } catch (err) {
+      toast.error(getApiError(err, 'Failed to refresh warranty documents'));
+    }
+  }, [warrantyUpload?.batchId]);
+
   const handleContinue = async () => {
     if (!agreed) {
       toast.error('Confirm the total cost before continuing');
@@ -140,7 +156,18 @@ export const ProductCostBreakdown = () => {
           isWarranty: true,
         }));
         toast.success('Warranty batch uploaded and approved');
-        navigate('/org/batch-status');
+
+        // If the upload response already carries the created BatchUsers, let
+        // the org attach documents right here (per batch_user_id) instead of
+        // navigating away and having to find the batch again. Otherwise fall
+        // back to the previous behavior.
+        const batchId = data?.batch_id || data?.id || '';
+        const createdProducts = data?.products || data?.batch_users || [];
+        if (batchId && createdProducts.length > 0) {
+          setWarrantyUpload({ batchId, batchName: data?.batch_name || productBatchData.batchName, products: createdProducts });
+        } else {
+          navigate('/org/batch-status');
+        }
         return;
       }
 
@@ -209,6 +236,64 @@ export const ProductCostBreakdown = () => {
           )}
         </div>
 
+        {warrantyUpload ? (
+        <div className="mt-3">
+          <Card className="border border-blue-100 p-5 shadow-[0_16px_40px_-36px_rgba(37,99,235,0.28)]">
+            <div className="flex items-center gap-3">
+              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600">
+                <CheckCircle size={18} />
+              </div>
+              <div>
+                <h3 className="font-sora text-lg font-semibold text-slate-950">Warranty Batch Created</h3>
+                <p className="font-inter text-xs text-slate-500">
+                  {warrantyUpload.products.length} {warrantyUpload.products.length === 1 ? 'record' : 'records'} — attach a Warranty
+                  Document to each person below, or skip and do it later from Batch Status.
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-5 overflow-hidden rounded-2xl border border-slate-100">
+              <div className="max-h-[50vh] overflow-y-auto">
+                <table className="w-full font-inter">
+                  <thead className="sticky top-0 bg-slate-50">
+                    <tr className="border-b border-slate-100">
+                      {['Product', 'Serial Number', 'Warranty Document'].map((h) => (
+                        <th key={h} className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-400">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {warrantyUpload.products.map((product, i) => {
+                      const batchUserId = product.product_id || product.id;
+                      return (
+                        <tr key={batchUserId || i} className="border-b border-slate-50 last:border-0">
+                          <td className="px-4 py-3 text-sm font-medium text-slate-900">{product.product_name || '—'}</td>
+                          <td className="px-4 py-3 text-xs font-mono text-slate-400">{product.serial_number || '—'}</td>
+                          <td className="px-4 py-3">
+                            <WarrantyDocumentCell
+                              batchId={warrantyUpload.batchId}
+                              batchUserId={batchUserId}
+                              url={product.custom_fields?.warrenty_report || product.custom_fields?.warranty_report || null}
+                              onDeleted={reloadWarrantyProducts}
+                            />
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="mt-5 flex items-center justify-between gap-3">
+              <p className="font-inter text-xs text-slate-400">You can also manage these documents later from Batch Status.</p>
+              <Button variant="primary" size="lg" onClick={() => navigate('/org/batch-status')} icon={ArrowRight}>
+                Continue to Batch Status
+              </Button>
+            </div>
+          </Card>
+        </div>
+        ) : (
         <div className="mt-3 grid gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
           <Card className="border border-blue-100 p-5 shadow-[0_16px_40px_-36px_rgba(37,99,235,0.28)]">
             <div className="flex items-center gap-3">
@@ -299,6 +384,7 @@ export const ProductCostBreakdown = () => {
             </div>
           </Card>
         </div>
+        )}
       </div>
     </AuthLayout>
   );

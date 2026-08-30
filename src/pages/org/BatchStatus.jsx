@@ -11,6 +11,7 @@ import { verificationAPI, sdcAPI, getApiError } from '@/services/api';
 import { useAuth } from '@/context/AuthContext';
 import { resolveDhiwaySpaceId } from '@/utils/dhiway';
 import { CertificateDetailModal } from '@/pages/admin/SDCVerification';
+import { WarrantyDocumentCell } from '@/components/shared/WarrantyDocumentCell';
 import {
   ChevronLeft, ChevronRight, CheckCircle, Clock, Download,
   Eye, FileText, Info, Layers, Package, RefreshCw, Upload,
@@ -770,15 +771,21 @@ const WarrantyDetailModal = ({ batchId, batchName, onClose }) => {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
 
-  useEffect(() => {
+  const reload = useCallback(() => {
     if (!batchId) return;
     setLoading(true);
-    setData(null);
-    setSearch('');
-    verificationAPI.getWarrantyStatus(batchId)
+    return verificationAPI.getWarrantyStatus(batchId)
       .then(({ data: resp }) => setData(resp))
       .catch((err) => toast.error(getApiError(err, 'Failed to load warranty status')))
       .finally(() => setLoading(false));
+  }, [batchId]);
+
+  useEffect(() => {
+    if (!batchId) return;
+    setData(null);
+    setSearch('');
+    reload();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [batchId]);
 
   const products = data?.products || [];
@@ -859,10 +866,10 @@ const WarrantyDetailModal = ({ batchId, batchName, onClose }) => {
               </div>
             ) : (
               <div className="max-h-[45vh] overflow-y-auto">
-                <table className="w-full min-w-[680px] font-inter">
+                <table className="w-full min-w-[860px] font-inter">
                   <thead className="sticky top-0">
                     <tr className="border-b border-blue-100 bg-blue-50/80">
-                      {['Product', 'Serial Number', 'Warranty Start', 'Warranty End', 'Status', 'Reason'].map((h) => (
+                      {['Product', 'Serial Number', 'Warranty Start', 'Warranty End', 'Status', 'Reason', 'Warranty Document'].map((h) => (
                         <th key={h} className="px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-brand-blue/70">{h}</th>
                       ))}
                     </tr>
@@ -894,6 +901,14 @@ const WarrantyDetailModal = ({ batchId, batchName, onClose }) => {
                           </td>
                           <td className="px-5 py-3.5 text-xs text-gray-400 max-w-[160px]">
                             <span className="line-clamp-2">{product.warranty_reason || '—'}</span>
+                          </td>
+                          <td className="px-5 py-3.5">
+                            <WarrantyDocumentCell
+                              batchId={batchId}
+                              batchUserId={product.product_id || product.id}
+                              url={product.custom_fields?.warrenty_report || product.custom_fields?.warranty_report || null}
+                              onDeleted={reload}
+                            />
                           </td>
                         </tr>
                       );

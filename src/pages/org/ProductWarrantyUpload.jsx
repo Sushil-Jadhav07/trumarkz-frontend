@@ -6,6 +6,7 @@ import { PageHeader } from '@/components/shared/PageHeader';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
+import { WarrantyDocumentCell } from '@/components/shared/WarrantyDocumentCell';
 import { verificationAPI, getApiError } from '@/services/api';
 import { Clock, CheckCircle, XCircle, RefreshCw, Package, Search, ArrowLeft } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -143,42 +144,54 @@ const StatusViewer = ({ batchId }) => {
               </div>
             ) : (
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[680px] font-inter">
+                <table className="w-full min-w-[860px] font-inter">
                   <thead>
                     <tr className="border-b border-blue-100 bg-blue-50/80">
-                      {['Product', 'Serial Number', 'Warranty Start', 'Warranty End', 'Status', 'Reason'].map((h) => (
+                      {['Product', 'Serial Number', 'Warranty Start', 'Warranty End', 'Status', 'Reason', 'Warranty Document'].map((h) => (
                         <th key={h} className="px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-brand-blue/70">{h}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
-                    {filtered.map((product, i) => (
-                      <motion.tr
-                        key={product.product_id || product.id || i}
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        transition={{ delay: i * 0.04 }}
-                        className="border-b border-blue-50 hover:bg-blue-50/30 transition-colors"
-                      >
-                        <td className="px-5 py-3.5">
-                          <div className="flex items-center gap-2.5">
-                            <div className="w-8 h-8 rounded-xl bg-brand-blue/10 flex items-center justify-center shrink-0">
-                              <Package size={13} className="text-brand-blue" />
+                    {filtered.map((product, i) => {
+                      const batchUserId = product.product_id || product.id;
+                      const docUrl = product.custom_fields?.warrenty_report || product.custom_fields?.warranty_report || null;
+                      return (
+                        <motion.tr
+                          key={batchUserId || i}
+                          initial={{ opacity: 0 }}
+                          animate={{ opacity: 1 }}
+                          transition={{ delay: i * 0.04 }}
+                          className="border-b border-blue-50 hover:bg-blue-50/30 transition-colors"
+                        >
+                          <td className="px-5 py-3.5">
+                            <div className="flex items-center gap-2.5">
+                              <div className="w-8 h-8 rounded-xl bg-brand-blue/10 flex items-center justify-center shrink-0">
+                                <Package size={13} className="text-brand-blue" />
+                              </div>
+                              <div className="min-w-0">
+                                <p className="text-sm font-semibold text-brand-dark truncate">{product.product_name || '—'}</p>
+                              </div>
                             </div>
-                            <div className="min-w-0">
-                              <p className="text-sm font-semibold text-brand-dark truncate">{product.product_name || '—'}</p>
-                            </div>
-                          </div>
-                        </td>
-                        <td className="px-5 py-3.5 text-xs font-mono text-gray-500">{product.serial_number || '—'}</td>
-                        <td className="px-5 py-3.5 text-xs text-gray-500">{formatDate(product.warranty_start_date)}</td>
-                        <td className="px-5 py-3.5 text-xs text-gray-500">{formatDate(product.warranty_end_date)}</td>
-                        <td className="px-5 py-3.5"><StatusBadge status={product.warranty_status || 'approved'} /></td>
-                        <td className="px-5 py-3.5 text-xs text-gray-400 font-inter max-w-[160px]">
-                          <span className="line-clamp-2">{product.warranty_reason || '—'}</span>
-                        </td>
-                      </motion.tr>
-                    ))}
+                          </td>
+                          <td className="px-5 py-3.5 text-xs font-mono text-gray-500">{product.serial_number || '—'}</td>
+                          <td className="px-5 py-3.5 text-xs text-gray-500">{formatDate(product.warranty_start_date)}</td>
+                          <td className="px-5 py-3.5 text-xs text-gray-500">{formatDate(product.warranty_end_date)}</td>
+                          <td className="px-5 py-3.5"><StatusBadge status={product.warranty_status || 'approved'} /></td>
+                          <td className="px-5 py-3.5 text-xs text-gray-400 font-inter max-w-[160px]">
+                            <span className="line-clamp-2">{product.warranty_reason || '—'}</span>
+                          </td>
+                          <td className="px-5 py-3.5">
+                            <WarrantyDocumentCell
+                              batchId={batchId}
+                              batchUserId={batchUserId}
+                              url={docUrl}
+                              onDeleted={fetch}
+                            />
+                          </td>
+                        </motion.tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

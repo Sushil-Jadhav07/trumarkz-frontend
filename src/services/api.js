@@ -713,6 +713,20 @@ export const verificationAPI = {
     if (reason) payload.reason = reason;
     return verificationApi.patch(`/verification/products/warranty/${productId}/status`, payload);
   },
+
+  // POST /verification/products/{batch_user_id}/warranty-document — upload or
+  // replace the Warranty Document for one BatchUser. Association is strictly
+  // by batch_user_id (never name/serial_no/array index — duplicate names are
+  // expected). Re-uploading for the same batch_user_id is how "replace" works;
+  // there is no separate replace endpoint and no frontend versioning logic.
+  uploadWarrantyDocument: (batchUserId, file, documentLabel) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    if (documentLabel) formData.append('document_label', documentLabel);
+    return verificationApi.post(`/verification/products/${batchUserId}/warranty-document`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
 };
 
 export const sdcAPI = {
