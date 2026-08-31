@@ -31,7 +31,7 @@ export const WarrantyDocumentCell = ({ batchId, batchUserId, url: propUrl, fileN
     if (!file || !batchUserId) return;
     setUploading(true);
     try {
-      const { data: resp } = await verificationAPI.uploadWarrantyDocument(batchUserId, file);
+      const { data: resp } = await verificationAPI.uploadWarrantyDocument(batchUserId, file, 'Warranty Report');
       setLocal({
         documentId: resp?.document_id || null,
         url: resp?.document_url || null,

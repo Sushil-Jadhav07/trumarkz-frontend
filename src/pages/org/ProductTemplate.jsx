@@ -8,7 +8,7 @@ import { Card } from '@/components/ui/Card';
 import { Modal } from '@/components/ui/Modal';
 import { StepWizard } from '@/components/ui/StepWizard';
 import { FileUpload } from '@/components/ui/FileUpload';
-import { ArrowRight, CheckCircle, ChevronDown, Download, FileText, Plus, RefreshCw, Upload, X } from 'lucide-react';
+import { ArrowRight, CheckCircle, ChevronDown, Download, FileText, Plus, RefreshCw, Upload, Users, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useApp } from '@/context/AppContext';
 import {
@@ -424,7 +424,45 @@ export const ProductTemplate = () => {
               </div>{/* end LEFT — Upload Data File */}
 
               {/* ── RIGHT — Product Documents (Warranty Report label included
-                  for warranty — backend maps it into custom_fields.warrenty_report) ── */}
+                  for warranty — backend maps it into custom_fields.warrenty_report) ──
+                  Warranty now uses a post-upload, per-BatchUser document flow (keyed by
+                  batch_user_id — see BatchStatus.jsx / ProductWarrantyUpload.jsx), since
+                  this panel's pre-upload, name-matched attachment can't key by a
+                  batch_user_id that doesn't exist yet. Kept unchanged for the Product flow. ── */}
+              {isWarranty ? (
+                <div className="flex-1 bg-gray-50 flex flex-col justify-center px-8 py-10">
+                  <p className="mb-6 font-inter text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+                    How Warranty Documents work
+                  </p>
+                  {[
+                    { icon: Upload, title: 'Upload the Excel', desc: 'Finish the steps on the left — this file becomes the batch.' },
+                    { icon: Users, title: 'Batch is created', desc: 'Each row becomes a person record with its own ID.' },
+                    { icon: FileText, title: 'Attach documents per person', desc: "From Batch Status, upload, view, replace, or delete each person's Warranty Document." },
+                  ].map((step, i, arr) => {
+                    const Icon = step.icon;
+                    const isLast = i === arr.length - 1;
+                    return (
+                      <div key={step.title} className="flex gap-3">
+                        <div className="flex flex-col items-center">
+                          <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border ${isLast ? 'border-brand-blue/30 bg-brand-blue/10' : 'border-gray-200 bg-white'}`}>
+                            <Icon size={15} className={isLast ? 'text-brand-blue' : 'text-gray-400'} />
+                          </div>
+                          {!isLast && <div className="my-1 w-px flex-1 bg-gray-200" style={{ minHeight: '18px' }} />}
+                        </div>
+                        <div className={isLast ? 'pb-0' : 'pb-6'}>
+                          <p className="font-inter text-sm font-semibold text-brand-dark">{step.title}</p>
+                          <p className="mt-0.5 max-w-[220px] font-inter text-xs text-gray-500">{step.desc}</p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  <div className="mt-4 rounded-xl border border-blue-100 bg-blue-50/60 px-4 py-3">
+                    <p className="font-inter text-[11px] text-brand-blue">
+                      Once this batch is created, open it from <span className="font-semibold">Batch Status</span> to manage each person's Warranty Document.
+                    </p>
+                  </div>
+                </div>
+              ) : (
               <div className="flex-1 bg-gray-50">
 
                 {/* Section header */}
@@ -642,7 +680,8 @@ export const ProductTemplate = () => {
               )}
               </div>{/* end doc entries container */}
 
-              </div>{/* end RIGHT — Product Documents */}
+              </div>
+              )}{/* end RIGHT — Product Documents */}
 
             </div>{/* end body flex row */}
 

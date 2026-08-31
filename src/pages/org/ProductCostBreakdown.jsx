@@ -114,8 +114,12 @@ export const ProductCostBreakdown = () => {
   const reloadWarrantyProducts = useCallback(async () => {
     if (!warrantyUpload?.batchId) return;
     try {
+      // GET /verification/products/warranty/{batch_id} — the existing-batch
+      // shape (products[] with product_id), distinct from the upload
+      // response's successful_users[] (id) but carrying the same identifier
+      // relationship; the row rendering below already accepts either shape.
       const { data } = await verificationAPI.getWarrantyStatus(warrantyUpload.batchId);
-      setWarrantyUpload((current) => (current ? { ...current, products: data?.products || [] } : current));
+      setWarrantyUpload((current) => (current ? { ...current, users: data?.products || [] } : current));
     } catch (err) {
       toast.error(getApiError(err, 'Failed to refresh warranty documents'));
     }
@@ -137,18 +141,15 @@ export const ProductCostBreakdown = () => {
     setSubmitting(true);
     try {
       if (isWarranty) {
-        const warrantyDocs = (productBatchData.docEntries || []).filter(
-          (e) => e.productName?.trim() && e.label && e.file
-        );
+        // Warranty no longer attaches documents by name during Excel
+        // submission — the backend creates the Batch + BatchUsers from the
+        // sheet alone, and documents are uploaded afterward per
+        // batch_user_id (see the successful_users handling below). Do not
+        // send doc_product_names / doc_labels / doc_files here.
         const { data } = await verificationAPI.uploadWarrantyExcel(
           productBatchData.file,
           productBatchData.batchName.trim(),
           productBatchData.description || '',
-          {
-            docProductNames: warrantyDocs.map((e) => e.productName.trim()),
-            docLabels:       warrantyDocs.map((e) => e.label),
-            docFiles:        warrantyDocs.map((e) => e.file),
-          }
         );
         setProductBatchData((current) => ({
           ...(current || {}),
@@ -157,14 +158,15 @@ export const ProductCostBreakdown = () => {
         }));
         toast.success('Warranty batch uploaded and approved');
 
-        // If the upload response already carries the created BatchUsers, let
-        // the org attach documents right here (per batch_user_id) instead of
-        // navigating away and having to find the batch again. Otherwise fall
-        // back to the previous behavior.
+        // successful_users[] is the authoritative source of the real
+        // batch_user_id per created BatchUser (successful_users[].id) —
+        // duplicate product/customer names are expected and each still gets
+        // its own id. Fall back to a products/batch_users shape only for
+        // safety, in case an older backend response omits successful_users.
         const batchId = data?.batch_id || data?.id || '';
-        const createdProducts = data?.products || data?.batch_users || [];
-        if (batchId && createdProducts.length > 0) {
-          setWarrantyUpload({ batchId, batchName: data?.batch_name || productBatchData.batchName, products: createdProducts });
+        const createdUsers = data?.successful_users || data?.products || data?.batch_users || [];
+        if (batchId && createdUsers.length > 0) {
+          setWarrantyUpload({ batchId, batchName: data?.batch_name || productBatchData.batchName, users: createdUsers });
         } else {
           navigate('/org/batch-status');
         }
@@ -246,7 +248,7 @@ export const ProductCostBreakdown = () => {
               <div>
                 <h3 className="font-sora text-lg font-semibold text-slate-950">Warranty Batch Created</h3>
                 <p className="font-inter text-xs text-slate-500">
-                  {warrantyUpload.products.length} {warrantyUpload.products.length === 1 ? 'record' : 'records'} — attach a Warranty
+                  {warrantyUpload.users.length} {warrantyUpload.users.length === 1 ? 'record' : 'records'} — attach a Warranty
                   Document to each person below, or skip and do it later from Batch Status.
                 </p>
               </div>
@@ -263,17 +265,19 @@ export const ProductCostBreakdown = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {warrantyUpload.products.map((product, i) => {
-                      const batchUserId = product.product_id || product.id;
+                    {warrantyUpload.users.map((user, i) => {
+                      // successful_users[].id is the real batch_user_id — never
+                      // derive it from product_name/customer_name, which can repeat.
+                      const batchUserId = user.id || user.product_id;
                       return (
                         <tr key={batchUserId || i} className="border-b border-slate-50 last:border-0">
-                          <td className="px-4 py-3 text-sm font-medium text-slate-900">{product.product_name || '—'}</td>
-                          <td className="px-4 py-3 text-xs font-mono text-slate-400">{product.serial_number || '—'}</td>
+                          <td className="px-4 py-3 text-sm font-medium text-slate-900">{user.product_name || user.customer_name || '—'}</td>
+                          <td className="px-4 py-3 text-xs font-mono text-slate-400">{user.serial_no || user.serial_number || '—'}</td>
                           <td className="px-4 py-3">
                             <WarrantyDocumentCell
                               batchId={warrantyUpload.batchId}
                               batchUserId={batchUserId}
-                              url={product.custom_fields?.warrenty_report || product.custom_fields?.warranty_report || null}
+                              url={user.custom_fields?.warrenty_report || user.custom_fields?.warranty_report || null}
                               onDeleted={reloadWarrantyProducts}
                             />
                           </td>
