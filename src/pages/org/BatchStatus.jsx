@@ -12,6 +12,7 @@ import { useAuth } from '@/context/AuthContext';
 import { resolveDhiwaySpaceId } from '@/utils/dhiway';
 import { CertificateDetailModal } from '@/pages/admin/SDCVerification';
 import { WarrantyDocumentCell } from '@/components/shared/WarrantyDocumentCell';
+import { loadWarrantyCertificates } from '@/utils/warrantyCertificates';
 import {
   ChevronLeft, ChevronRight, CheckCircle, Clock, Download,
   Eye, FileText, Info, Layers, Package, RefreshCw, Upload,
@@ -771,11 +772,28 @@ const WarrantyDetailModal = ({ batchId, batchName, onClose }) => {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
 
+  // SDC certificate lookup, keyed by product/batch_user id — matched to
+  // products by serial number identity, never array position (see
+  // loadWarrantyCertificates). Lets the org view/download its own warranty
+  // certificates from this same modal, same as the admin Batch Monitor does.
+  const [sdcByProductId, setSdcByProductId] = useState({});
+  const [certsLoading, setCertsLoading] = useState(false);
+  const [downloadingId, setDownloadingId] = useState(null);
+
   const reload = useCallback(() => {
     if (!batchId) return;
     setLoading(true);
     return verificationAPI.getWarrantyStatus(batchId)
-      .then(({ data: resp }) => setData(resp))
+      .then(async ({ data: resp }) => {
+        setData(resp);
+        setCertsLoading(true);
+        try {
+          const { sdcByProductId: byId } = await loadWarrantyCertificates(resp);
+          setSdcByProductId(byId);
+        } finally {
+          setCertsLoading(false);
+        }
+      })
       .catch((err) => toast.error(getApiError(err, 'Failed to load warranty status')))
       .finally(() => setLoading(false));
   }, [batchId]);
@@ -784,9 +802,30 @@ const WarrantyDetailModal = ({ batchId, batchName, onClose }) => {
     if (!batchId) return;
     setData(null);
     setSearch('');
+    setSdcByProductId({});
     reload();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [batchId]);
+
+  const handleDownloadWarrantyCertificate = async (publicId) => {
+    setDownloadingId(publicId);
+    const win = window.open('', '_blank');
+    if (win) win.opener = null;
+    try {
+      const { data: rec } = await sdcAPI.getRecord(publicId);
+      if (rec?.pdf) {
+        if (win) win.location.href = rec.pdf;
+      } else {
+        win?.close();
+        toast.error('No PDF link on this certificate yet');
+      }
+    } catch (err) {
+      win?.close();
+      toast.error(getApiError(err, 'Failed to fetch certificate'));
+    } finally {
+      setDownloadingId(null);
+    }
+  };
 
   const products = data?.products || [];
 
@@ -866,10 +905,10 @@ const WarrantyDetailModal = ({ batchId, batchName, onClose }) => {
               </div>
             ) : (
               <div className="max-h-[45vh] overflow-y-auto">
-                <table className="w-full min-w-[860px] font-inter">
+                <table className="w-full min-w-[980px] font-inter">
                   <thead className="sticky top-0">
                     <tr className="border-b border-blue-100 bg-blue-50/80">
-                      {['Product', 'Serial Number', 'Warranty Start', 'Warranty End', 'Status', 'Reason', 'Warranty Document'].map((h) => (
+                      {['Product', 'Serial Number', 'Warranty Start', 'Warranty End', 'Status', 'Certificate', 'Reason', 'Warranty Document'].map((h) => (
                         <th key={h} className="px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-brand-blue/70">{h}</th>
                       ))}
                     </tr>
@@ -878,8 +917,10 @@ const WarrantyDetailModal = ({ batchId, batchName, onClose }) => {
                     {filtered.map((product, i) => {
                       const statusMeta = WARRANTY_PRODUCT_STATUS_META[product.warranty_status] || WARRANTY_PRODUCT_STATUS_META.approved;
                       const StatusIcon = statusMeta.icon;
+                      const productId = product.product_id || product.id;
+                      const sdcMatch = productId ? sdcByProductId[productId] : null;
                       return (
-                        <tr key={product.product_id || product.id || i} className="border-b border-blue-50 last:border-0 hover:bg-blue-50/30 transition-colors">
+                        <tr key={productId || i} className="border-b border-blue-50 last:border-0 hover:bg-blue-50/30 transition-colors">
                           <td className="px-5 py-3.5">
                             <div className="flex items-center gap-2.5">
                               <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-brand-blue/10">
@@ -899,13 +940,32 @@ const WarrantyDetailModal = ({ batchId, batchName, onClose }) => {
                               {statusMeta.label}
                             </span>
                           </td>
+                          <td className="px-5 py-3.5">
+                            {certsLoading ? (
+                              <RefreshCw size={13} className="animate-spin text-gray-300" />
+                            ) : sdcMatch ? (
+                              <button
+                                type="button"
+                                onClick={() => handleDownloadWarrantyCertificate(sdcMatch.publicId)}
+                                disabled={downloadingId === sdcMatch.publicId}
+                                className="inline-flex items-center gap-1 text-[11px] font-semibold text-brand-blue hover:underline disabled:opacity-50"
+                              >
+                                {downloadingId === sdcMatch.publicId
+                                  ? <RefreshCw size={12} className="animate-spin" />
+                                  : <Download size={12} />}
+                                Download
+                              </button>
+                            ) : (
+                              <span className="text-[11px] text-gray-400">—</span>
+                            )}
+                          </td>
                           <td className="px-5 py-3.5 text-xs text-gray-400 max-w-[160px]">
                             <span className="line-clamp-2">{product.warranty_reason || '—'}</span>
                           </td>
                           <td className="px-5 py-3.5">
                             <WarrantyDocumentCell
                               batchId={batchId}
-                              batchUserId={product.product_id || product.id}
+                              batchUserId={productId}
                               url={product.custom_fields?.warrenty_report || product.custom_fields?.warranty_report || null}
                               onDeleted={reload}
                             />

@@ -17,11 +17,16 @@ import {
   PRODUCT_VERIFICATION_STEP_ROUTES,
   WARRANTY_SERVICE_HEADERS,
   VERIFICATION_SERVICE_HEADERS,
+  VERIFICATION_REQUIRED_HEADERS,
 } from '@/data/productVerificationFlow';
 import { verificationAPI, triggerBlobDownload } from '@/services/api';
 
+// "+" is preserved (not stripped to "_") since it's canonical to backend
+// field names like third+party+qr1/third+party+qr2 — sanitizing it away
+// would make those columns permanently unrecognizable against the canonical
+// header list.
 const sanitizeKey = (v) =>
-  String(v || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+  String(v || '').trim().toLowerCase().replace(/[^a-z0-9+]+/g, '_').replace(/^_+|_+$/g, '');
 
 // product_name is always the first fixed column
 const BASE_FIELD = { key: 'product_name', label: 'Product Name', fixed: true };
@@ -33,6 +38,8 @@ const downloadLocalFallback = (headers, fileName = 'product-template') => {
     if (k.includes('product')) return 'Example Product';
     if (k === 'category') return 'Electronics';
     if (k.includes('model')) return 'Model A';
+    if (k.includes('brand')) return 'Acme Corp';
+    if (k.includes('qr')) return 'https://example.com/qr/CODE123';
     if (k.includes('warrenty_report') || k.includes('warranty_report')) return 'report.pdf';
     if (k.includes('product_details')) return 'Premium electronics warranty pack';
     if (k.includes('serial')) return 'SN-1234';
@@ -261,7 +268,10 @@ export const ProductTemplate = () => {
       const uploadedHeaders = (rows[0] || []).map((h) => sanitizeKey(h)).filter(Boolean);
 
       if (!isWarranty) {
-        const missingHeaders = VERIFICATION_SERVICE_HEADERS.filter((h) => !uploadedHeaders.includes(h));
+        // Only product_name is required for the normal Product flow — the
+        // rest of VERIFICATION_SERVICE_HEADERS (model_no, brand, the two QR
+        // fields) are optional and must never block Continue.
+        const missingHeaders = VERIFICATION_REQUIRED_HEADERS.filter((h) => !uploadedHeaders.includes(h));
         if (missingHeaders.length > 0) {
           toast.error(`Missing required columns: ${missingHeaders.join(', ')}`);
           return;

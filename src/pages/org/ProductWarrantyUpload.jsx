@@ -7,8 +7,9 @@ import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
 import { WarrantyDocumentCell } from '@/components/shared/WarrantyDocumentCell';
-import { verificationAPI, getApiError } from '@/services/api';
-import { Clock, CheckCircle, XCircle, RefreshCw, Package, Search, ArrowLeft } from 'lucide-react';
+import { loadWarrantyCertificates } from '@/utils/warrantyCertificates';
+import { verificationAPI, sdcAPI, getApiError } from '@/services/api';
+import { Clock, CheckCircle, XCircle, RefreshCw, Package, Search, ArrowLeft, Download } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 // ── Status helpers ─────────────────────────────────────────────────────────────
@@ -61,12 +62,26 @@ const StatusViewer = ({ batchId }) => {
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
 
+  // SDC certificate lookup, keyed by product/batch_user id — matched to
+  // products by serial number identity, never array position (see
+  // loadWarrantyCertificates).
+  const [sdcByProductId, setSdcByProductId] = useState({});
+  const [certsLoading, setCertsLoading] = useState(false);
+  const [downloadingId, setDownloadingId] = useState(null);
+
   const fetch = useCallback(async () => {
     if (!batchId) return;
     setLoading(true);
     try {
       const { data: resp } = await verificationAPI.getWarrantyStatus(batchId);
       setData(resp);
+      setCertsLoading(true);
+      try {
+        const { sdcByProductId: byId } = await loadWarrantyCertificates(resp);
+        setSdcByProductId(byId);
+      } finally {
+        setCertsLoading(false);
+      }
     } catch (err) {
       toast.error(getApiError(err, 'Failed to load warranty status'));
     } finally {
@@ -75,6 +90,26 @@ const StatusViewer = ({ batchId }) => {
   }, [batchId]);
 
   useEffect(() => { fetch(); }, [fetch]);
+
+  const handleDownloadWarrantyCertificate = async (publicId) => {
+    setDownloadingId(publicId);
+    const win = window.open('', '_blank');
+    if (win) win.opener = null;
+    try {
+      const { data: rec } = await sdcAPI.getRecord(publicId);
+      if (rec?.pdf) {
+        if (win) win.location.href = rec.pdf;
+      } else {
+        win?.close();
+        toast.error('No PDF link on this certificate yet');
+      }
+    } catch (err) {
+      win?.close();
+      toast.error(getApiError(err, 'Failed to fetch certificate'));
+    } finally {
+      setDownloadingId(null);
+    }
+  };
 
   const products = data?.products || [];
 
@@ -144,10 +179,10 @@ const StatusViewer = ({ batchId }) => {
               </div>
             ) : (
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[860px] font-inter">
+                <table className="w-full min-w-[980px] font-inter">
                   <thead>
                     <tr className="border-b border-blue-100 bg-blue-50/80">
-                      {['Product', 'Serial Number', 'Warranty Start', 'Warranty End', 'Status', 'Reason', 'Warranty Document'].map((h) => (
+                      {['Product', 'Serial Number', 'Warranty Start', 'Warranty End', 'Status', 'Certificate', 'Reason', 'Warranty Document'].map((h) => (
                         <th key={h} className="px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-brand-blue/70">{h}</th>
                       ))}
                     </tr>
@@ -156,6 +191,7 @@ const StatusViewer = ({ batchId }) => {
                     {filtered.map((product, i) => {
                       const batchUserId = product.product_id || product.id;
                       const docUrl = product.custom_fields?.warrenty_report || product.custom_fields?.warranty_report || null;
+                      const sdcMatch = batchUserId ? sdcByProductId[batchUserId] : null;
                       return (
                         <motion.tr
                           key={batchUserId || i}
@@ -178,6 +214,25 @@ const StatusViewer = ({ batchId }) => {
                           <td className="px-5 py-3.5 text-xs text-gray-500">{formatDate(product.warranty_start_date)}</td>
                           <td className="px-5 py-3.5 text-xs text-gray-500">{formatDate(product.warranty_end_date)}</td>
                           <td className="px-5 py-3.5"><StatusBadge status={product.warranty_status || 'approved'} /></td>
+                          <td className="px-5 py-3.5">
+                            {certsLoading ? (
+                              <RefreshCw size={13} className="animate-spin text-gray-300" />
+                            ) : sdcMatch ? (
+                              <button
+                                type="button"
+                                onClick={() => handleDownloadWarrantyCertificate(sdcMatch.publicId)}
+                                disabled={downloadingId === sdcMatch.publicId}
+                                className="inline-flex items-center gap-1 text-[11px] font-semibold text-brand-blue hover:underline disabled:opacity-50"
+                              >
+                                {downloadingId === sdcMatch.publicId
+                                  ? <RefreshCw size={12} className="animate-spin" />
+                                  : <Download size={12} />}
+                                Download
+                              </button>
+                            ) : (
+                              <span className="text-[11px] text-gray-400">—</span>
+                            )}
+                          </td>
                           <td className="px-5 py-3.5 text-xs text-gray-400 font-inter max-w-[160px]">
                             <span className="line-clamp-2">{product.warranty_reason || '—'}</span>
                           </td>

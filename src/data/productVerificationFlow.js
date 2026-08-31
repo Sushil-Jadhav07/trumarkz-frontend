@@ -88,10 +88,16 @@ export const WARRANTY_SERVICE_HEADERS = [
   'serial_number',
 ];
 
+// Canonical column set for the normal Product Verification flow. Only
+// product_name is required — the rest are genuinely optional and must never
+// block upload. The two QR fields' "+" is canonical to the backend's field
+// names and must be preserved exactly, never normalised to "_".
 export const VERIFICATION_SERVICE_HEADERS = [
   'product_name',
-  'serial_number',
-  'model',
-  'batch_number',
-  'certificate_number',
+  'model_no',
+  'brand',
+  'third+party+qr1',
+  'third+party+qr2',
 ];
+
+export const VERIFICATION_REQUIRED_HEADERS = ['product_name'];

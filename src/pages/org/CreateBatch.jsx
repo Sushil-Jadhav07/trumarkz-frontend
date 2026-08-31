@@ -666,7 +666,7 @@ const ProductBulkPanel = ({ categories, onResult, selectedCategory, selectedServ
   const [templateHeaders, setTemplateHeaders] = useState(
     selectedService?.id === 'warranty'
       ? 'customer_name,model_no,warrenty_report,product_details,purchase_date,expiration_date,created_time,serial_number'
-      : 'product_name,serial_number,model,batch_number,certificate_number'
+      : 'product_name,model_no,brand,third+party+qr1,third+party+qr2'
   );
   const [selectedFile, setSelectedFile] = useState(null);
   const [uploadProgress, setUploadProgress] = useState(0);
@@ -716,7 +716,7 @@ const ProductBulkPanel = ({ categories, onResult, selectedCategory, selectedServ
     setTemplateHeaders(
       selectedService?.id === 'warranty'
         ? 'customer_name,model_no,warrenty_report,product_details,purchase_date,expiration_date,created_time,serial_number'
-        : 'product_name,serial_number,model,batch_number,certificate_number'
+        : 'product_name,model_no,brand,third+party+qr1,third+party+qr2'
     );
   }, [selectedService]);
 

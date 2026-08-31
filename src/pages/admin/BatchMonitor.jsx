@@ -776,6 +776,31 @@ const WarrantyDetailModal = ({ batchId, batchName, orgId, spaceId, onClose }) =>
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
 
+  // "Send to Organization" — same purely-local notify-action as the generic
+  // Control Center modal (no backend stage past sdc_generated), tracked in
+  // the same localStorage-backed workflow map so it persists per batch_id
+  // across modal opens/closes and app sessions alike.
+  const [sharedWithOrganization, setSharedWithOrganization] = useState(
+    () => !!getStoredWorkflow()[batchId]?.orgShared
+  );
+  const [sendingToOrg, setSendingToOrg] = useState(false);
+
+  useEffect(() => {
+    setSharedWithOrganization(!!getStoredWorkflow()[batchId]?.orgShared);
+  }, [batchId]);
+
+  const handleSendToOrganization = async () => {
+    setSendingToOrg(true);
+    try {
+      const next = { ...getStoredWorkflow(), [batchId]: { ...(getStoredWorkflow()[batchId] || {}), orgShared: true, lastAction: new Date().toISOString() } };
+      localStorage.setItem(BATCH_WORKFLOW_KEY, JSON.stringify(next));
+      setSharedWithOrganization(true);
+      toast.success(`${batchName} shared with the organization`);
+    } finally {
+      setSendingToOrg(false);
+    }
+  };
+
   // SDC generation — same generate → poll /status → issue flow as the
   // generic Control Center modal, self-contained here since warranty batches
   // carry their own status/certs separately from the generic batch shape.
@@ -1124,22 +1149,42 @@ const WarrantyDetailModal = ({ batchId, batchName, orgId, spaceId, onClose }) =>
                 button, SDC Certificates sub-section below a divider), now
                 sized to sit in the right column instead of full-width. */}
             <div className="min-w-0 rounded-2xl border border-gray-100 bg-gray-50 p-5">
-              <div className="mb-4">
-                <p className="font-sora font-semibold text-brand-dark">Batch Actions</p>
-                <p className="text-xs text-gray-400 font-inter mt-1">Whole-batch controls only</p>
+              <div className="flex items-start justify-between gap-3 mb-4">
+                <div>
+                  <p className="font-sora font-semibold text-brand-dark">Batch Actions</p>
+                  <p className="text-xs text-gray-400 font-inter mt-1">Whole-batch controls only</p>
+                </div>
+                {sharedWithOrganization && <Badge status="success">Shared</Badge>}
               </div>
 
-              <Button
-                variant="outline"
-                size="sm"
-                icon={Sparkles}
-                className="w-full justify-start"
-                disabled={(summary?.approved ?? 0) === 0}
-                title={(summary?.approved ?? 0) === 0 ? 'No approved products in this batch yet' : undefined}
-                onClick={() => setSdcGenerateOpen(true)}
-              >
-                {sdcRecords.length > 0 ? 'Regenerate SDC' : 'Generate SDC'}
-              </Button>
+              <div className="space-y-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  icon={Sparkles}
+                  className="w-full justify-start"
+                  disabled={(summary?.approved ?? 0) === 0}
+                  title={(summary?.approved ?? 0) === 0 ? 'No approved products in this batch yet' : undefined}
+                  onClick={() => setSdcGenerateOpen(true)}
+                >
+                  {sdcRecords.length > 0 ? 'Regenerate SDC' : 'Generate SDC'}
+                </Button>
+
+                {/* Send to org — once SDC is generated and not yet shared, same
+                    gating as the generic Control Center modal. */}
+                {data?.status === 'sdc_generated' && !sharedWithOrganization && (
+                  <Button
+                    variant="success"
+                    size="sm"
+                    icon={sendingToOrg ? RefreshCw : Send}
+                    className="w-full justify-start"
+                    disabled={sendingToOrg}
+                    onClick={handleSendToOrganization}
+                  >
+                    {sendingToOrg ? 'Sending…' : 'Send to Organization'}
+                  </Button>
+                )}
+              </div>
 
               <div className="mt-4 pt-4 border-t border-gray-200/70">
                 <div className="flex items-center justify-between mb-2">
