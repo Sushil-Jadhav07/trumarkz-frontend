@@ -35,6 +35,7 @@ const downloadLocalFallback = (headers, fileName = 'product-template') => {
   const buildExample = (h) => {
     const k = h.toLowerCase();
     if (k.includes('customer')) return 'Aniket Jha';
+    if (k.includes('sku')) return 'SKU-1001';
     if (k.includes('product')) return 'Example Product';
     if (k === 'category') return 'Electronics';
     if (k.includes('model')) return 'Model A';
@@ -112,7 +113,7 @@ export const ProductTemplate = () => {
   const addDocEntry = () =>
     setDocEntries((prev) => [
       ...prev,
-      { id: Date.now(), productName: '', label: '', file: null },
+      { id: Date.now(), productName: '', sku: '', label: '', file: null },
     ]);
 
   const removeDocEntry = (id) =>
@@ -136,12 +137,19 @@ export const ProductTemplate = () => {
     setActiveDocIdx(null);
   };
 
-  // Product names parsed from the uploaded Excel — drives the product name dropdown
-  const [excelProductNames, setExcelProductNames] = useState([]);
+  // Product+SKU rows parsed from the uploaded Excel — drives the product
+  // picker dropdown. sku_no is now the mandatory, collision-proof matching
+  // key the backend uses to attach a document to the right BatchUser (see
+  // PART 5 of the SKU/document-association architecture): product_name alone
+  // can repeat across rows, and the backend now explicitly rejects an
+  // ambiguous doc_product_names match instead of guessing. So rows are
+  // deduped and selected by sku_no, with product_name shown alongside purely
+  // for readability (e.g. "Lakme Absolute Matte Lipstick (SKU: LAKME-001)").
+  const [excelProducts, setExcelProducts] = useState([]); // [{ name, sku }]
   const [openProductDropdownId, setOpenProductDropdownId] = useState(null);
 
   useEffect(() => {
-    if (!excelFile) { setExcelProductNames([]); return; }
+    if (!excelFile) { setExcelProducts([]); return; }
     const read = async () => {
       try {
         const buf = await excelFile.arrayBuffer();
@@ -152,16 +160,33 @@ export const ProductTemplate = () => {
         // Warranty sheets can identify each row as either `product_name`
         // (the standard download-template column) or `customer_name` (seen
         // live in warranty sample/export data) — check both rather than
-        // assuming one, so the product picker still works either way.
+        // assuming one, so the product picker still works either way. (The
+        // doc panel that uses this list only renders for the Product flow —
+        // warranty sheets have no sku_no column, and skuIdx below just comes
+        // back -1 for them, which is handled below.)
         const nameIdx = ['product_name', 'customer_name']
           .map((key) => headers.indexOf(key))
           .find((idx) => idx !== -1) ?? -1;
-        if (nameIdx === -1) { setExcelProductNames([]); return; }
-        const names = rows.slice(1)
-          .map((row) => String(row[nameIdx] ?? '').trim())
-          .filter(Boolean);
-        setExcelProductNames([...new Set(names)]);
-      } catch { setExcelProductNames([]); }
+        if (nameIdx === -1) { setExcelProducts([]); return; }
+        const skuIdx = headers.indexOf('sku_no');
+        const seenKeys = new Set();
+        const products = [];
+        rows.slice(1).forEach((row) => {
+          const name = String(row[nameIdx] ?? '').trim();
+          if (!name) return;
+          const sku = skuIdx !== -1 ? String(row[skuIdx] ?? '').trim() : '';
+          // Dedupe by sku_no — the real unique identity per row. Falling
+          // back to name only covers sheets with no sku_no column at all
+          // (pre-migration files, or warranty, which doesn't render this
+          // picker anyway); once sku_no is present it's authoritative, so
+          // two rows with the same name but different SKUs both show up.
+          const dedupeKey = sku || name;
+          if (seenKeys.has(dedupeKey)) return;
+          seenKeys.add(dedupeKey);
+          products.push({ name, sku });
+        });
+        setExcelProducts(products);
+      } catch { setExcelProducts([]); }
     };
     read();
   }, [excelFile]);
@@ -249,14 +274,19 @@ export const ProductTemplate = () => {
   const handleContinue = async () => {
     if (!excelFile) { toast.error('Please upload the completed Excel file'); return; }
 
-    // Validate doc entries — reject partial ones before proceeding
+    // Validate doc entries — reject partial ones before proceeding. sku is
+    // required alongside productName/label/file: it's set automatically by
+    // picking a product from the dropdown (never typed), so a missing sku
+    // here means the dropdown's Excel-parsed product list is stale relative
+    // to the picked entry — surface that rather than sending an unsafe,
+    // name-only match to the backend.
     const incompleteDocs = docEntries.filter(
       (e) =>
         (e.productName.trim() || e.label?.trim() || e.file) &&
-        !(e.productName.trim() && e.label?.trim() && e.file)
+        !(e.productName.trim() && e.sku?.trim() && e.label?.trim() && e.file)
     );
     if (incompleteDocs.length > 0) {
-      toast.error(`${incompleteDocs.length} document attachment(s) are incomplete — fill product name and file or remove them.`);
+      toast.error(`${incompleteDocs.length} document attachment(s) are incomplete — pick a product and file, or remove them.`);
       return;
     }
 
@@ -268,9 +298,14 @@ export const ProductTemplate = () => {
       const uploadedHeaders = (rows[0] || []).map((h) => sanitizeKey(h)).filter(Boolean);
 
       if (!isWarranty) {
-        // Only product_name is required for the normal Product flow — the
-        // rest of VERIFICATION_SERVICE_HEADERS (model_no, brand, the two QR
-        // fields) are optional and must never block Continue.
+        // product_name and sku_no are required for the normal Product flow
+        // (sku_no is the mandatory, collision-proof document-matching key —
+        // see VERIFICATION_REQUIRED_HEADERS) — the rest of
+        // VERIFICATION_SERVICE_HEADERS (model_no, brand, third+party+qr2)
+        // are optional and must never block Continue. third+party+qr1 is
+        // intentionally absent from this list — the backend populates it
+        // automatically when a Product document is uploaded, so it must
+        // never be required or expected from the uploaded sheet.
         const missingHeaders = VERIFICATION_REQUIRED_HEADERS.filter((h) => !uploadedHeaders.includes(h));
         if (missingHeaders.length > 0) {
           toast.error(`Missing required columns: ${missingHeaders.join(', ')}`);
@@ -284,7 +319,7 @@ export const ProductTemplate = () => {
         .length;
       if (recordCount <= 0) { toast.error('The uploaded file has no data rows'); return; }
 
-      const validDocs = docEntries.filter((e) => e.productName.trim() && e.label?.trim() && e.file);
+      const validDocs = docEntries.filter((e) => e.productName.trim() && e.sku?.trim() && e.label?.trim() && e.file);
 
       setProductBatchData({
         file: excelFile,
@@ -402,7 +437,7 @@ export const ProductTemplate = () => {
                             : 'None attached'}
                         </p>
                       </div>
-                      {docEntries.length > 0 && docEntries.every((e) => e.file && e.productName.trim() && e.label?.trim()) && (
+                      {docEntries.length > 0 && docEntries.every((e) => e.file && e.productName.trim() && e.sku?.trim() && e.label?.trim()) && (
                         <span className="rounded-full bg-green-100 px-2 py-0.5 font-inter text-[10px] font-bold text-green-700">All ready</span>
                       )}
                     </div>
@@ -415,7 +450,7 @@ export const ProductTemplate = () => {
                       {[
                         { label: 'Batch name set',          done: Boolean(batchNameValue.trim()) },
                         { label: 'Excel file uploaded',     done: Boolean(excelFile) },
-                        { label: 'Docs ready (or skipped)', done: docEntries.length === 0 || docEntries.every((e) => e.file && e.productName.trim() && e.label?.trim()) },
+                        { label: 'Docs ready (or skipped)', done: docEntries.length === 0 || docEntries.every((e) => e.file && e.productName.trim() && e.sku?.trim() && e.label?.trim()) },
                       ].map(({ label, done }) => (
                         <div key={label} className="flex items-center gap-2.5">
                           <div className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full transition-colors ${done ? 'bg-green-100' : 'bg-gray-100'}`}>
@@ -473,21 +508,21 @@ export const ProductTemplate = () => {
                   </div>
                 </div>
               ) : (
-              <div className="flex-1 bg-gray-50">
+              <div className="flex min-w-0 flex-1 flex-col bg-gray-50">
 
                 {/* Section header */}
-                <div className="flex items-center justify-between border-b border-gray-200 bg-white px-6 py-4">
-                  <div className="flex items-center gap-2.5">
-                    <div className={`flex h-7 w-7 items-center justify-center rounded-lg ${docEntries.length > 0 && docEntries.every((e) => e.file && e.productName.trim() && e.label?.trim()) ? 'bg-green-100' : 'bg-blue-100'}`}>
-                      <FileText size={13} className={docEntries.length > 0 && docEntries.every((e) => e.file && e.productName.trim() && e.label?.trim()) ? 'text-green-600' : 'text-brand-blue'} />
+                <div className="flex min-w-0 items-center justify-between gap-2 border-b border-gray-200 bg-white px-6 py-4">
+                  <div className="flex min-w-0 items-center gap-2.5">
+                    <div className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg ${docEntries.length > 0 && docEntries.every((e) => e.file && e.productName.trim() && e.sku?.trim() && e.label?.trim()) ? 'bg-green-100' : 'bg-blue-100'}`}>
+                      <FileText size={13} className={docEntries.length > 0 && docEntries.every((e) => e.file && e.productName.trim() && e.sku?.trim() && e.label?.trim()) ? 'text-green-600' : 'text-brand-blue'} />
                     </div>
-                    <div>
-                      <p className="font-inter text-sm font-semibold text-brand-dark">{isWarranty ? 'Warranty Documents' : 'Product Documents'}</p>
-                      <p className="font-inter text-[11px] text-gray-500">
+                    <div className="min-w-0">
+                      <p className="truncate font-inter text-sm font-semibold text-brand-dark">{isWarranty ? 'Warranty Documents' : 'Product Documents'}</p>
+                      <p className="truncate font-inter text-[11px] text-gray-500">
                         {isWarranty ? 'Attach a Warranty Report or card to individual products' : 'Attach warranty cards or certificates to products'}
                       </p>
                     </div>
-                    <span className="rounded-md bg-gray-200 px-2 py-0.5 font-inter text-[10px] font-semibold text-gray-500">Optional</span>
+                    <span className="shrink-0 rounded-md bg-gray-200 px-2 py-0.5 font-inter text-[10px] font-semibold text-gray-500">Optional</span>
                   </div>
                   <button
                     type="button"
@@ -500,7 +535,7 @@ export const ProductTemplate = () => {
                 </div>
 
                 {/* ── Document entries ── */}
-                <div className="bg-gray-50">
+                <div className="min-w-0 flex-1 overflow-x-auto bg-gray-50">
 
               {/* Empty state */}
               {docEntries.length === 0 ? (
@@ -516,10 +551,12 @@ export const ProductTemplate = () => {
                 </div>
               ) : (
                 <>
-                  {/* Entry cards */}
-                  <div className="space-y-2 p-4">
+                  {/* Entry cards — min-w-max keeps each row's controls at a legible
+                      width; the overflow-x-auto ancestor scrolls this instead of
+                      blowing out the page when the panel is narrower than that. */}
+                  <div className="min-w-max space-y-2 p-4">
                     {docEntries.map((entry, idx) => {
-                      const isComplete = entry.productName.trim() && entry.label?.trim() && entry.file;
+                      const isComplete = entry.productName.trim() && entry.sku?.trim() && entry.label?.trim() && entry.file;
                       return (
                         <div
                           key={entry.id}
@@ -561,7 +598,9 @@ export const ProductTemplate = () => {
                                 }`}
                               >
                                 <span className={`truncate text-sm ${entry.productName ? 'text-brand-dark' : 'text-gray-400'}`}>
-                                  {entry.productName || 'Select product…'}
+                                  {entry.productName
+                                    ? (entry.sku ? `${entry.productName} (SKU: ${entry.sku})` : entry.productName)
+                                    : 'Select product…'}
                                 </span>
                                 <ChevronDown
                                   size={13}
@@ -575,33 +614,57 @@ export const ProductTemplate = () => {
                                 <>
                                   <div className="fixed inset-0 z-40" onClick={() => setOpenProductDropdownId(null)} />
                                   <div className="absolute left-0 top-[calc(100%+4px)] z-50 w-full rounded-xl border border-gray-200 bg-white">
-                                    {excelProductNames.length === 0 ? (
+                                    {excelProducts.length === 0 ? (
                                       <div className="px-4 py-5 text-center">
                                         <p className="font-inter text-xs text-gray-400">
                                           {excelFile ? 'No product_name column found in the file' : 'Upload your Excel file first to see products'}
                                         </p>
                                       </div>
-                                    ) : (
+                                    ) : (() => {
+                                      // One product → one document only: a product already
+                                      // picked in another row is hidden here so it can't be
+                                      // selected twice. Keyed by sku_no — the real unique
+                                      // identity per the backend contract — never by name,
+                                      // which duplicate product names would break. The
+                                      // current entry keeps its own pick visible so it still
+                                      // shows as selected/changeable.
+                                      const takenElsewhere = new Set(
+                                        docEntries
+                                          .filter((e) => e.id !== entry.id && e.sku?.trim())
+                                          .map((e) => e.sku)
+                                      );
+                                      const availableProducts = excelProducts.filter(
+                                        (p) => p.sku === entry.sku || !takenElsewhere.has(p.sku)
+                                      );
+                                      return availableProducts.length === 0 ? (
+                                        <div className="px-4 py-5 text-center">
+                                          <p className="font-inter text-xs text-gray-400">
+                                            Every product already has a document assigned
+                                          </p>
+                                        </div>
+                                      ) : (
                                       <div className="max-h-40 overflow-y-auto rounded-xl">
-                                        {excelProductNames.map((name) => (
+                                        {availableProducts.map((p) => (
                                           <div
-                                            key={name}
+                                            key={p.sku || p.name}
                                             role="button"
                                             onClick={() => {
-                                              updateDocEntry(entry.id, { productName: name });
+                                              updateDocEntry(entry.id, { productName: p.name, sku: p.sku });
                                               setOpenProductDropdownId(null);
                                             }}
                                             className={`cursor-pointer px-3 py-2.5 font-inter text-sm transition-colors first:rounded-t-xl last:rounded-b-xl hover:bg-blue-50 hover:text-brand-blue ${
-                                              entry.productName === name
+                                              entry.sku === p.sku
                                                 ? 'bg-blue-50 font-semibold text-brand-blue'
                                                 : 'text-brand-dark'
                                             }`}
                                           >
-                                            {name}
+                                            {p.name}
+                                            {p.sku && <span className="ml-1.5 font-mono text-[11px] text-gray-400">SKU: {p.sku}</span>}
                                           </div>
                                         ))}
                                       </div>
-                                    )}
+                                      );
+                                    })()}
                                   </div>
                                 </>
                               )}
@@ -615,7 +678,7 @@ export const ProductTemplate = () => {
                             <select
                               value={entry.label}
                               onChange={(e) => updateDocEntry(entry.id, { label: e.target.value })}
-                              className={`w-36 shrink-0 rounded-xl border px-3 py-2 font-inter text-sm focus:border-brand-blue focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-blue/15 ${
+                              className={`w-32 shrink-0 rounded-xl border px-3 py-2 font-inter text-sm focus:border-brand-blue focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-blue/15 ${
                                 isComplete ? 'border-green-200 bg-white text-brand-dark' : 'border-gray-300 bg-white text-brand-dark'
                               } ${entry.label ? '' : 'text-gray-400'}`}
                             >
@@ -627,7 +690,7 @@ export const ProductTemplate = () => {
 
                             {/* File */}
                             {entry.file ? (
-                              <div className="flex w-44 shrink-0 items-center gap-2 rounded-xl border border-green-200 bg-green-50 px-3 py-2">
+                              <div className="flex w-40 shrink-0 items-center gap-2 rounded-xl border border-green-200 bg-green-50 px-3 py-2">
                                 <CheckCircle size={13} className="shrink-0 text-green-600" />
                                 <span className="min-w-0 flex-1 truncate font-inter text-xs font-medium text-green-700">
                                   {entry.file.name}
@@ -644,7 +707,7 @@ export const ProductTemplate = () => {
                               <button
                                 type="button"
                                 onClick={() => openDocFilePicker(idx)}
-                                className="flex w-44 shrink-0 items-center justify-center gap-1.5 rounded-xl border border-dashed border-gray-400 py-2 font-inter text-xs text-gray-500 transition-colors hover:border-brand-blue hover:bg-blue-50/40 hover:text-brand-blue"
+                                className="flex w-40 shrink-0 items-center justify-center gap-1.5 rounded-xl border border-dashed border-gray-400 py-2 font-inter text-xs text-gray-500 transition-colors hover:border-brand-blue hover:bg-blue-50/40 hover:text-brand-blue"
                               >
                                 <Upload size={12} />
                                 Pick file
@@ -669,9 +732,9 @@ export const ProductTemplate = () => {
                   {docEntries.length > 0 && (
                     <div className="flex items-center justify-between border-t border-gray-200 bg-white px-4 py-2.5">
                       <span className="font-inter text-[11px] text-gray-500">
-                        {docEntries.filter((e) => e.file && e.productName.trim() && e.label?.trim()).length} of {docEntries.length} complete
+                        {docEntries.filter((e) => e.file && e.productName.trim() && e.sku?.trim() && e.label?.trim()).length} of {docEntries.length} complete
                       </span>
-                      {docEntries.every((e) => e.file && e.productName.trim() && e.label?.trim()) && (
+                      {docEntries.every((e) => e.file && e.productName.trim() && e.sku?.trim() && e.label?.trim()) && (
                         <span className="flex items-center gap-1 font-inter text-[11px] font-semibold text-green-600">
                           <CheckCircle size={11} /> All ready
                         </span>
@@ -738,9 +801,13 @@ export const ProductTemplate = () => {
                     </p>
                     <p className="font-mono text-[11px] text-slate-400">{key}</p>
                   </div>
-                  {isWarranty && (
+                  {isWarranty ? (
                     <span className="rounded-full bg-brand-blue/10 px-2.5 py-1 font-inter text-[10px] font-semibold uppercase text-brand-blue">
                       Fixed
+                    </span>
+                  ) : VERIFICATION_REQUIRED_HEADERS.includes(key) && (
+                    <span className="rounded-full bg-red-50 px-2.5 py-1 font-inter text-[10px] font-semibold uppercase text-red-500">
+                      Required
                     </span>
                   )}
                 </div>

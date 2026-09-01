@@ -466,11 +466,21 @@ export const verificationAPI = {
     appendFormValue(formData, 'verification_types', options.verificationTypes || options.verification_types);
     appendFormValue(formData, 'template_id', options.templateId || options.template_id);
 
-    // Document attachments — doc_files must be appended individually (not joined)
+    // Document attachments — doc_files must be appended individually (not joined).
+    // doc_sku_nos is the mandatory, collision-proof matching key per the current
+    // backend contract (sku_no is unique per row within a batch, unlike
+    // product_name, which the backend explicitly refuses to guess across when
+    // duplicated — see "ambiguous" error in bulk-upload/products). doc_product_names
+    // is kept as a legacy fallback only for callers that haven't migrated to
+    // sku-based selection yet; when both are supplied, sku_nos takes priority
+    // server-side, but callers should send one or the other, not stale legacy data
+    // alongside real SKUs.
+    const docSkus   = options.docSkuNos     || options.doc_sku_nos;
     const docNames  = options.docProductNames || options.doc_product_names;
     const docLabels = options.docLabels       || options.doc_labels;
     const docFiles  = options.docFiles        || options.doc_files;
 
+    if (Array.isArray(docSkus)   && docSkus.length   > 0) formData.append('doc_sku_nos', docSkus.join(','));
     if (Array.isArray(docNames)  && docNames.length  > 0) formData.append('doc_product_names', docNames.join(','));
     if (Array.isArray(docLabels) && docLabels.length > 0) formData.append('doc_labels', docLabels.join(','));
     if (Array.isArray(docFiles))  docFiles.forEach((f) => formData.append('doc_files', f));

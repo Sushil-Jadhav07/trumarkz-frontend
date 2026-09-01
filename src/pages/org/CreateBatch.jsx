@@ -38,6 +38,7 @@ const parseTemplateHeaders = (value) =>
 
 const buildExampleValue = (header) => {
   const key = header.toLowerCase();
+  if (key.includes('sku')) return 'SKU-1001';
   if (key.includes('product')) return 'Example Product';
   if (key.includes('serial')) return 'SN-001';
   if (key.includes('warranty start')) return '2026-05-16';
@@ -666,7 +667,12 @@ const ProductBulkPanel = ({ categories, onResult, selectedCategory, selectedServ
   const [templateHeaders, setTemplateHeaders] = useState(
     selectedService?.id === 'warranty'
       ? 'customer_name,model_no,warrenty_report,product_details,purchase_date,expiration_date,created_time,serial_number'
-      : 'product_name,model_no,brand,third+party+qr1,third+party+qr2'
+      // sku_no is now a mandatory Product column (the collision-proof key
+      // document attachment matches on) and third+party+qr1 is no longer
+      // user-filled — the backend populates it automatically once a Product
+      // document is uploaded. See VERIFICATION_SERVICE_HEADERS in
+      // productVerificationFlow.js for the same canonical column set.
+      : 'product_name,sku_no,model_no,brand,third+party+qr2'
   );
   const [selectedFile, setSelectedFile] = useState(null);
   const [uploadProgress, setUploadProgress] = useState(0);
@@ -688,7 +694,7 @@ const ProductBulkPanel = ({ categories, onResult, selectedCategory, selectedServ
   const addDocEntry = () =>
     setDocEntries((prev) => [
       ...prev,
-      { id: Date.now(), productName: '', label: 'certificate', file: null },
+      { id: Date.now(), sku: '', label: 'certificate', file: null },
     ]);
 
   const removeDocEntry = (id) =>
@@ -716,7 +722,7 @@ const ProductBulkPanel = ({ categories, onResult, selectedCategory, selectedServ
     setTemplateHeaders(
       selectedService?.id === 'warranty'
         ? 'customer_name,model_no,warrenty_report,product_details,purchase_date,expiration_date,created_time,serial_number'
-        : 'product_name,model_no,brand,third+party+qr1,third+party+qr2'
+        : 'product_name,sku_no,model_no,brand,third+party+qr2'
     );
   }, [selectedService]);
 
@@ -737,15 +743,19 @@ const ProductBulkPanel = ({ categories, onResult, selectedCategory, selectedServ
     if (!batchName.trim()) { toast.error('Please enter a batch name'); return; }
     if (!selectedFile) { toast.error('Please select an Excel file'); return; }
 
-    // Validate doc entries — skip incomplete ones, warn if any are partial
+    // Validate doc entries — skip incomplete ones, warn if any are partial.
+    // Matched by sku_no, not product name: the backend now requires sku_no
+    // as the collision-proof key for document association (product_name
+    // alone is rejected as ambiguous once two rows share a name) — see
+    // PART 5 of the SKU/document-association architecture.
     const validDocs = docEntries.filter(
-      (e) => e.productName.trim() && e.label && e.file
+      (e) => e.sku.trim() && e.label && e.file
     );
     const incompleteDocs = docEntries.filter(
-      (e) => (e.productName.trim() || e.file) && !(e.productName.trim() && e.label && e.file)
+      (e) => (e.sku.trim() || e.file) && !(e.sku.trim() && e.label && e.file)
     );
     if (incompleteDocs.length > 0) {
-      toast.error(`${incompleteDocs.length} document attachment(s) are incomplete — fill product name and file or remove them.`);
+      toast.error(`${incompleteDocs.length} document attachment(s) are incomplete — fill the product's SKU and file, or remove them.`);
       return;
     }
 
@@ -760,9 +770,9 @@ const ProductBulkPanel = ({ categories, onResult, selectedCategory, selectedServ
           batchType: 'product',
           verificationTypes: getProductVerificationTypes(selectedService),
           credentialVisibility: visibility,
-          docProductNames: validDocs.map((e) => e.productName.trim()),
-          docLabels:       validDocs.map((e) => e.label),
-          docFiles:        validDocs.map((e) => e.file),
+          docSkuNos: validDocs.map((e) => e.sku.trim()),
+          docLabels: validDocs.map((e) => e.label),
+          docFiles:  validDocs.map((e) => e.file),
         },
         setUploadProgress
       );
@@ -1027,13 +1037,13 @@ const ProductBulkPanel = ({ categories, onResult, selectedCategory, selectedServ
               Attach certificates, warranty cards, or compliance docs to specific products.
             </p>
             <p className="font-inter text-[11px] text-gray-300">
-              Product name must match the Excel exactly.
+              SKU must match the sku_no column in the Excel exactly.
             </p>
           </div>
         ) : (
           <div className="divide-y divide-gray-50">
             <div className="grid grid-cols-[1fr_144px_1fr_32px] items-center gap-3 px-4 py-2">
-              <p className="font-inter text-[10px] font-bold uppercase tracking-[0.1em] text-gray-400">Product Name (exact match)</p>
+              <p className="font-inter text-[10px] font-bold uppercase tracking-[0.1em] text-gray-400">SKU (exact match)</p>
               <p className="font-inter text-[10px] font-bold uppercase tracking-[0.1em] text-gray-400">Doc Type</p>
               <p className="font-inter text-[10px] font-bold uppercase tracking-[0.1em] text-gray-400">File</p>
               <span />
@@ -1051,9 +1061,9 @@ const ProductBulkPanel = ({ categories, onResult, selectedCategory, selectedServ
                   <div className="grid grid-cols-[1fr_144px_1fr_32px] items-center gap-3 px-4 py-3">
                     <input
                       type="text"
-                      value={entry.productName}
-                      onChange={(e) => updateDocEntry(entry.id, { productName: e.target.value })}
-                      placeholder="e.g. Screw M8"
+                      value={entry.sku}
+                      onChange={(e) => updateDocEntry(entry.id, { sku: e.target.value })}
+                      placeholder="e.g. SKU-1001"
                       className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 font-inter text-sm text-brand-dark placeholder-gray-300 focus:border-brand-blue focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-blue/15"
                     />
                     <select
@@ -1104,7 +1114,7 @@ const ProductBulkPanel = ({ categories, onResult, selectedCategory, selectedServ
               <span className="font-inter text-[11px] text-gray-400">
                 {docEntries.filter((e) => e.file).length} of {docEntries.length} files attached
               </span>
-              {docEntries.length > 0 && docEntries.every((e) => e.file && e.productName.trim()) && (
+              {docEntries.length > 0 && docEntries.every((e) => e.file && e.sku.trim()) && (
                 <span className="flex items-center gap-1 font-inter text-[11px] font-semibold text-green-600">
                   <CheckCircle size={11} /> All ready
                 </span>

@@ -159,6 +159,23 @@ const getCertificateSerialNumber = (rec) =>
   rec?.credentialSubject?.serial_number ||
   null;
 
+// Plain Product batches have no serial_number field at all (their schema is
+// product_name/sku_no/model_no/brand/QR — see VERIFICATION_REQUIRED_HEADERS;
+// sku_no is a pre-upload document-matching key only and, per the backend's
+// own architecture docs, must never be used for certificate correlation),
+// so title/email matching permanently fails for them: the list endpoint
+// (GET /sdc/records) echoes the certificate's own publicId into `title` and
+// leaves `recipients` empty for products, carrying no identity back to the
+// batch record at all. Confirmed live in a single-record detail fetch
+// (GET /sdc/records/{publicId}) that credentialSubject.product_id IS present
+// there — same shape as serial_no above — so that's the reliable key for
+// products, at the cost of one extra request per unmatched candidate.
+const getCertificateProductId = (rec) =>
+  rec?.credential?.credentialSubject?.product_id ||
+  rec?.credentialSubject?.product_id ||
+  rec?.record?.credentialSubject?.product_id ||
+  null;
+
 // verification_type_label is just "Manual"/"Automatic" (a category, per the
 // submitted-reports docs) — not a display name. The readable name has to
 // come from slugifying verification_type_name (e.g. "police_verification" →
@@ -1731,6 +1748,65 @@ export const BatchMonitor = () => {
           };
         }
       });
+
+      // Product records never match by the pass above — they have no email,
+      // and Dhiway echoes the certificate's own publicId into `title` for
+      // this batch type (confirmed live), so title === recordName never
+      // holds either. The list endpoint carries nothing identity-based for
+      // products, but a single-record detail fetch does: credentialSubject.
+      // product_id (confirmed live via GET /sdc/records/{publicId}). Only
+      // chase this down for whichever records are still unmatched, and only
+      // among the most-recently-created still-unclaimed certs, so this stays
+      // a handful of extra requests rather than one per cert in the space.
+      const unmatchedProductRecords = detailRecords.filter((record) => {
+        const recordId = record?.id || record?.user_id || record?.entity_id;
+        return isProductRecord(record) && recordId && !matchedByRecordId[recordId];
+      });
+
+      if (unmatchedProductRecords.length > 0) {
+        const candidatePool = allRecords
+          .filter((item) => item?.publicId && !seenPublicIds.has(item.publicId))
+          .sort((a, b) => new Date(b.createdAt || b.anchorTime || 0) - new Date(a.createdAt || a.anchorTime || 0))
+          .slice(0, Math.max(unmatchedProductRecords.length * 4, 20));
+
+        const detailed = await Promise.all(
+          candidatePool.map((item) =>
+            sdcAPI.getRecord(item.publicId)
+              .then(({ data }) => ({ item, productId: getCertificateProductId(data) }))
+              .catch(() => null)
+          )
+        );
+
+        const certByProductId = new Map();
+        detailed.forEach((entry) => {
+          if (entry?.productId && !certByProductId.has(entry.productId)) {
+            certByProductId.set(entry.productId, entry.item);
+          }
+        });
+
+        unmatchedProductRecords.forEach((record) => {
+          const recordId = record?.id || record?.user_id || record?.entity_id;
+          const match = certByProductId.get(recordId);
+          if (!match?.publicId || seenPublicIds.has(match.publicId)) return;
+          seenPublicIds.add(match.publicId);
+          matchedRecords.push(match);
+          matchedByRecordId[recordId] = {
+            id: match.id,
+            publicId: match.publicId,
+            title: match.title,
+            recipients: match.recipients || [],
+            anchorTime: match.anchorTime || null,
+            revoked: !!match.revoked,
+            issued: !!match.anchorTime && !match.revoked,
+            active: !!match.active,
+            latest: !!match.latest,
+            edited: !!match.edited,
+            createdAt: match.createdAt || null,
+            updatedAt: match.updatedAt || null,
+          };
+        });
+      }
+
       setBatchSdcRecords(matchedRecords);
       setBatchSdcByRecordId(matchedByRecordId);
     } catch {

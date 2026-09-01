@@ -70,6 +70,20 @@ const getRecordSerialNumber = (record) =>
   record?.metadata?.serial_number ||
   '';
 
+// Plain Product batches have no serial_number field, and Dhiway echoes the
+// certificate's own publicId into `title` for them (confirmed live) — so
+// neither key in matchCertificates below can ever pair them up, forcing the
+// blind positional fallback further down. A single-record detail fetch
+// (GET /sdc/records/{publicId}) does carry an identity-based key though:
+// credentialSubject.product_id (confirmed live) — same shape Dhiway uses for
+// serial_no. Used as a second, authoritative pass before falling back to
+// position-guessing.
+const getCertificateProductId = (rec) =>
+  rec?.credential?.credentialSubject?.product_id ||
+  rec?.credentialSubject?.product_id ||
+  rec?.record?.credentialSubject?.product_id ||
+  null;
+
 const formatDate = (value) => {
   if (!value) return '-';
   const date = new Date(value);
@@ -216,6 +230,7 @@ export const GenerateSDCModal = ({ batch, onClose, onGenerated, liveStatus, poll
 
       const matches = [];
       const matchedPublicIds = new Set();
+      const matchedRecordIds = new Set();
 
       records.forEach((r) => {
         const email = normalizeMatchKey(r?.email);
@@ -235,9 +250,54 @@ export const GenerateSDCModal = ({ batch, onClose, onGenerated, liveStatus, poll
 
         if (match?.publicId) {
           matchedPublicIds.add(match.publicId);
-          matches.push({ publicId: match.publicId, title: match.title || recordTitle(r) });
+          matches.push({ publicId: match.publicId, title: recordTitle(r) || match.title });
+          const recordId = r?.id || r?.user_id || r?.entity_id;
+          if (recordId) matchedRecordIds.add(recordId);
         }
       });
+
+      // Product-like records with no serial number (plain Product batches
+      // have none) never match the pass above — Dhiway echoes the
+      // certificate's own publicId into `title` for them (confirmed live),
+      // so title/serial matching finds nothing. Fetch full detail for the
+      // still-unclaimed, most-recently-created certs and pair by the
+      // certificate's own credentialSubject.product_id, an authoritative
+      // identity key, before ever falling back to position-guessing below.
+      const unmatchedProductRecords = records.filter((r) => {
+        const recordId = r?.id || r?.user_id || r?.entity_id;
+        const serial = normalizeMatchKey(getRecordSerialNumber(r));
+        return recordId && (isProductRecord(r) || !!serial) && !matchedRecordIds.has(recordId);
+      });
+
+      if (unmatchedProductRecords.length > 0) {
+        const candidatePool = allRecords
+          .filter((item) => item?.publicId && !matchedPublicIds.has(item.publicId))
+          .sort((a, b) => new Date(b.createdAt || b.anchorTime || 0) - new Date(a.createdAt || a.anchorTime || 0))
+          .slice(0, Math.max(unmatchedProductRecords.length * 4, 20));
+
+        const detailed = await Promise.all(
+          candidatePool.map((item) =>
+            sdcAPI.getRecord(item.publicId)
+              .then(({ data }) => ({ item, productId: getCertificateProductId(data) }))
+              .catch(() => null)
+          )
+        );
+
+        const certByProductId = new Map();
+        detailed.forEach((entry) => {
+          if (entry?.productId && !certByProductId.has(entry.productId)) {
+            certByProductId.set(entry.productId, entry.item);
+          }
+        });
+
+        unmatchedProductRecords.forEach((r) => {
+          const recordId = r?.id || r?.user_id || r?.entity_id;
+          const cert = certByProductId.get(recordId);
+          if (!cert?.publicId || matchedPublicIds.has(cert.publicId)) return;
+          matchedPublicIds.add(cert.publicId);
+          matches.push({ publicId: cert.publicId, title: recordTitle(r) || cert.title });
+        });
+      }
 
       if (matches.length === 0 && allRecords.length > 0) {
         const fallbackRecords = [...records];
@@ -250,7 +310,7 @@ export const GenerateSDCModal = ({ batch, onClose, onGenerated, liveStatus, poll
         fallbackRecords.forEach((r, index) => {
           const cert = fallbackCertificates[index];
           if (cert?.publicId) {
-            matches.push({ publicId: cert.publicId, title: cert.title || recordTitle(r) });
+            matches.push({ publicId: cert.publicId, title: recordTitle(r) || cert.title });
           }
         });
       }

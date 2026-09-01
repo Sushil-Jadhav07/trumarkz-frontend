@@ -173,8 +173,14 @@ export const ProductCostBreakdown = () => {
         return;
       }
 
+      // sku_no is now the mandatory, collision-proof key the backend uses to
+      // attach a document to the right product before any BatchUser exists
+      // (see PART 5 of the SKU/document-association architecture) — every
+      // entry from the Template step's picker already carries one alongside
+      // productName, so require both here rather than falling back to a
+      // name-only match the backend itself now refuses as ambiguous.
       const validDocs = (productBatchData.docEntries || []).filter(
-        (e) => e.productName?.trim() && e.label && e.file
+        (e) => e.productName?.trim() && e.sku?.trim() && e.label && e.file
       );
       const { data } = await verificationAPI.bulkUploadProducts(
         productBatchData.file,
@@ -185,9 +191,9 @@ export const ProductCostBreakdown = () => {
           verificationTypes: selectedProductVerifications,
           credentialVisibility,
           templateId: activeTemplate,
-          docProductNames: validDocs.map((e) => e.productName.trim()),
-          docLabels:       validDocs.map((e) => e.label),
-          docFiles:        validDocs.map((e) => e.file),
+          docSkuNos: validDocs.map((e) => e.sku.trim()),
+          docLabels: validDocs.map((e) => e.label),
+          docFiles:  validDocs.map((e) => e.file),
         }
       );
 

@@ -88,16 +88,23 @@ export const WARRANTY_SERVICE_HEADERS = [
   'serial_number',
 ];
 
-// Canonical column set for the normal Product Verification flow. Only
-// product_name is required — the rest are genuinely optional and must never
-// block upload. The two QR fields' "+" is canonical to the backend's field
-// names and must be preserved exactly, never normalised to "_".
+// Canonical column set for the normal Product Verification flow — updated
+// per the production SKU/document-association architecture: `sku_no` is now
+// a mandatory column alongside product_name (it's the collision-proof key
+// used to attach documents to the right product *before* the backend has
+// created any BatchUser rows — product_name alone can't do that safely once
+// two rows share a name). `third+party+qr1` is no longer user-filled here —
+// the backend populates it automatically with the document's view URL once
+// a Product document is uploaded, so it must not appear in the template the
+// org fills in. `third+party+qr2` remains a plain optional column. The "+"
+// in it is canonical to the backend's field name and must be preserved
+// exactly, never normalised to "_".
 export const VERIFICATION_SERVICE_HEADERS = [
   'product_name',
+  'sku_no',
   'model_no',
   'brand',
-  'third+party+qr1',
   'third+party+qr2',
 ];
 
-export const VERIFICATION_REQUIRED_HEADERS = ['product_name'];
+export const VERIFICATION_REQUIRED_HEADERS = ['product_name', 'sku_no'];
