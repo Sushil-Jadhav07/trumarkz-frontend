@@ -560,6 +560,18 @@ export const verificationAPI = {
       params: batchType ? { batch_type: batchType } : undefined,
     }),
   getBatchDetails: (batchId) => verificationApi.get(`/verification/batches/${batchId}`),
+
+  // POST /verification/batches/{batch_id}/share-with-organization —
+  // Superadmin only. The real, persisted "Send to Organization" action:
+  // backend sets shared_with_org=true, records shared_at/shared_by, and
+  // commits it — this is the actual security gate for certificate/SDC
+  // visibility (GET /sdc/batches/{batch_id}/status and
+  // GET /sdc/records/{public_id} both withhold data for an org caller until
+  // this has been called). No request body; idempotent — calling it again
+  // on an already-shared batch safely returns the existing state unchanged.
+  shareWithOrganization: (batchId) =>
+    verificationApi.post(`/verification/batches/${batchId}/share-with-organization`),
+
   // DELETE /verification/batches/{batch_id}/users/{batch_user_id} —
   // superadmin only. Permanently removes one customer from a batch (cascades
   // their documents/audit logs) without touching the batch or its other

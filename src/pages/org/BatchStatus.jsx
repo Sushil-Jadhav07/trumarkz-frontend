@@ -9,7 +9,6 @@ import { ProgressBar } from '@/components/ui/ProgressBar';
 import { Modal } from '@/components/ui/Modal';
 import { verificationAPI, sdcAPI, getApiError } from '@/services/api';
 import { useAuth } from '@/context/AuthContext';
-import { resolveDhiwaySpaceId } from '@/utils/dhiway';
 import { CertificateDetailModal } from '@/pages/admin/SDCVerification';
 import { WarrantyDocumentCell } from '@/components/shared/WarrantyDocumentCell';
 import { loadWarrantyCertificates } from '@/utils/warrantyCertificates';
@@ -30,18 +29,38 @@ const formatVerifType = (t) => {
 
 const isUUID = (t) => UUID_RE.test(t);
 
-const isProductRecord = (r) =>
-  r?.entity_type === 'product' || !!r?.product_name || !!r?.category_name;
+// batchType (the batch's own real batch_type, e.g. from GET /verification/
+// batches/{batch_id}) is the authoritative signal — trust it first. Product
+// batch users come back with NO product_name/category_name field at all
+// (confirmed live): the product's name is under `full_name` and its extra
+// attributes (brand, sku_no, ...) are nested in `custom_fields`, identical in
+// shape to a Human record. Without batchType, this record is silently
+// misread as Human — which also fed the wrong (email/title) certificate
+// match branch below and left a genuinely-issued certificate unmatched.
+const isProductRecord = (r, batchType) =>
+  batchType === 'product' || r?.entity_type === 'product' || !!r?.product_name || !!r?.category_name;
 
 const getRecordTitle = (r) =>
   r?.product_name || r?.full_name || r?.email || r?.id || r?.user_id || r?.entity_id || 'Record';
 
-const getRecordSubtitle = (r) =>
-  isProductRecord(r)
+const getRecordSubtitle = (r, batchType) =>
+  isProductRecord(r, batchType)
     ? r?.category_name || 'Product verification'
     : [r?.email, r?.phone_number].filter(Boolean).join(' · ') || 'Human verification';
 
 const getRecordKey = (r) => r?.id || r?.user_id || r?.entity_id;
+
+// Product records carry no email/reliable title for certificate matching —
+// the authoritative, identity-based key is the certificate's own
+// credentialSubject.product_id, which equals the record's own id
+// (BatchUser.id). Same helper as the admin Batch Monitor / SDC Verification
+// pages, kept in sync so org and admin views never disagree about which
+// record a certificate belongs to.
+const getCertificateProductId = (rec) =>
+  rec?.credential?.credentialSubject?.product_id ||
+  rec?.credentialSubject?.product_id ||
+  rec?.record?.credentialSubject?.product_id ||
+  null;
 
 const VERIFIED_RECORD_STATUSES = new Set(['approved', 'verified']);
 const FAILED_RECORD_STATUSES = new Set(['rejected', 'failed']);
@@ -260,88 +279,126 @@ const SegmentedBar = ({ total, verified, failed, pending }) => {
 
 // ── Batch Detail Modal ────────────────────────────────────────────────────────
 const BatchDetailModal = ({ batchId, batchName, onClose }) => {
-  const { user } = useAuth();
   const [detail,  setDetail]  = useState(null);
   const [loading, setLoading] = useState(true);
   const [sdcByRecordId, setSdcByRecordId] = useState({});
   const [certsLoading, setCertsLoading] = useState(false);
   const [downloadingId, setDownloadingId] = useState(null);
   const [detailRecord, setDetailRecord] = useState(null);
+  // The real, authoritative SDC/sharing state — from GET /sdc/batches/
+  // {batch_id}/status itself (sdc_status, shared_with_org, ready/total),
+  // never from GET /verification/batches/{batch_id}'s verification_progress.sdc,
+  // which isn't reliably present on the org-facing batch-detail response and
+  // was silently hiding the "Refresh Certificates" control (and the initial
+  // certificate fetch) for batches where it came back empty.
+  const [sdcStatus, setSdcStatus] = useState(null);
   const instanceKey = 'de';
 
-  // Matches this batch's records against the Dhiway record list by
-  // email/title (same approach used on the admin Batch Monitor / SDC
-  // Verification pages) — org_id/space_id come straight from THIS batch's own
-  // verification_progress.sdc (recorded at generation time), which is the
-  // authoritative source for exactly which Dhiway org/space its certificates
-  // actually live in — more reliable than guessing from the org's current
-  // profile setting, which could differ or have changed since generation.
-  const refreshCertificates = useCallback(async (records, sdcInfo, batchType) => {
-    if (!records?.length) return;
+  // Correct common certificate flow for an organization caller — never the
+  // bulk GET /sdc/records list (Superadmin-only; an org calling it gets a
+  // flat 403, which is why this used to come back empty no matter how good
+  // the matching logic was):
+  //   1. GET /sdc/batches/{batch_id}/status — the backend checks batch
+  //      ownership + shared_with_org itself here and only returns
+  //      certificate_ids once this org is actually allowed to see them.
+  //   2. GET /sdc/records/{public_id} per id — fetch each certificate's own
+  //      full detail directly, never search a bulk list for it.
+  //   3. Match each fetched certificate to a record by identity (never by
+  //      array position/order, which can silently swap two records):
+  //      product_id (== the record's own id, i.e. BatchUser.id) for Product
+  //      records, recipient email or exact title for Human records.
+  const refreshCertificates = useCallback(async (records, batchType) => {
+    if (!batchId || !records?.length) return;
     setCertsLoading(true);
     try {
-      const orgId   = sdcInfo?.org_id || undefined;
-      // Falls back to the org's configured Dhiway space for this batch type if
-      // this batch's own verification_progress.sdc doesn't have one recorded
-      // yet. Typed configs are preferred so warranty/product batches do not
-      // accidentally reuse human spaces.
-      const spaceId = sdcInfo?.space_id || resolveDhiwaySpaceId(user?.dhiwaysDetails, batchType || sdcInfo?.batch_type || 'human');
+      const { data: statusData } = await sdcAPI.getBatchStatus(batchId);
+      setSdcStatus(statusData || null);
+      const certIds = Array.isArray(statusData?.certificate_ids) ? statusData.certificate_ids : [];
+      if (certIds.length === 0) { setSdcByRecordId({}); return; }
 
-      const allRecords = [];
-      let page = 1;
-      let hasMore = true;
-      while (hasMore) {
-        const { data } = await sdcAPI.getRecords({ active: 1, page, pageSize: 100, org_id: orgId, space_id: spaceId });
-        const pageRecords = Array.isArray(data?.records) ? data.records : [];
-        allRecords.push(...pageRecords);
-        const totalPages = Number(data?.totalPages || data?.total_pages || 0);
-        hasMore = totalPages > 0 ? page < totalPages : pageRecords.length === 100;
-        page += 1;
-      }
+      const fetched = await Promise.all(
+        certIds.map((publicId) =>
+          sdcAPI.getRecord(publicId)
+            .then(({ data: rec }) => ({
+              // GET /sdc/records/{public_id} (single-record detail) is a
+              // genuinely different, much leaner shape than the bulk list —
+              // confirmed live: no top-level id/title/recipients/anchorTime/
+              // revoked/active/latest/edited here at all, just
+              // public_id/credential/pdf/verify. Everything usable lives
+              // inside `credential` — fall back to its fields rather than
+              // reading top-level keys that don't exist on this endpoint.
+              id: rec?.id || rec?.credential?.id || null,
+              publicId: rec?.publicId || rec?.public_id || publicId,
+              title: rec?.title || null,
+              recipients: Array.isArray(rec?.recipients) ? rec.recipients : [],
+              productId: getCertificateProductId(rec),
+              anchorTime: rec?.anchorTime || rec?.credential?.validFrom || rec?.credential?.issuanceDate || null,
+              revoked: !!rec?.revoked,
+              // Presence in certificate_ids already means the backend
+              // confirmed this certificate is issued for this batch — don't
+              // also require anchorTime, which isn't guaranteed present here.
+              issued: !rec?.revoked,
+              active: !!rec?.active, latest: !!rec?.latest, edited: !!rec?.edited,
+              createdAt: rec?.createdAt || rec?.credential?.issuanceDate || null,
+              updatedAt: rec?.updatedAt || null,
+            }))
+            .catch(() => null)
+        )
+      );
+      const certs = fetched.filter(Boolean);
+
       const byId = {};
+      const usedPublicIds = new Set();
       records.forEach((record) => {
         // Confirmed via the live batch-details response: each user is keyed
         // by `user_id`, not `id` — check all three since the shape can vary.
         const recordId = getRecordKey(record);
+        if (!recordId) return;
         const recordEmail = record?.email?.trim().toLowerCase();
         const recordName = getRecordTitle(record)?.trim().toLowerCase();
-        const match = allRecords.find((item) => {
-          const recipients = (item?.recipients || []).map((v) => v?.trim().toLowerCase()).filter(Boolean);
-          const itemTitle = item?.title?.trim().toLowerCase();
-          return (recordEmail && recipients.includes(recordEmail)) || (recordName && itemTitle === recordName);
-        });
-        if (match?.publicId && recordId) {
-          byId[recordId] = {
-            id: match.id, publicId: match.publicId, title: match.title,
-            recipients: Array.isArray(match.recipients) ? match.recipients : [],
-            anchorTime: match.anchorTime || null, revoked: !!match.revoked,
-            issued: !!match.anchorTime && !match.revoked,
-            active: !!match.active, latest: !!match.latest, edited: !!match.edited,
-            createdAt: match.createdAt || null, updatedAt: match.updatedAt || null,
-          };
+        // batchType (this batch's own real batch_type) decides the branch —
+        // Product batch users carry no product_name/category_name field at
+        // all (their name is under full_name, exactly like a Human record),
+        // so per-record sniffing alone silently misroutes every product
+        // here into the email/title branch, where it can never match.
+        const match = isProductRecord(record, batchType)
+          ? certs.find((c) => c.productId && c.productId === recordId && !usedPublicIds.has(c.publicId))
+          : certs.find((c) => {
+              const recipients = c.recipients.map((v) => v?.trim().toLowerCase()).filter(Boolean);
+              const title = c.title?.trim().toLowerCase();
+              return !usedPublicIds.has(c.publicId) &&
+                ((recordEmail && recipients.includes(recordEmail)) || (recordName && title === recordName));
+            });
+        if (match) {
+          usedPublicIds.add(match.publicId);
+          byId[recordId] = match;
         }
       });
       setSdcByRecordId(byId);
     } catch (err) {
       setSdcByRecordId({});
-      toast.error(getApiError(err, 'Failed to fetch SDC records'));
+      toast.error(getApiError(err, 'Failed to fetch certificates'));
     } finally {
       setCertsLoading(false);
     }
-  }, [user?.dhiwaysDetails]);
+  }, [batchId]);
 
   useEffect(() => {
     if (!batchId) return;
     setLoading(true);
     setDetail(null);
     setSdcByRecordId({});
+    setSdcStatus(null);
     verificationAPI.getBatchDetails(batchId)
       .then(({ data }) => {
         const normalised = normaliseBatch(data);
         setDetail(normalised);
-        const sdcInfo = normalised?.verificationProgress?.sdc;
-        if (sdcInfo?.status) {
-          refreshCertificates(normalised.records, sdcInfo, normalised.batchType);
+        // Always check — GET /sdc/batches/{batch_id}/status is cheap and
+        // safely returns an empty certificate_ids for a batch with nothing
+        // generated/shared yet, so there's no need to gate this behind a
+        // separate local flag that may not even be present for this batch.
+        if (normalised.records.length > 0) {
+          refreshCertificates(normalised.records, normalised.batchType);
         }
       })
       .catch((err) => toast.error(getApiError(err, 'Failed to load batch details')))
@@ -375,6 +432,14 @@ const BatchDetailModal = ({ batchId, batchName, onClose }) => {
   const meta = detail?.statusMeta || BATCH_STATUS_META.pending;
   const StatusIcon = meta.icon;
   const sdc = detail?.verificationProgress?.sdc || null;
+  // Whether to show the SDC/certificate section at all — prefer the real
+  // status-endpoint response (sdcStatus, from GET /sdc/batches/{id}/status)
+  // since verification_progress.sdc isn't reliably present on this org-facing
+  // batch-detail response; fall back to it only for cosmetic fields (a
+  // generation timestamp) the status endpoint doesn't carry.
+  const hasSdcActivity = !!(sdc || sdcStatus);
+  const sdcStatusText = sdcStatus?.sdc_status || sdc?.status || null;
+  const sdcIssuedCount = sdcStatus?.ready ?? sdc?.issued_count ?? null;
   const pct = detail && detail.total > 0
     ? Math.round(((detail.verified + detail.failed) / detail.total) * 100)
     : 0;
@@ -423,11 +488,11 @@ const BatchDetailModal = ({ batchId, batchName, onClose }) => {
                       {detail.description}
                     </p>
                   )}
-                  {sdc && (
+                  {hasSdcActivity && (
                     <p className="mt-2 font-inter text-[11px] text-gray-400">
-                      {sdcStatusLabel(sdc.status)}
-                      {sdc.created_at ? ` · ${sdc.created_at}` : ''}
-                      {sdc.issued_count ? ` · ${sdc.issued_count} issued` : ''}
+                      {sdcStatusLabel(sdcStatusText)}
+                      {sdc?.created_at ? ` · ${sdc.created_at}` : ''}
+                      {sdcIssuedCount ? ` · ${sdcIssuedCount} issued` : ''}
                     </p>
                   )}
                 </div>
@@ -437,22 +502,20 @@ const BatchDetailModal = ({ batchId, batchName, onClose }) => {
                   <div className={`h-1.5 w-1.5 rounded-full ${meta.dot}`} />
                   <span className="font-inter text-xs font-semibold">{meta.label}</span>
                 </div>
-                {sdc && (
+                {hasSdcActivity && (
                   <div className="flex items-center gap-1.5 rounded-xl border border-blue-100 bg-blue-50 px-3 py-2 text-brand-blue">
                     <Award size={12} />
-                    <span className="font-inter text-xs font-semibold">{sdcStatusLabel(sdc.status)}</span>
+                    <span className="font-inter text-xs font-semibold">{sdcStatusLabel(sdcStatusText)}</span>
                   </div>
                 )}
-                {sdc && (
-                  <button
-                    type="button"
-                    onClick={() => refreshCertificates(detail.records, detail.verificationProgress?.sdc, detail.batchType)}
-                    disabled={certsLoading}
-                    className="flex items-center gap-1 font-inter text-[11px] font-semibold text-brand-blue hover:opacity-70 disabled:opacity-50"
-                  >
-                    <RefreshCw size={11} className={certsLoading ? 'animate-spin' : ''} /> Refresh Certificates
-                  </button>
-                )}
+                <button
+                  type="button"
+                  onClick={() => refreshCertificates(detail.records, detail.batchType)}
+                  disabled={certsLoading}
+                  className="flex items-center gap-1 font-inter text-[11px] font-semibold text-brand-blue hover:opacity-70 disabled:opacity-50"
+                >
+                  <RefreshCw size={11} className={certsLoading ? 'animate-spin' : ''} /> Refresh Certificates
+                </button>
               </div>
             </div>
           </div>
@@ -677,7 +740,7 @@ const BatchDetailModal = ({ batchId, batchName, onClose }) => {
                   </thead>
                   <tbody>
                     {detail.records.map((record, i) => {
-                      const Icon = isProductRecord(record) ? Package : User;
+                      const Icon = isProductRecord(record, detail.batchType) ? Package : User;
                       const sb   = recordStatusBadge(record.verification_status);
                       const sdcMatch = sdcByRecordId[getRecordKey(record)] || null;
                       return (
@@ -698,7 +761,7 @@ const BatchDetailModal = ({ batchId, batchName, onClose }) => {
                                   {getRecordTitle(record)}
                                 </p>
                                 <p className="truncate font-inter text-xs text-gray-400">
-                                  {getRecordSubtitle(record)}
+                                  {getRecordSubtitle(record, detail.batchType)}
                                 </p>
                               </div>
                             </div>
