@@ -744,13 +744,15 @@ export const verificationAPI = {
 
   // reservedSerialNos: the ordered reserved_serial_nos array from
   // reserveWarrantySerials, sent back verbatim — sets use_reserved_serials=true
-  // whenever any are supplied, per the current backend contract. Warranty
-  // documents are NOT attached here at all — they're strictly a post-batch,
-  // per-batch_user_id concern (see uploadWarrantyDocument), independent of
-  // this call and of the reserved serial numbers.
-  // verificationTypes: ids selected on the (now shared) Verifications step —
-  // sent the same way as bulkUploadProducts's verification_types field.
-  uploadWarrantyExcel: (file, batchName, description = '', reservedSerialNos = [], verificationTypes = [], maybeProgress) => {
+  // whenever any are supplied, per the current backend contract.
+  // documents: [{ file, serialNo, label }] — pre-batch documents staged on
+  // the Template step, one entry per attached file (a record may contribute
+  // 0, 1, or 2 entries). Sent as three parallel repeated-key arrays
+  // (doc_files / doc_serial_nos / doc_labels), index-aligned — never by
+  // array position of the Excel rows themselves, since coverage is sparse.
+  // The backend uses each entry's serialNo (one of reservedSerialNos) to
+  // attach it to the right BatchUser once created.
+  uploadWarrantyExcel: (file, batchName, description = '', reservedSerialNos = [], documents = [], maybeProgress) => {
     const formData = new FormData();
     const { onProgress } = normalizeUploadArgs(undefined, maybeProgress);
 
@@ -762,8 +764,12 @@ export const verificationAPI = {
       formData.append('reserved_serial_nos', reservedSerialNos.join(','));
       formData.append('use_reserved_serials', 'true');
     }
-    if (Array.isArray(verificationTypes) && verificationTypes.length > 0) {
-      formData.append('verification_types', verificationTypes.join(','));
+    if (Array.isArray(documents) && documents.length > 0) {
+      documents.forEach(({ file: docFile, serialNo, label }) => {
+        formData.append('doc_files', docFile);
+        formData.append('doc_serial_nos', serialNo);
+        formData.append('doc_labels', label);
+      });
     }
 
     return verificationApi.post('/verification/products/warranty-upload', formData, {

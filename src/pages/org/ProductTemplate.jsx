@@ -8,13 +8,16 @@ import { Card } from '@/components/ui/Card';
 import { Modal } from '@/components/ui/Modal';
 import { StepWizard } from '@/components/ui/StepWizard';
 import { FileUpload } from '@/components/ui/FileUpload';
-import { AlertTriangle, ArrowRight, CheckCircle, Download, FileText, Plus, RefreshCw, Upload, X } from 'lucide-react';
+import { ArrowRight, CheckCircle, Download, FileText, Plus, RefreshCw, Upload, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useApp } from '@/context/AppContext';
 import {
   PRODUCT_VERIFICATION_STEPS,
   PRODUCT_VERIFICATION_STEP_META,
   PRODUCT_VERIFICATION_STEP_ROUTES,
+  WARRANTY_VERIFICATION_STEPS,
+  WARRANTY_VERIFICATION_STEP_META,
+  WARRANTY_VERIFICATION_STEP_ROUTES,
   WARRANTY_SERVICE_HEADERS,
   VERIFICATION_SERVICE_HEADERS,
   VERIFICATION_REQUIRED_HEADERS,
@@ -34,13 +37,15 @@ const BASE_FIELD = { key: 'product_name', label: 'Product Name', fixed: true };
 const downloadLocalFallback = (headers, fileName = 'product-template') => {
   const buildExample = (h) => {
     const k = h.toLowerCase();
+    // third+party+qr1/qr2 must always download blank — backend-populated
+    // only, via the verifier-report qr_slot workflow, never filled by hand.
+    if (k.includes('qr')) return '';
     if (k.includes('customer')) return 'Aniket Jha';
     if (k.includes('sku')) return 'SKU-1001';
     if (k.includes('product')) return 'Example Product';
     if (k === 'category') return 'Electronics';
     if (k.includes('model')) return 'Model A';
     if (k.includes('brand')) return 'Acme Corp';
-    if (k.includes('qr')) return 'https://example.com/qr/CODE123';
     if (k.includes('purchase_date')) return '2026-05-16';
     if (k.includes('expiration_date')) return '2027-05-16';
     if (k.includes('invoice')) return 'INV-001';
@@ -53,6 +58,52 @@ const downloadLocalFallback = (headers, fileName = 'product-template') => {
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Products');
   XLSX.writeFile(wb, `${fileName}.xlsx`);
+};
+
+// One local (in-memory only) upload slot for a single warranty record's
+// Warranty Report or Product Details file — nothing is sent anywhere until
+// the final warranty-upload submit; this only stages a File object.
+const WarrantyDocSlot = ({ label, file, onChange, onClear }) => {
+  const inputRef = useRef(null);
+  return (
+    <div className="flex items-center justify-between gap-2 rounded-lg border border-gray-200 bg-gray-50/60 px-3 py-2">
+      <input
+        type="file"
+        accept=".pdf,.png,.jpg,.jpeg"
+        className="hidden"
+        ref={inputRef}
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          e.target.value = '';
+          if (f) onChange(f);
+        }}
+      />
+      <div className="min-w-0 flex-1">
+        <p className="font-inter text-[11px] font-semibold text-gray-500">{label}</p>
+        <p className={`truncate font-inter text-[11px] ${file ? 'text-brand-dark' : 'text-gray-300'}`}>
+          {file ? file.name : 'Not attached'}
+        </p>
+      </div>
+      {file ? (
+        <button
+          type="button"
+          onClick={onClear}
+          title="Remove"
+          className="shrink-0 text-gray-400 transition-colors hover:text-red-500"
+        >
+          <X size={13} />
+        </button>
+      ) : (
+        <button
+          type="button"
+          onClick={() => inputRef.current?.click()}
+          className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-dashed border-gray-300 px-2 py-1 font-inter text-[11px] font-semibold text-gray-500 transition-colors hover:border-brand-blue hover:text-brand-blue"
+        >
+          <Upload size={11} /> Attach
+        </button>
+      )}
+    </div>
+  );
 };
 
 export const ProductTemplate = () => {
@@ -88,10 +139,12 @@ export const ProductTemplate = () => {
   // reserves a globally-unique TMZ-W-XXXXXXXX serial per valid row from a
   // central registry, before any Batch/BatchUser exists. Response:
   // { total_reserved, reserved_serial_nos }. These are sent back verbatim,
-  // in the same order, to /warranty-upload — never reordered, split, or
-  // generated client-side. Warranty documents are NOT attached here at all
-  // (they're a strictly post-batch, per-batch_user_id concern — see Batch
-  // Status / ProductCostBreakdown.jsx's "Warranty Batch Created" panel).
+  // in the same order, to /warranty-upload as reserved_serial_nos — never
+  // reordered, split, or generated client-side. This is purely an internal
+  // workflow detail: the reservation call and its TMZ-W serials are NEVER
+  // shown to the org user (see excelRows/docSelections below) — the user
+  // only ever sees their own Excel's record names and a document-upload UI
+  // per record.
   const [warrantyReservation, setWarrantyReservation] = useState(null);
   const [warrantyReserving, setWarrantyReserving] = useState(false);
 
@@ -101,7 +154,7 @@ export const ProductTemplate = () => {
     setWarrantyReservation(null);
     verificationAPI.reserveWarrantySerials(file)
       .then(({ data }) => setWarrantyReservation(data))
-      .catch((err) => toast.error(getApiError(err, 'Failed to reserve warranty serial numbers')))
+      .catch((err) => toast.error(getApiError(err, 'Failed to process the uploaded file')))
       .finally(() => setWarrantyReserving(false));
   }, []);
 
@@ -113,6 +166,56 @@ export const ProductTemplate = () => {
     if (!excelFile) { setWarrantyReservation(null); return; }
     runWarrantyReservation(excelFile);
   }, [isWarranty, excelFile, runWarrantyReservation]);
+
+  // Excel record labels (customer_name per row), parsed client-side purely
+  // for display — index-aligned with warrantyReservation.reserved_serial_nos
+  // (row i's label pairs with reserved_serial_nos[i]), same non-empty-row
+  // filter used everywhere else on this page for warranty rows. The backend
+  // never returns names alongside reserved serials, so this ordering
+  // assumption is the only link available between a record and its serial.
+  const [excelRows, setExcelRows] = useState([]);
+
+  useEffect(() => {
+    if (!isWarranty || !excelFile) { setExcelRows([]); return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const buf = await excelFile.arrayBuffer();
+        const wb = XLSX.read(buf, { type: 'array' });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json(ws, { header: 1 });
+        const headers = (rows[0] || []).map((h) => sanitizeKey(h));
+        const nameIdx = headers.indexOf('customer_name');
+        const dataRows = rows.slice(1).filter((row) => Array.isArray(row) && row.some((cell) => String(cell ?? '').trim() !== ''));
+        const labels = dataRows.map((row, i) => {
+          const name = nameIdx >= 0 ? String(row[nameIdx] ?? '').trim() : '';
+          return name || `Record ${i + 1}`;
+        });
+        if (!cancelled) setExcelRows(labels);
+      } catch {
+        if (!cancelled) setExcelRows([]);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [isWarranty, excelFile]);
+
+  // Per-record document staging — { [rowIndex]: { warrantyReport: File|null,
+  // productDetails: File|null } }. Files stay in memory only; nothing is
+  // uploaded until the final POST /products/warranty-upload call in
+  // ProductCostBreakdown.jsx, which maps each staged file to its row's
+  // reserved serial number via doc_files/doc_serial_nos/doc_labels.
+  const [docSelections, setDocSelections] = useState({});
+
+  useEffect(() => {
+    if (!excelFile) setDocSelections({});
+  }, [excelFile]);
+
+  const setDocFile = (rowIndex, slot, file) => {
+    setDocSelections((prev) => ({
+      ...prev,
+      [rowIndex]: { ...prev[rowIndex], [slot]: file },
+    }));
+  };
 
   // Pulls the real column list out of the backend's own warranty-template
   // .xlsx (same file "Download Template" fetches) instead of trusting the
@@ -196,10 +299,10 @@ export const ProductTemplate = () => {
     if (!excelFile) { toast.error('Please upload the completed Excel file'); return; }
 
     if (isWarranty) {
-      if (warrantyReserving) { toast.error('Still reserving serial numbers — please wait a moment'); return; }
-      if (!warrantyReservation) { toast.error('Serial number reservation failed — re-select the Excel file to retry'); return; }
+      if (warrantyReserving) { toast.error('Still processing the uploaded file — please wait a moment'); return; }
+      if (!warrantyReservation) { toast.error('Failed to process the uploaded file — re-select it to retry'); return; }
       if (!warrantyReservation.total_reserved || warrantyReservation.total_reserved <= 0) {
-        toast.error('No valid rows were reserved from this file');
+        toast.error('No valid rows were found in this file');
         return;
       }
     }
@@ -213,12 +316,15 @@ export const ProductTemplate = () => {
 
       if (!isWarranty) {
         // product_name and sku_no are required for the normal Product flow —
-        // the rest of VERIFICATION_SERVICE_HEADERS (model_no, brand) are
-        // optional and must never block Continue. third+party+qr1/qr2 are
-        // intentionally absent from this list: neither ever comes from the
-        // sheet — both are populated exclusively by the backend's own
-        // qr_slot verifier-report workflow, assigned automatically by
-        // request-creation order once manual verifications are sent.
+        // the rest of VERIFICATION_SERVICE_HEADERS (model_no, brand, and the
+        // two QR columns) are optional and must never block Continue.
+        // third+party+qr1/qr2 are only ever downloaded blank for column-
+        // structure parity with the backend template — even if present (or
+        // manually filled) in the uploaded sheet, they're never read as
+        // authoritative here. Both are populated exclusively by the
+        // backend's own qr_slot verifier-report workflow, assigned
+        // automatically by request-creation order once manual verifications
+        // are sent.
         const missingHeaders = VERIFICATION_REQUIRED_HEADERS.filter((h) => !uploadedHeaders.includes(h));
         if (missingHeaders.length > 0) {
           toast.error(`Missing required columns: ${missingHeaders.join(', ')}`);
@@ -235,6 +341,22 @@ export const ProductTemplate = () => {
         : rows.slice(1).filter((row) => Array.isArray(row) && row.some((cell) => String(cell ?? '').trim() !== '')).length;
       if (recordCount <= 0) { toast.error('The uploaded file has no data rows'); return; }
 
+      // Flatten per-row doc selections into the doc_files/doc_serial_nos/
+      // doc_labels triplet the final warranty-upload call needs — mapping
+      // by row index into reserved_serial_nos, never by array position of
+      // the documents themselves (a row may contribute 0, 1, or 2 files).
+      const documents = isWarranty
+        ? excelRows.flatMap((_, i) => {
+            const serial = warrantyReservation.reserved_serial_nos?.[i];
+            const sel = docSelections[i];
+            if (!serial || !sel) return [];
+            const out = [];
+            if (sel.warrantyReport) out.push({ file: sel.warrantyReport, serialNo: serial, label: 'Warranty Report' });
+            if (sel.productDetails) out.push({ file: sel.productDetails, serialNo: serial, label: 'Product Details' });
+            return out;
+          })
+        : [];
+
       setProductBatchData({
         file: excelFile,
         batchName: batchNameValue,
@@ -246,7 +368,7 @@ export const ProductTemplate = () => {
         uploadResponse: null,
         // Sent back verbatim to POST /products/warranty-upload as
         // reserved_serial_nos — never reordered or regenerated.
-        ...(isWarranty ? { reservedSerialNos: warrantyReservation.reserved_serial_nos || [] } : {}),
+        ...(isWarranty ? { reservedSerialNos: warrantyReservation.reserved_serial_nos || [], documents } : {}),
       });
       navigate('/org/product/costing');
     } catch {
@@ -258,7 +380,7 @@ export const ProductTemplate = () => {
     { label: 'Batch name set',      done: Boolean(batchNameValue.trim()) },
     { label: 'Excel file uploaded', done: Boolean(excelFile) },
     ...(isWarranty
-      ? [{ label: 'Serial numbers reserved', done: !!warrantyReservation && warrantyReservation.total_reserved > 0 }]
+      ? [{ label: 'Records processed', done: !!warrantyReservation && warrantyReservation.total_reserved > 0 }]
       : []),
   ];
 
@@ -266,9 +388,9 @@ export const ProductTemplate = () => {
     <AuthLayout title="Upload Product Data">
       <div className="w-full mx-auto lg:max-w-none">
         <StepWizard
-          steps={PRODUCT_VERIFICATION_STEPS}
-          currentStep={PRODUCT_VERIFICATION_STEP_META.template.currentStep}
-          stepRoutes={PRODUCT_VERIFICATION_STEP_ROUTES}
+          steps={isWarranty ? WARRANTY_VERIFICATION_STEPS : PRODUCT_VERIFICATION_STEPS}
+          currentStep={isWarranty ? WARRANTY_VERIFICATION_STEP_META.template.currentStep : PRODUCT_VERIFICATION_STEP_META.template.currentStep}
+          stepRoutes={isWarranty ? WARRANTY_VERIFICATION_STEP_ROUTES : PRODUCT_VERIFICATION_STEP_ROUTES}
         />
 
         <PageHeader
@@ -371,12 +493,14 @@ export const ProductTemplate = () => {
 
               </div>{/* end LEFT — Upload Data File */}
 
-              {/* ── RIGHT — Warranty: pre-batch serial reservation status only
-                  (documents are strictly post-batch, per batch_user_id — see
-                  Batch Status). Product: no per-row document UI at all —
-                  QR1/QR2 come exclusively from the verifier-report workflow,
-                  and internal documents (if ever needed) are handled by a
-                  separate, standalone flow outside this step entirely. ── */}
+              {/* ── RIGHT — Warranty: per-record document upload, shown right
+                  beside the Excel records themselves. Reservation of the
+                  underlying TMZ-W serial numbers still happens (hidden) so
+                  each staged file can be mapped to the right row at final
+                  submit — but neither the reservation step nor any serial
+                  number is ever shown to the org user. Product: no per-row
+                  document UI at all — QR1/QR2 come exclusively from the
+                  verifier-report workflow. ── */}
               {isWarranty ? (
                 <div className="flex min-w-0 flex-1 flex-col bg-gray-50">
                   <div className="flex min-w-0 items-center gap-2.5 border-b border-gray-200 bg-white px-6 py-4">
@@ -384,8 +508,8 @@ export const ProductTemplate = () => {
                       <FileText size={13} className={warrantyReservation ? 'text-green-600' : 'text-brand-blue'} />
                     </div>
                     <div className="min-w-0">
-                      <p className="truncate font-inter text-sm font-semibold text-brand-dark">Warranty Serial Reservation</p>
-                      <p className="truncate font-inter text-[11px] text-gray-500">Each row gets a unique TMZ-W serial before the batch is created</p>
+                      <p className="truncate font-inter text-sm font-semibold text-brand-dark">Warranty Document Upload</p>
+                      <p className="truncate font-inter text-[11px] text-gray-500">Attach a Warranty Report and/or Product Details for each record</p>
                     </div>
                   </div>
 
@@ -396,48 +520,51 @@ export const ProductTemplate = () => {
                           <Upload size={17} className="text-gray-400" />
                         </div>
                         <p className="max-w-xs font-inter text-xs text-gray-500">
-                          Upload your warranty Excel on the left — each row will get a unique reserved serial number before the batch is created.
+                          Upload your warranty Excel on the left to enable document upload for each record.
                         </p>
                       </div>
-                    ) : warrantyReserving ? (
+                    ) : excelRows.length === 0 ? (
                       <div className="flex flex-1 items-center justify-center gap-2 text-brand-blue">
                         <RefreshCw size={18} className="animate-spin" />
-                        <span className="font-inter text-sm">Reserving serial numbers…</span>
-                      </div>
-                    ) : !warrantyReservation ? (
-                      <div className="flex flex-1 flex-col items-center justify-center gap-3 text-center">
-                        <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-red-200 bg-red-50">
-                          <AlertTriangle size={17} className="text-red-500" />
-                        </div>
-                        <p className="max-w-xs font-inter text-xs text-gray-500">Couldn't reserve serial numbers for this file.</p>
-                        <button
-                          type="button"
-                          onClick={() => runWarrantyReservation(excelFile)}
-                          className="inline-flex items-center gap-1.5 rounded-xl border border-brand-blue/30 bg-brand-blue/10 px-3 py-1.5 font-inter text-xs font-semibold text-brand-blue transition-colors hover:bg-brand-blue hover:text-white"
-                        >
-                          <RefreshCw size={12} /> Retry
-                        </button>
+                        <span className="font-inter text-sm">Loading records…</span>
                       </div>
                     ) : (
                       <>
-                        <div className="mb-4 rounded-xl border border-green-200 bg-green-50 px-4 py-3">
-                          <p className="font-inter text-sm font-semibold text-green-700">
-                            {warrantyReservation.total_reserved} serial number{warrantyReservation.total_reserved === 1 ? '' : 's'} reserved
-                          </p>
-                          <p className="mt-0.5 font-inter text-[11px] text-green-600">Ready to create the batch — click Continue below.</p>
-                        </div>
-                        <div className="max-h-64 flex-1 overflow-y-auto rounded-xl border border-gray-200 bg-white">
-                          {(warrantyReservation.reserved_serial_nos || []).map((serial, i) => (
-                            <div key={serial || i} className="flex items-center justify-between gap-2 border-b border-gray-100 px-4 py-2.5 last:border-0">
-                              <span className="font-inter text-[11px] text-gray-400">Row {i + 1}</span>
-                              <span className="font-mono text-[11px] font-semibold text-brand-blue">{serial}</span>
-                            </div>
-                          ))}
-                        </div>
-                        <div className="mt-4 rounded-xl border border-blue-100 bg-blue-50/60 px-4 py-3">
-                          <p className="font-inter text-[11px] text-brand-blue">
-                            Warranty Report and Product Details documents are attached per person after the batch is created — open it from <span className="font-semibold">Batch Status</span>.
-                          </p>
+                        {!warrantyReserving && !warrantyReservation && (
+                          <div className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3">
+                            <p className="font-inter text-xs text-red-600">Couldn't process this file — documents can't be submitted yet.</p>
+                            <button
+                              type="button"
+                              onClick={() => runWarrantyReservation(excelFile)}
+                              className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-red-300 bg-white px-3 py-1.5 font-inter text-xs font-semibold text-red-600 transition-colors hover:bg-red-100"
+                            >
+                              <RefreshCw size={12} /> Retry
+                            </button>
+                          </div>
+                        )}
+                        <div className="space-y-3">
+                          {excelRows.map((label, i) => {
+                            const sel = docSelections[i] || {};
+                            return (
+                              <div key={i} className="rounded-xl border border-gray-200 bg-white p-3">
+                                <p className="mb-2 truncate font-inter text-xs font-semibold text-brand-dark">{label}</p>
+                                <div className="space-y-2">
+                                  <WarrantyDocSlot
+                                    label="Warranty Report"
+                                    file={sel.warrantyReport}
+                                    onChange={(f) => setDocFile(i, 'warrantyReport', f)}
+                                    onClear={() => setDocFile(i, 'warrantyReport', null)}
+                                  />
+                                  <WarrantyDocSlot
+                                    label="Product Details"
+                                    file={sel.productDetails}
+                                    onChange={(f) => setDocFile(i, 'productDetails', f)}
+                                    onClear={() => setDocFile(i, 'productDetails', null)}
+                                  />
+                                </div>
+                              </div>
+                            );
+                          })}
                         </div>
                       </>
                     )}
@@ -507,6 +634,10 @@ export const ProductTemplate = () => {
                   {isWarranty ? (
                     <span className="rounded-full bg-brand-blue/10 px-2.5 py-1 font-inter text-[10px] font-semibold uppercase text-brand-blue">
                       Fixed
+                    </span>
+                  ) : key.includes('qr') ? (
+                    <span className="rounded-full bg-amber-50 px-2.5 py-1 font-inter text-[10px] font-semibold uppercase text-amber-600">
+                      Leave Empty
                     </span>
                   ) : VERIFICATION_REQUIRED_HEADERS.includes(key) && (
                     <span className="rounded-full bg-red-50 px-2.5 py-1 font-inter text-[10px] font-semibold uppercase text-red-500">

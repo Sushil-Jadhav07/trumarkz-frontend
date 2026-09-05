@@ -25,6 +25,35 @@ export const PRODUCT_VERIFICATION_STEP_META = {
   batch:         { currentStep: 5, label: 'Step 6 of 6', progress: 100 },
 };
 
+// Warranty batches skip "Verifications" entirely (no verification-type
+// selection concept for warranty — see SelectProductService's routing).
+// StepWizard marks every step before `currentStep` as completed, so reusing
+// the 6-step product arrays here would wrongly show "Verifications" with a
+// checkmark despite it never being visited. This 5-step variant drops it.
+export const WARRANTY_VERIFICATION_STEPS = [
+  'Sector',
+  'Service',
+  'Template',
+  'Costing',
+  'Batch',
+];
+
+export const WARRANTY_VERIFICATION_STEP_ROUTES = [
+  '/org/product/sector',
+  '/org/product/service',
+  '/org/product/template',
+  '/org/product/costing',
+  '/org/batch-status',
+];
+
+export const WARRANTY_VERIFICATION_STEP_META = {
+  sector:   { currentStep: 0, label: 'Step 1 of 5', progress: 20 },
+  service:  { currentStep: 1, label: 'Step 2 of 5', progress: 40 },
+  template: { currentStep: 2, label: 'Step 3 of 5', progress: 60 },
+  costing:  { currentStep: 3, label: 'Step 4 of 5', progress: 80 },
+  batch:    { currentStep: 4, label: 'Step 5 of 5', progress: 100 },
+};
+
 export const PRODUCT_SERVICE_OPTIONS = [
   {
     id: 'verification',
@@ -95,16 +124,23 @@ export const WARRANTY_SERVICE_HEADERS = [
 // Canonical column set for the normal Product Verification flow. `sku_no` is
 // mandatory alongside product_name (it's the collision-proof key the backend
 // uses internally; the frontend no longer attaches any document during this
-// upload at all). BOTH third+party+qr1 and third+party+qr2 are excluded —
-// the backend explicitly ignores them if present in the sheet. QR1/QR2 are
-// populated exclusively by the backend's own qr_slot verifier-report
-// workflow (assigned automatically by request-creation order — the frontend
-// must never select or send a qr_slot).
+// upload at all). third+party+qr1 and third+party+qr2 are included here so
+// the downloaded template's column structure matches the backend's — but
+// they must always download with EMPTY sample values (see downloadLocalFallback
+// in ProductTemplate.jsx) and are never in VERIFICATION_REQUIRED_HEADERS.
+// The org user must never fill these in manually; QR1/QR2 are populated
+// exclusively by the backend's own qr_slot verifier-report workflow
+// (assigned automatically by request-creation order). Even if a user types
+// something into these columns before uploading, the frontend still never
+// treats it as authoritative — it just posts the whole file and lets the
+// backend's own ingestion decide what to trust, same as always.
 export const VERIFICATION_SERVICE_HEADERS = [
   'product_name',
   'sku_no',
   'model_no',
   'brand',
+  'third+party+qr1',
+  'third+party+qr2',
 ];
 
 export const VERIFICATION_REQUIRED_HEADERS = ['product_name', 'sku_no'];

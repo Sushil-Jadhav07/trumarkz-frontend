@@ -13,6 +13,9 @@ import {
   PRODUCT_VERIFICATION_STEPS,
   PRODUCT_VERIFICATION_STEP_META,
   PRODUCT_VERIFICATION_STEP_ROUTES,
+  WARRANTY_VERIFICATION_STEPS,
+  WARRANTY_VERIFICATION_STEP_META,
+  WARRANTY_VERIFICATION_STEP_ROUTES,
   PRODUCT_CERTIFICATE_TEMPLATES,
 } from '@/data/productVerificationFlow';
 import { verificationAPI, getApiError } from '@/services/api';
@@ -141,19 +144,20 @@ export const ProductCostBreakdown = () => {
     setSubmitting(true);
     try {
       if (isWarranty) {
-        // Documents are never attached during Excel submission — the backend
-        // creates the Batch + BatchUsers from the sheet + the reserved
-        // serials alone (see reservedSerialNos, set by the Template step's
-        // reserveWarrantySerials call). Warranty Report / Product Details
-        // documents are uploaded afterward, per batch_user_id, from the
-        // "Warranty Batch Created" panel below or from Batch Status.
+        // Documents staged on the Template step (per record, keyed to its
+        // reserved serial number) are sent together with the Excel + the
+        // reserved serials in this single call — see
+        // productBatchData.documents, built there right after each file was
+        // attached. The backend maps each by its serial number onto the
+        // BatchUser it creates for that row.
         const reservedSerialNos = productBatchData.reservedSerialNos || [];
+        const documents = productBatchData.documents || [];
         const { data } = await verificationAPI.uploadWarrantyExcel(
           productBatchData.file,
           productBatchData.batchName.trim(),
           productBatchData.description || '',
           reservedSerialNos,
-          selectedProductVerifications,
+          documents,
         );
         setProductBatchData((current) => ({
           ...(current || {}),
@@ -213,9 +217,9 @@ export const ProductCostBreakdown = () => {
     <AuthLayout title="Product Costing">
       <div className="mx-auto w-full max-w-[1380px]">
         <StepWizard
-          steps={PRODUCT_VERIFICATION_STEPS}
-          currentStep={PRODUCT_VERIFICATION_STEP_META.costing.currentStep}
-          stepRoutes={PRODUCT_VERIFICATION_STEP_ROUTES}
+          steps={isWarranty ? WARRANTY_VERIFICATION_STEPS : PRODUCT_VERIFICATION_STEPS}
+          currentStep={isWarranty ? WARRANTY_VERIFICATION_STEP_META.costing.currentStep : PRODUCT_VERIFICATION_STEP_META.costing.currentStep}
+          stepRoutes={isWarranty ? WARRANTY_VERIFICATION_STEP_ROUTES : PRODUCT_VERIFICATION_STEP_ROUTES}
         />
 
         <section className="mt-4">

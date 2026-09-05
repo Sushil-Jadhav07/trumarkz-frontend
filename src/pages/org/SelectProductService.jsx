@@ -52,7 +52,11 @@ export const SelectProductService = () => {
       return;
     }
     toast.success(`${selectedProductService.title} selected`);
-    navigate('/org/product/verifications');
+    if (selectedProductService.id === 'warranty') {
+      navigate('/org/product/template');
+    } else {
+      navigate('/org/product/verifications');
+    }
   };
 
   return (
