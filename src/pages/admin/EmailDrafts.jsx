@@ -9,9 +9,17 @@ import { Modal } from '@/components/ui/Modal';
 import { verificationAPI, getApiError } from '@/services/api';
 import {
   Mail, Plus, Pencil, Trash2, RefreshCw, FileText,
-  ChevronDown, AlertTriangle, Save, X,
+  ChevronDown, AlertTriangle, Save, X, History, Eye, Search,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
+
+const formatSentAt = (v) => {
+  if (!v) return '—';
+  const d = new Date(v);
+  return Number.isNaN(d.getTime())
+    ? v
+    : d.toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+};
 
 // ── Type selector dropdown ─────────────────────────────────────────────────────
 const TypeSelector = ({ value, onChange, types, loading }) => {
@@ -271,8 +279,185 @@ const DraftCard = ({ draft, index, onEdit, onDelete }) => (
   </motion.div>
 );
 
+// ── Email history detail modal — full subject/body preview for one send ────────
+const HistoryDetailModal = ({ row, onClose }) => (
+  <Modal isOpen={!!row} onClose={onClose} title="Sent Email" size="lg">
+    {row && (
+      <div className="space-y-4">
+        <div className="grid grid-cols-2 gap-3 text-sm">
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-wide text-gray-400 font-inter">Organization</p>
+            <p className="font-inter text-brand-dark mt-0.5">{row.organization_name || '—'}</p>
+          </div>
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-wide text-gray-400 font-inter">Batch</p>
+            <p className="font-inter text-brand-dark mt-0.5 truncate">{row.batch_name || row.batch_id || '—'}</p>
+          </div>
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-wide text-gray-400 font-inter">Verification Type</p>
+            <p className="font-inter text-brand-dark mt-0.5">{row.verification_type_name || '—'}</p>
+          </div>
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-wide text-gray-400 font-inter">Recipient</p>
+            <p className="font-inter text-brand-dark mt-0.5">{row.recipient_email || '—'}</p>
+          </div>
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-wide text-gray-400 font-inter">Sent At</p>
+            <p className="font-inter text-brand-dark mt-0.5">{formatSentAt(row.sent_at)}</p>
+          </div>
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-wide text-gray-400 font-inter">Template Used</p>
+            <p className="font-inter text-brand-dark mt-0.5">{row.email_draft_id ? 'Saved draft' : 'Custom (no saved draft)'}</p>
+          </div>
+        </div>
+        <div className="rounded-xl border border-gray-100 p-4">
+          <p className="text-[10px] font-bold uppercase tracking-wide text-gray-400 font-inter mb-1">Subject</p>
+          <p className="font-inter text-sm text-brand-dark">{row.email_subject || '—'}</p>
+        </div>
+        <div className="rounded-xl border border-gray-100 p-4 max-h-64 overflow-y-auto">
+          <p className="text-[10px] font-bold uppercase tracking-wide text-gray-400 font-inter mb-1">Body</p>
+          <div className="font-inter text-sm text-gray-600 whitespace-pre-wrap">{row.email_body || '—'}</div>
+        </div>
+      </div>
+    )}
+  </Modal>
+);
+
+// ── Email history panel — actual send logs, distinct from the reusable draft
+// library above (GET /email-drafts/history vs GET /email-drafts/{type}).
+// Only ever shows sends that actually succeeded via SMTP — a failed dispatch
+// never appears here, by backend design, so this is a delivery-confirmed log,
+// not an attempt log. ──
+const EmailHistoryPanel = () => {
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [filters, setFilters] = useState({ organizationId: '', batchId: '', verificationType: '' });
+  const [detailRow, setDetailRow] = useState(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const { data } = await verificationAPI.getEmailHistory({
+        organizationId: filters.organizationId.trim() || undefined,
+        batchId: filters.batchId.trim() || undefined,
+        verificationType: filters.verificationType.trim() || undefined,
+        limit: 100,
+      });
+      setRows(Array.isArray(data) ? data : (data?.items || data?.history || []));
+    } catch (err) {
+      toast.error(getApiError(err, 'Failed to load email history'));
+      setRows([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [filters.organizationId, filters.batchId, filters.verificationType]);
+
+  useEffect(() => { load(); }, [load]);
+
+  return (
+    <>
+      <Card className="p-5 border border-blue-100 mb-6">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="w-8 h-8 rounded-xl bg-blue-50 flex items-center justify-center">
+            <Search size={15} className="text-brand-blue" />
+          </div>
+          <div>
+            <p className="font-semibold text-brand-dark font-inter text-sm">Filter Send History</p>
+            <p className="text-xs text-gray-400 font-inter">Superadmin can filter by organization; leave blank to see every org</p>
+          </div>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-3">
+          <Input
+            label="Organization ID"
+            placeholder="Optional — leave blank for all orgs"
+            value={filters.organizationId}
+            onChange={(e) => setFilters((f) => ({ ...f, organizationId: e.target.value }))}
+          />
+          <Input
+            label="Batch ID"
+            placeholder="Optional"
+            value={filters.batchId}
+            onChange={(e) => setFilters((f) => ({ ...f, batchId: e.target.value }))}
+          />
+          <Input
+            label="Verification Type"
+            placeholder="e.g. Address Verification"
+            value={filters.verificationType}
+            onChange={(e) => setFilters((f) => ({ ...f, verificationType: e.target.value }))}
+          />
+        </div>
+        <div className="mt-3 flex justify-end">
+          <button
+            type="button"
+            onClick={load}
+            disabled={loading}
+            className="flex items-center gap-2 px-3 py-2 rounded-xl border border-gray-200 text-sm text-gray-600 hover:bg-gray-50 transition-colors font-inter disabled:opacity-50"
+          >
+            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+            Refresh
+          </button>
+        </div>
+      </Card>
+
+      {loading ? (
+        <div className="flex items-center justify-center py-16 gap-3 text-brand-blue">
+          <RefreshCw size={20} className="animate-spin" />
+          <span className="font-inter text-sm">Loading history…</span>
+        </div>
+      ) : rows.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-16 text-center">
+          <div className="w-12 h-12 rounded-2xl bg-gray-100 flex items-center justify-center mb-3">
+            <History size={20} className="text-gray-400" />
+          </div>
+          <p className="font-sora font-semibold text-brand-dark">No sends found</p>
+          <p className="text-sm text-gray-400 font-inter mt-1">
+            Only successfully delivered emails show up here — try widening or clearing the filters above.
+          </p>
+        </div>
+      ) : (
+        <div className="rounded-2xl border border-gray-100 bg-white overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[860px]">
+              <thead className="bg-gray-50">
+                <tr>
+                  {['Organization', 'Batch', 'Verification Type', 'Recipient', 'Sent At', ''].map((h) => (
+                    <th key={h} className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase text-gray-500 font-inter">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {rows.map((row) => (
+                  <tr key={row.id} className="hover:bg-gray-50/70 transition-colors">
+                    <td className="px-4 py-3 font-inter text-sm text-brand-dark">{row.organization_name || '—'}</td>
+                    <td className="px-4 py-3 font-inter text-sm text-gray-600 truncate max-w-[220px]">{row.batch_name || row.batch_id || '—'}</td>
+                    <td className="px-4 py-3 font-inter text-sm text-gray-600">{row.verification_type_name || '—'}</td>
+                    <td className="px-4 py-3 font-inter text-sm text-gray-600">{row.recipient_email || '—'}</td>
+                    <td className="px-4 py-3 font-inter text-xs text-gray-400">{formatSentAt(row.sent_at)}</td>
+                    <td className="px-4 py-3 text-right">
+                      <button
+                        type="button"
+                        onClick={() => setDetailRow(row)}
+                        className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold font-inter text-brand-blue hover:bg-blue-50 transition-colors"
+                      >
+                        <Eye size={12} /> View
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      <HistoryDetailModal row={detailRow} onClose={() => setDetailRow(null)} />
+    </>
+  );
+};
+
 // ── Main Page ──────────────────────────────────────────────────────────────────
 export const EmailDrafts = () => {
+  const [activeTab, setActiveTab] = useState('templates'); // 'templates' | 'history'
   const [verificationTypes, setVerificationTypes] = useState([]);
   const [typesLoading, setTypesLoading] = useState(true);
   const [selectedType, setSelectedType] = useState('');
@@ -326,9 +511,9 @@ export const EmailDrafts = () => {
     <AuthLayout title="Email Drafts">
       <PageHeader
         title="Email Drafts"
-        subtitle="Manage saved email templates for manual verification requests"
+        subtitle={activeTab === 'templates' ? 'Manage saved email templates for manual verification requests' : 'Actual email dispatch logs — only successfully delivered sends appear here'}
         action={
-          selectedType && (
+          activeTab === 'templates' && selectedType && (
             <div className="flex items-center gap-2">
               <Button
                 variant="primary"
@@ -352,6 +537,32 @@ export const EmailDrafts = () => {
         }
       />
 
+      {/* Templates vs Send History — two distinct data sources: the reusable
+          draft library (email_drafts) vs actual dispatch logs
+          (manual_verification_requests). Keeping them as tabs on one page
+          mirrors how closely related they are without conflating them. */}
+      <div className="mb-6 flex items-center gap-1 rounded-xl border border-gray-100 bg-gray-50 p-1 w-fit">
+        {[
+          { key: 'templates', label: 'Templates', icon: FileText },
+          { key: 'history', label: 'Send History', icon: History },
+        ].map((tab) => (
+          <button
+            key={tab.key}
+            type="button"
+            onClick={() => setActiveTab(tab.key)}
+            className={`flex items-center gap-1.5 rounded-lg px-3.5 py-2 font-inter text-sm font-medium transition-colors ${
+              activeTab === tab.key ? 'bg-white text-brand-blue shadow-sm' : 'text-gray-500 hover:text-brand-dark'
+            }`}
+          >
+            <tab.icon size={14} /> {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {activeTab === 'history' ? (
+        <EmailHistoryPanel />
+      ) : (
+      <>
       {/* Verification type selector */}
       <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2 }}>
         <Card className="p-5 border border-blue-100 mb-6">
@@ -429,6 +640,8 @@ export const EmailDrafts = () => {
           </motion.div>
         )}
       </AnimatePresence>
+      </>
+      )}
 
       {/* Modals */}
       <DraftModal

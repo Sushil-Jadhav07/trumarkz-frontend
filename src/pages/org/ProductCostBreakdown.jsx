@@ -141,15 +141,19 @@ export const ProductCostBreakdown = () => {
     setSubmitting(true);
     try {
       if (isWarranty) {
-        // Warranty no longer attaches documents by name during Excel
-        // submission — the backend creates the Batch + BatchUsers from the
-        // sheet alone, and documents are uploaded afterward per
-        // batch_user_id (see the successful_users handling below). Do not
-        // send doc_product_names / doc_labels / doc_files here.
+        // Documents are never attached during Excel submission — the backend
+        // creates the Batch + BatchUsers from the sheet + the reserved
+        // serials alone (see reservedSerialNos, set by the Template step's
+        // reserveWarrantySerials call). Warranty Report / Product Details
+        // documents are uploaded afterward, per batch_user_id, from the
+        // "Warranty Batch Created" panel below or from Batch Status.
+        const reservedSerialNos = productBatchData.reservedSerialNos || [];
         const { data } = await verificationAPI.uploadWarrantyExcel(
           productBatchData.file,
           productBatchData.batchName.trim(),
           productBatchData.description || '',
+          reservedSerialNos,
+          selectedProductVerifications,
         );
         setProductBatchData((current) => ({
           ...(current || {}),
@@ -173,15 +177,10 @@ export const ProductCostBreakdown = () => {
         return;
       }
 
-      // sku_no is now the mandatory, collision-proof key the backend uses to
-      // attach a document to the right product before any BatchUser exists
-      // (see PART 5 of the SKU/document-association architecture) — every
-      // entry from the Template step's picker already carries one alongside
-      // productName, so require both here rather than falling back to a
-      // name-only match the backend itself now refuses as ambiguous.
-      const validDocs = (productBatchData.docEntries || []).filter(
-        (e) => e.productName?.trim() && e.sku?.trim() && e.label && e.file
-      );
+      // No document attachment here at all — Product Excel upload no longer
+      // supports row-level documents. QR1/QR2 come exclusively from the
+      // verifier-report workflow (backend-assigned qr_slot); any internal-
+      // only product document goes through a separate, standalone flow.
       const { data } = await verificationAPI.bulkUploadProducts(
         productBatchData.file,
         productBatchData.batchName.trim(),
@@ -191,9 +190,6 @@ export const ProductCostBreakdown = () => {
           verificationTypes: selectedProductVerifications,
           credentialVisibility,
           templateId: activeTemplate,
-          docSkuNos: validDocs.map((e) => e.sku.trim()),
-          docLabels: validDocs.map((e) => e.label),
-          docFiles:  validDocs.map((e) => e.file),
         }
       );
 
@@ -254,8 +250,8 @@ export const ProductCostBreakdown = () => {
               <div>
                 <h3 className="font-sora text-lg font-semibold text-slate-950">Warranty Batch Created</h3>
                 <p className="font-inter text-xs text-slate-500">
-                  {warrantyUpload.users.length} {warrantyUpload.users.length === 1 ? 'record' : 'records'} — attach a Warranty
-                  Document to each person below, or skip and do it later from Batch Status.
+                  {warrantyUpload.users.length} {warrantyUpload.users.length === 1 ? 'record' : 'records'} — optionally attach a
+                  Warranty Report and/or Product Details document to each person below, or skip and do it later from Batch Status.
                 </p>
               </div>
             </div>
@@ -265,7 +261,7 @@ export const ProductCostBreakdown = () => {
                 <table className="w-full font-inter">
                   <thead className="sticky top-0 bg-slate-50">
                     <tr className="border-b border-slate-100">
-                      {['Product', 'Serial Number', 'Warranty Document'].map((h) => (
+                      {['Product', 'Serial Number', 'Warranty Report', 'Product Details'].map((h) => (
                         <th key={h} className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-400">{h}</th>
                       ))}
                     </tr>
@@ -283,7 +279,19 @@ export const ProductCostBreakdown = () => {
                             <WarrantyDocumentCell
                               batchId={warrantyUpload.batchId}
                               batchUserId={batchUserId}
+                              label="Warranty Report"
                               url={user.custom_fields?.warrenty_report || user.custom_fields?.warranty_report || null}
+                              onDeleted={reloadWarrantyProducts}
+                            />
+                          </td>
+                          <td className="px-4 py-3">
+                            {/* Two independent slots — replacing/deleting Product
+                                Details never touches Warranty Report, and vice versa. */}
+                            <WarrantyDocumentCell
+                              batchId={warrantyUpload.batchId}
+                              batchUserId={batchUserId}
+                              label="Product Details"
+                              url={user.custom_fields?.product_details || null}
                               onDeleted={reloadWarrantyProducts}
                             />
                           </td>

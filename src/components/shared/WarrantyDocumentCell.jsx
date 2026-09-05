@@ -3,14 +3,19 @@ import { Eye, Upload, Trash2, RefreshCw } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { verificationAPI, getApiError } from '@/services/api';
 
-// Per-BatchUser Warranty Document control — Upload / View / Replace / Delete,
-// keyed strictly by batchUserId (never name or row position, since duplicate
-// names are expected). `url` is the current document URL as known by the
-// parent (usually product.custom_fields.warrenty_report); once this cell
-// uploads its own file, it holds that response locally (with the document_id
-// needed to enable Delete) until the parent's `url` prop actually changes —
-// which happens after `onDeleted` triggers a parent refetch.
-export const WarrantyDocumentCell = ({ batchId, batchUserId, url: propUrl, fileName: propFileName, onDeleted }) => {
+// Per-BatchUser document control — Upload / View / Replace / Delete, keyed
+// strictly by batchUserId (never name or row position, since duplicate
+// names are expected). Two independent slots share this same component:
+// "Warranty Report" (custom_fields.warrenty_report) and "Product Details"
+// (custom_fields.product_details) — each is its own document destination;
+// uploading one never touches the other. `label` selects which slot this
+// instance manages (the exact document_label sent to
+// POST /products/{batch_user_id}/warranty-document). `url` is the current
+// document URL for that slot as known by the parent; once this cell uploads
+// its own file, it holds that response locally (with the document_id needed
+// to enable Delete) until the parent's `url` prop actually changes — which
+// happens after `onDeleted` triggers a parent refetch.
+export const WarrantyDocumentCell = ({ batchId, batchUserId, label = 'Warranty Report', url: propUrl, fileName: propFileName, onDeleted }) => {
   const [local, setLocal] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -31,15 +36,15 @@ export const WarrantyDocumentCell = ({ batchId, batchUserId, url: propUrl, fileN
     if (!file || !batchUserId) return;
     setUploading(true);
     try {
-      const { data: resp } = await verificationAPI.uploadWarrantyDocument(batchUserId, file, 'Warranty Report');
+      const { data: resp } = await verificationAPI.uploadWarrantyDocument(batchUserId, file, label);
       setLocal({
         documentId: resp?.document_id || null,
         url: resp?.document_url || null,
         fileName: resp?.file_name || file.name,
       });
-      toast.success('Warranty document uploaded');
+      toast.success(`${label} uploaded`);
     } catch (err) {
-      toast.error(getApiError(err, 'Failed to upload warranty document'));
+      toast.error(getApiError(err, `Failed to upload ${label.toLowerCase()}`));
     } finally {
       setUploading(false);
     }
@@ -50,12 +55,12 @@ export const WarrantyDocumentCell = ({ batchId, batchUserId, url: propUrl, fileN
     setDeleting(true);
     try {
       await verificationAPI.deleteBatchUserDocument(batchId, batchUserId, doc.documentId);
-      toast.success('Warranty document deleted');
+      toast.success(`${label} deleted`);
       setConfirming(false);
       setLocal(null);
       await onDeleted?.();
     } catch (err) {
-      toast.error(getApiError(err, 'Failed to delete warranty document'));
+      toast.error(getApiError(err, `Failed to delete ${label.toLowerCase()}`));
     } finally {
       setDeleting(false);
     }
@@ -101,7 +106,7 @@ export const WarrantyDocumentCell = ({ batchId, batchUserId, url: propUrl, fileN
               href={doc.url}
               target="_blank"
               rel="noopener noreferrer"
-              title={doc.fileName || 'Warranty Report'}
+              title={doc.fileName || label}
               className="inline-flex items-center gap-1 text-[11px] font-semibold text-brand-blue hover:underline"
             >
               <Eye size={12} /> View

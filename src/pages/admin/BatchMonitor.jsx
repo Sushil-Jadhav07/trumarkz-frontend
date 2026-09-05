@@ -2006,7 +2006,17 @@ export const BatchMonitor = () => {
     setDecidingRequestId(requestId);
     try {
       const { data } = await verificationAPI.updateManualVerificationStatus(requestId, status, reason);
-      toast.success(data?.message || `Marked ${status}`);
+      // "Reject wins" precedence (backend, Sept 2026): an approval decision
+      // can never silently un-reject a user already rejected elsewhere in a
+      // split-verifier batch. users_protected_from_downgrade tells us when
+      // that guard actually fired — surface it, or an admin approving a
+      // request that reports users_updated: 0 has no way to know why.
+      const protectedCount = data?.users_protected_from_downgrade || 0;
+      toast.success(
+        protectedCount > 0
+          ? `${data?.message || `Marked ${status}`} — ${protectedCount} already-rejected user${protectedCount === 1 ? '' : 's'} protected from being re-approved`
+          : (data?.message || `Marked ${status}`)
+      );
       setRejectingRequestId(null);
       setRejectReason('');
       const batchId = selectedBatch?.id;

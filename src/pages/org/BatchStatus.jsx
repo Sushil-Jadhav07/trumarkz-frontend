@@ -32,8 +32,7 @@ const isUUID = (t) => UUID_RE.test(t);
 // batchType (the batch's own real batch_type, e.g. from GET /verification/
 // batches/{batch_id}) is the authoritative signal — trust it first. Product
 // batch users come back with NO product_name/category_name field at all
-// (confirmed live): the product's name is under `full_name` and its extra
-// attributes (brand, sku_no, ...) are nested in `custom_fields`, identical in
+// (confirmed live): the product's name is under `full_name`, identical in
 // shape to a Human record. Without batchType, this record is silently
 // misread as Human — which also fed the wrong (email/title) certificate
 // match branch below and left a genuinely-issued certificate unmatched.
@@ -968,10 +967,10 @@ const WarrantyDetailModal = ({ batchId, batchName, onClose }) => {
               </div>
             ) : (
               <div className="max-h-[45vh] overflow-y-auto">
-                <table className="w-full min-w-[980px] font-inter">
+                <table className="w-full min-w-[1080px] font-inter">
                   <thead className="sticky top-0">
                     <tr className="border-b border-blue-100 bg-blue-50/80">
-                      {['Product', 'Serial Number', 'Warranty Start', 'Warranty End', 'Status', 'Certificate', 'Reason', 'Warranty Document'].map((h) => (
+                      {['Product', 'Serial Number', 'Warranty Start', 'Warranty End', 'Status', 'Certificate', 'Reason', 'Warranty Report', 'Product Details'].map((h) => (
                         <th key={h} className="px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-brand-blue/70">{h}</th>
                       ))}
                     </tr>
@@ -1029,7 +1028,19 @@ const WarrantyDetailModal = ({ batchId, batchName, onClose }) => {
                             <WarrantyDocumentCell
                               batchId={batchId}
                               batchUserId={productId}
+                              label="Warranty Report"
                               url={product.custom_fields?.warrenty_report || product.custom_fields?.warranty_report || null}
+                              onDeleted={reload}
+                            />
+                          </td>
+                          <td className="px-5 py-3.5">
+                            {/* Independent slot — never overwritten or cleared by
+                                uploading/replacing/deleting the Warranty Report. */}
+                            <WarrantyDocumentCell
+                              batchId={batchId}
+                              batchUserId={productId}
+                              label="Product Details"
+                              url={product.custom_fields?.product_details || null}
                               onDeleted={reload}
                             />
                           </td>

@@ -38,7 +38,6 @@ const parseTemplateHeaders = (value) =>
 
 const buildExampleValue = (header) => {
   const key = header.toLowerCase();
-  if (key.includes('sku')) return 'SKU-1001';
   if (key.includes('product')) return 'Example Product';
   if (key.includes('serial')) return 'SN-001';
   if (key.includes('warranty start')) return '2026-05-16';
@@ -664,65 +663,30 @@ const ProductBulkPanel = ({ categories, onResult, selectedCategory, selectedServ
   const [numberOfUnits, setNumberOfUnits] = useState('');
   const [visibility, setVisibility] = useState(selectedPermission || 'private');
   const [templateLoading, setTemplateLoading] = useState(false);
+  // warrenty_report / product_details are never Excel columns — both are
+  // document-URL destinations, attached post-batch via
+  // POST /products/{batch_user_id}/warranty-document. sku_no is a mandatory
+  // Product column; neither QR column is ever user-filled — both are
+  // populated exclusively by the backend's qr_slot verifier-report workflow.
+  // See VERIFICATION_SERVICE_HEADERS / WARRANTY_SERVICE_HEADERS in
+  // productVerificationFlow.js for the same canonical column sets.
   const [templateHeaders, setTemplateHeaders] = useState(
     selectedService?.id === 'warranty'
-      ? 'customer_name,model_no,warrenty_report,product_details,purchase_date,expiration_date,created_time,serial_number'
-      // sku_no is now a mandatory Product column (the collision-proof key
-      // document attachment matches on) and third+party+qr1 is no longer
-      // user-filled — the backend populates it automatically once a Product
-      // document is uploaded. See VERIFICATION_SERVICE_HEADERS in
-      // productVerificationFlow.js for the same canonical column set.
-      : 'product_name,sku_no,model_no,brand,third+party+qr2'
+      ? 'customer_name,model_no,purchase_date,expiration_date'
+      : 'product_name,sku_no,model_no,brand'
   );
   const [selectedFile, setSelectedFile] = useState(null);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [loading, setLoading] = useState(false);
   const [uploadResult, setUploadResult] = useState(null);
   const [showPreview, setShowPreview] = useState(false);
-  // Document attachments for the bulk upload
-  const [docEntries, setDocEntries] = useState([]);
-  const [activeDocIdx, setActiveDocIdx] = useState(null);
-  const docFileInputRef = useRef(null);
   const navigate = useNavigate();
-
-  const DOC_LABEL_OPTIONS = [
-    { value: 'certificate',    label: 'Certificate' },
-    { value: 'warranty_card',  label: 'Warranty Card' },
-    { value: 'compliance_doc', label: 'Compliance Doc' },
-  ];
-
-  const addDocEntry = () =>
-    setDocEntries((prev) => [
-      ...prev,
-      { id: Date.now(), sku: '', label: 'certificate', file: null },
-    ]);
-
-  const removeDocEntry = (id) =>
-    setDocEntries((prev) => prev.filter((e) => e.id !== id));
-
-  const updateDocEntry = (id, patch) =>
-    setDocEntries((prev) => prev.map((e) => (e.id === id ? { ...e, ...patch } : e)));
-
-  const openDocFilePicker = (idx) => {
-    setActiveDocIdx(idx);
-    docFileInputRef.current?.click();
-  };
-
-  const handleDocFileChange = (e) => {
-    const file = e.target.files?.[0];
-    if (!file || activeDocIdx === null) return;
-    setDocEntries((prev) =>
-      prev.map((entry, i) => (i === activeDocIdx ? { ...entry, file } : entry))
-    );
-    e.target.value = '';
-    setActiveDocIdx(null);
-  };
 
   useEffect(() => {
     setTemplateHeaders(
       selectedService?.id === 'warranty'
-        ? 'customer_name,model_no,warrenty_report,product_details,purchase_date,expiration_date,created_time,serial_number'
-        : 'product_name,sku_no,model_no,brand,third+party+qr2'
+        ? 'customer_name,model_no,purchase_date,expiration_date'
+        : 'product_name,sku_no,model_no,brand'
     );
   }, [selectedService]);
 
@@ -743,24 +707,13 @@ const ProductBulkPanel = ({ categories, onResult, selectedCategory, selectedServ
     if (!batchName.trim()) { toast.error('Please enter a batch name'); return; }
     if (!selectedFile) { toast.error('Please select an Excel file'); return; }
 
-    // Validate doc entries — skip incomplete ones, warn if any are partial.
-    // Matched by sku_no, not product name: the backend now requires sku_no
-    // as the collision-proof key for document association (product_name
-    // alone is rejected as ambiguous once two rows share a name) — see
-    // PART 5 of the SKU/document-association architecture.
-    const validDocs = docEntries.filter(
-      (e) => e.sku.trim() && e.label && e.file
-    );
-    const incompleteDocs = docEntries.filter(
-      (e) => (e.sku.trim() || e.file) && !(e.sku.trim() && e.label && e.file)
-    );
-    if (incompleteDocs.length > 0) {
-      toast.error(`${incompleteDocs.length} document attachment(s) are incomplete — fill the product's SKU and file, or remove them.`);
-      return;
-    }
-
     setLoading(true); setUploadProgress(0);
     try {
+      // No document attachment here — Product Excel upload no longer
+      // supports row-level documents. QR1/QR2 come exclusively from the
+      // backend's own verifier-report workflow (qr_slot, assigned
+      // automatically); any internal-only product document goes through a
+      // separate, standalone flow instead of this bulk-upload call.
       const { data } = await verificationAPI.bulkUploadProducts(
         selectedFile,
         batchName.trim(),
@@ -770,9 +723,6 @@ const ProductBulkPanel = ({ categories, onResult, selectedCategory, selectedServ
           batchType: 'product',
           verificationTypes: getProductVerificationTypes(selectedService),
           credentialVisibility: visibility,
-          docSkuNos: validDocs.map((e) => e.sku.trim()),
-          docLabels: validDocs.map((e) => e.label),
-          docFiles:  validDocs.map((e) => e.file),
         },
         setUploadProgress
       );
@@ -1006,130 +956,6 @@ const ProductBulkPanel = ({ categories, onResult, selectedCategory, selectedServ
             <span className="text-xs text-gray-400 font-inter">.xlsx or .xls</span>
           </button>
         )}
-      </div>
-
-      {/* ── Document Attachments ── */}
-      <div className="rounded-2xl border border-gray-100 bg-white overflow-hidden">
-        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 bg-gray-50/60">
-          <div className="flex items-center gap-2">
-            <FileText size={14} className="text-brand-blue" />
-            <p className="font-inter text-sm font-semibold text-brand-dark">Attach Product Documents</p>
-            <span className="rounded-md bg-gray-100 px-1.5 py-0.5 font-inter text-[10px] font-medium text-gray-400">
-              Optional
-            </span>
-          </div>
-          <button
-            type="button"
-            onClick={addDocEntry}
-            className="inline-flex items-center gap-1.5 rounded-xl border border-brand-blue/20 bg-brand-blue/5 px-3 py-1.5 font-inter text-xs font-semibold text-brand-blue transition-colors hover:bg-brand-blue hover:text-white"
-          >
-            <Plus size={12} />
-            Add Document
-          </button>
-        </div>
-
-        {docEntries.length === 0 ? (
-          <div className="flex flex-col items-center justify-center gap-2 py-7 text-center">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-gray-100 bg-gray-50">
-              <FileText size={16} className="text-gray-300" />
-            </div>
-            <p className="font-inter text-xs text-gray-400 max-w-xs">
-              Attach certificates, warranty cards, or compliance docs to specific products.
-            </p>
-            <p className="font-inter text-[11px] text-gray-300">
-              SKU must match the sku_no column in the Excel exactly.
-            </p>
-          </div>
-        ) : (
-          <div className="divide-y divide-gray-50">
-            <div className="grid grid-cols-[1fr_144px_1fr_32px] items-center gap-3 px-4 py-2">
-              <p className="font-inter text-[10px] font-bold uppercase tracking-[0.1em] text-gray-400">SKU (exact match)</p>
-              <p className="font-inter text-[10px] font-bold uppercase tracking-[0.1em] text-gray-400">Doc Type</p>
-              <p className="font-inter text-[10px] font-bold uppercase tracking-[0.1em] text-gray-400">File</p>
-              <span />
-            </div>
-            <AnimatePresence>
-              {docEntries.map((entry, idx) => (
-                <motion.div
-                  key={entry.id}
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: 'auto' }}
-                  exit={{ opacity: 0, height: 0 }}
-                  transition={{ duration: 0.18 }}
-                  className="overflow-hidden"
-                >
-                  <div className="grid grid-cols-[1fr_144px_1fr_32px] items-center gap-3 px-4 py-3">
-                    <input
-                      type="text"
-                      value={entry.sku}
-                      onChange={(e) => updateDocEntry(entry.id, { sku: e.target.value })}
-                      placeholder="e.g. SKU-1001"
-                      className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 font-inter text-sm text-brand-dark placeholder-gray-300 focus:border-brand-blue focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-blue/15"
-                    />
-                    <select
-                      value={entry.label}
-                      onChange={(e) => updateDocEntry(entry.id, { label: e.target.value })}
-                      className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 font-inter text-sm text-brand-dark focus:border-brand-blue focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-blue/15"
-                    >
-                      {DOC_LABEL_OPTIONS.map((opt) => (
-                        <option key={opt.value} value={opt.value}>{opt.label}</option>
-                      ))}
-                    </select>
-                    {entry.file ? (
-                      <div className="flex items-center gap-2 rounded-xl border border-green-200 bg-green-50 px-3 py-2">
-                        <CheckCircle size={13} className="shrink-0 text-green-600" />
-                        <span className="min-w-0 flex-1 truncate font-inter text-xs font-medium text-green-700">
-                          {entry.file.name}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => updateDocEntry(entry.id, { file: null })}
-                          className="shrink-0 text-green-400 hover:text-red-500 transition-colors"
-                        >
-                          <X size={12} />
-                        </button>
-                      </div>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => openDocFilePicker(idx)}
-                        className="flex w-full items-center justify-center gap-1.5 rounded-xl border-2 border-dashed border-gray-200 py-2 font-inter text-xs text-gray-400 transition-colors hover:border-brand-blue hover:bg-blue-50/40 hover:text-brand-blue"
-                      >
-                        <Upload size={12} />
-                        Pick file
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => removeDocEntry(entry.id)}
-                      className="flex h-8 w-8 items-center justify-center rounded-lg text-gray-300 transition-colors hover:bg-red-50 hover:text-red-500"
-                    >
-                      <X size={14} />
-                    </button>
-                  </div>
-                </motion.div>
-              ))}
-            </AnimatePresence>
-            <div className="flex items-center gap-3 border-t border-gray-100 bg-gray-50/60 px-4 py-2.5">
-              <span className="font-inter text-[11px] text-gray-400">
-                {docEntries.filter((e) => e.file).length} of {docEntries.length} files attached
-              </span>
-              {docEntries.length > 0 && docEntries.every((e) => e.file && e.sku.trim()) && (
-                <span className="flex items-center gap-1 font-inter text-[11px] font-semibold text-green-600">
-                  <CheckCircle size={11} /> All ready
-                </span>
-              )}
-            </div>
-          </div>
-        )}
-
-        <input
-          ref={docFileInputRef}
-          type="file"
-          accept=".pdf,.jpg,.jpeg,.png,.xlsx,.xls,.doc,.docx"
-          onChange={handleDocFileChange}
-          className="hidden"
-        />
       </div>
 
       {loading && (

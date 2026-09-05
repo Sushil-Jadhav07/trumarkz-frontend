@@ -75,36 +75,36 @@ export const PRODUCT_SECTOR_DEFS = [
   },
 ];
 
-// Must match the backend's warranty Excel contract: 8 fixed columns with
-// the warranty-specific fields in the same order the template download uses.
+// Must match the backend's warranty Excel contract — pure record metadata
+// only. `warrenty_report` and `product_details` are NOT Excel columns at all
+// — both are document-URL destinations, populated exclusively via
+// POST /products/{batch_user_id}/warranty-document (document_label:
+// "Warranty Report" or "Product Details") after the batch exists. `serial_no`
+// and `created_time` are also absent — the backend assigns serial_no at
+// reservation (see reserveWarrantySerials) and created_time at SDC issuance.
+// This is only a fallback: the real, live column list is fetched from the
+// backend's own template file (see the warrantyHeaders effect) and takes
+// priority whenever it succeeds.
 export const WARRANTY_SERVICE_HEADERS = [
   'customer_name',
   'model_no',
-  'warrenty_report',
-  'product_details',
   'purchase_date',
   'expiration_date',
-  'created_time',
-  'serial_number',
 ];
 
-// Canonical column set for the normal Product Verification flow — updated
-// per the production SKU/document-association architecture: `sku_no` is now
-// a mandatory column alongside product_name (it's the collision-proof key
-// used to attach documents to the right product *before* the backend has
-// created any BatchUser rows — product_name alone can't do that safely once
-// two rows share a name). `third+party+qr1` is no longer user-filled here —
-// the backend populates it automatically with the document's view URL once
-// a Product document is uploaded, so it must not appear in the template the
-// org fills in. `third+party+qr2` remains a plain optional column. The "+"
-// in it is canonical to the backend's field name and must be preserved
-// exactly, never normalised to "_".
+// Canonical column set for the normal Product Verification flow. `sku_no` is
+// mandatory alongside product_name (it's the collision-proof key the backend
+// uses internally; the frontend no longer attaches any document during this
+// upload at all). BOTH third+party+qr1 and third+party+qr2 are excluded —
+// the backend explicitly ignores them if present in the sheet. QR1/QR2 are
+// populated exclusively by the backend's own qr_slot verifier-report
+// workflow (assigned automatically by request-creation order — the frontend
+// must never select or send a qr_slot).
 export const VERIFICATION_SERVICE_HEADERS = [
   'product_name',
   'sku_no',
   'model_no',
   'brand',
-  'third+party+qr2',
 ];
 
 export const VERIFICATION_REQUIRED_HEADERS = ['product_name', 'sku_no'];

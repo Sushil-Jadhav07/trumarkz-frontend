@@ -179,10 +179,10 @@ const StatusViewer = ({ batchId }) => {
               </div>
             ) : (
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[980px] font-inter">
+                <table className="w-full min-w-[1080px] font-inter">
                   <thead>
                     <tr className="border-b border-blue-100 bg-blue-50/80">
-                      {['Product', 'Serial Number', 'Warranty Start', 'Warranty End', 'Status', 'Certificate', 'Reason', 'Warranty Document'].map((h) => (
+                      {['Product', 'Serial Number', 'Warranty Start', 'Warranty End', 'Status', 'Certificate', 'Reason', 'Warranty Report', 'Product Details'].map((h) => (
                         <th key={h} className="px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-brand-blue/70">{h}</th>
                       ))}
                     </tr>
@@ -190,7 +190,8 @@ const StatusViewer = ({ batchId }) => {
                   <tbody>
                     {filtered.map((product, i) => {
                       const batchUserId = product.product_id || product.id;
-                      const docUrl = product.custom_fields?.warrenty_report || product.custom_fields?.warranty_report || null;
+                      const warrantyReportUrl = product.custom_fields?.warrenty_report || product.custom_fields?.warranty_report || null;
+                      const productDetailsUrl = product.custom_fields?.product_details || null;
                       const sdcMatch = batchUserId ? sdcByProductId[batchUserId] : null;
                       return (
                         <motion.tr
@@ -240,7 +241,19 @@ const StatusViewer = ({ batchId }) => {
                             <WarrantyDocumentCell
                               batchId={batchId}
                               batchUserId={batchUserId}
-                              url={docUrl}
+                              label="Warranty Report"
+                              url={warrantyReportUrl}
+                              onDeleted={fetch}
+                            />
+                          </td>
+                          <td className="px-5 py-3.5">
+                            {/* Independent slot — never overwritten or cleared by
+                                uploading/replacing/deleting the Warranty Report. */}
+                            <WarrantyDocumentCell
+                              batchId={batchId}
+                              batchUserId={batchUserId}
+                              label="Product Details"
+                              url={productDetailsUrl}
                               onDeleted={fetch}
                             />
                           </td>
