@@ -7,7 +7,6 @@ import { PageHeader } from '@/components/shared/PageHeader';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { StepWizard } from '@/components/ui/StepWizard';
-import { WarrantyDocumentCell } from '@/components/shared/WarrantyDocumentCell';
 import { useApp } from '@/context/AppContext';
 import {
   PRODUCT_VERIFICATION_STEPS,
@@ -114,20 +113,6 @@ export const ProductCostBreakdown = () => {
   const recordCount = productBatchData?.recordCount || 0;
   const totalCost = selectedChecks.reduce((sum, item) => sum + ((item.price || 0) * recordCount), 0);
 
-  const reloadWarrantyProducts = useCallback(async () => {
-    if (!warrantyUpload?.batchId) return;
-    try {
-      // GET /verification/products/warranty/{batch_id} — the existing-batch
-      // shape (products[] with product_id), distinct from the upload
-      // response's successful_users[] (id) but carrying the same identifier
-      // relationship; the row rendering below already accepts either shape.
-      const { data } = await verificationAPI.getWarrantyStatus(warrantyUpload.batchId);
-      setWarrantyUpload((current) => (current ? { ...current, users: data?.products || [] } : current));
-    } catch (err) {
-      toast.error(getApiError(err, 'Failed to refresh warranty documents'));
-    }
-  }, [warrantyUpload?.batchId]);
-
   const handleContinue = async () => {
     if (!agreed) {
       toast.error('Confirm the total cost before continuing');
@@ -174,7 +159,10 @@ export const ProductCostBreakdown = () => {
         const batchId = data?.batch_id || data?.id || '';
         const createdUsers = data?.successful_users || data?.products || data?.batch_users || [];
         if (batchId && createdUsers.length > 0) {
-          setWarrantyUpload({ batchId, batchName: data?.batch_name || productBatchData.batchName, users: createdUsers });
+          // Documents were already attached pre-batch, on the Template step
+          // (see productBatchData.documents above) — this confirmation is
+          // purely informational, never a second upload prompt.
+          setWarrantyUpload({ batchId, batchName: data?.batch_name || productBatchData.batchName, count: createdUsers.length });
         } else {
           navigate('/org/batch-status');
         }
@@ -216,9 +204,16 @@ export const ProductCostBreakdown = () => {
   return (
     <AuthLayout title="Product Costing">
       <div className="mx-auto w-full max-w-[1380px]">
+        {/* Once the warranty batch is actually created, this page is showing
+            the final confirmation — not the costing step anymore — so the
+            wizard should read as "Batch" (step 5), not "Costing" (step 4). */}
         <StepWizard
           steps={isWarranty ? WARRANTY_VERIFICATION_STEPS : PRODUCT_VERIFICATION_STEPS}
-          currentStep={isWarranty ? WARRANTY_VERIFICATION_STEP_META.costing.currentStep : PRODUCT_VERIFICATION_STEP_META.costing.currentStep}
+          currentStep={
+            isWarranty
+              ? (warrantyUpload ? WARRANTY_VERIFICATION_STEP_META.batch.currentStep : WARRANTY_VERIFICATION_STEP_META.costing.currentStep)
+              : PRODUCT_VERIFICATION_STEP_META.costing.currentStep
+          }
           stepRoutes={isWarranty ? WARRANTY_VERIFICATION_STEP_ROUTES : PRODUCT_VERIFICATION_STEP_ROUTES}
         />
 
@@ -254,61 +249,14 @@ export const ProductCostBreakdown = () => {
               <div>
                 <h3 className="font-sora text-lg font-semibold text-slate-950">Warranty Batch Created</h3>
                 <p className="font-inter text-xs text-slate-500">
-                  {warrantyUpload.users.length} {warrantyUpload.users.length === 1 ? 'record' : 'records'} — optionally attach a
-                  Warranty Report and/or Product Details document to each person below, or skip and do it later from Batch Status.
+                  {warrantyUpload.count} {warrantyUpload.count === 1 ? 'record' : 'records'} created successfully.
+                  Any Warranty Report / Product Details documents you attached on the previous step have been
+                  submitted with the batch — view or manage them anytime from Batch Status.
                 </p>
               </div>
             </div>
 
-            <div className="mt-5 overflow-hidden rounded-2xl border border-slate-100">
-              <div className="max-h-[50vh] overflow-y-auto">
-                <table className="w-full font-inter">
-                  <thead className="sticky top-0 bg-slate-50">
-                    <tr className="border-b border-slate-100">
-                      {['Product', 'Serial Number', 'Warranty Report', 'Product Details'].map((h) => (
-                        <th key={h} className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-400">{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {warrantyUpload.users.map((user, i) => {
-                      // successful_users[].id is the real batch_user_id — never
-                      // derive it from product_name/customer_name, which can repeat.
-                      const batchUserId = user.id || user.product_id;
-                      return (
-                        <tr key={batchUserId || i} className="border-b border-slate-50 last:border-0">
-                          <td className="px-4 py-3 text-sm font-medium text-slate-900">{user.product_name || user.customer_name || '—'}</td>
-                          <td className="px-4 py-3 text-xs font-mono text-slate-400">{user.serial_no || user.serial_number || '—'}</td>
-                          <td className="px-4 py-3">
-                            <WarrantyDocumentCell
-                              batchId={warrantyUpload.batchId}
-                              batchUserId={batchUserId}
-                              label="Warranty Report"
-                              url={user.custom_fields?.warrenty_report || user.custom_fields?.warranty_report || null}
-                              onDeleted={reloadWarrantyProducts}
-                            />
-                          </td>
-                          <td className="px-4 py-3">
-                            {/* Two independent slots — replacing/deleting Product
-                                Details never touches Warranty Report, and vice versa. */}
-                            <WarrantyDocumentCell
-                              batchId={warrantyUpload.batchId}
-                              batchUserId={batchUserId}
-                              label="Product Details"
-                              url={user.custom_fields?.product_details || null}
-                              onDeleted={reloadWarrantyProducts}
-                            />
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            <div className="mt-5 flex items-center justify-between gap-3">
-              <p className="font-inter text-xs text-slate-400">You can also manage these documents later from Batch Status.</p>
+            <div className="mt-5 flex justify-end">
               <Button variant="primary" size="lg" onClick={() => navigate('/org/batch-status')} icon={ArrowRight}>
                 Continue to Batch Status
               </Button>

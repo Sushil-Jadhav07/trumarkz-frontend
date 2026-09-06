@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import * as XLSX from 'xlsx';
 import { useNavigate } from 'react-router-dom';
 import { AuthLayout } from '@/components/layout/AuthLayout';
@@ -8,7 +8,7 @@ import { Card } from '@/components/ui/Card';
 import { Modal } from '@/components/ui/Modal';
 import { StepWizard } from '@/components/ui/StepWizard';
 import { FileUpload } from '@/components/ui/FileUpload';
-import { ArrowRight, CheckCircle, Download, FileText, Plus, RefreshCw, Upload, X } from 'lucide-react';
+import { ArrowRight, CheckCircle, Download, FileText, RefreshCw, Upload, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useApp } from '@/context/AppContext';
 import {
@@ -37,8 +37,8 @@ const BASE_FIELD = { key: 'product_name', label: 'Product Name', fixed: true };
 const downloadLocalFallback = (headers, fileName = 'product-template') => {
   const buildExample = (h) => {
     const k = h.toLowerCase();
-    // third+party+qr1/qr2 must always download blank — backend-populated
-    // only, via the verifier-report qr_slot workflow, never filled by hand.
+    // third+party+qr2 must always download blank — backend-populated only,
+    // via the verifier-report qr_slot workflow, never filled by hand.
     if (k.includes('qr')) return '';
     if (k.includes('customer')) return 'Aniket Jha';
     if (k.includes('sku')) return 'SKU-1001';
@@ -108,7 +108,6 @@ const WarrantyDocSlot = ({ label, file, onChange, onClear }) => {
 
 export const ProductTemplate = () => {
   const navigate = useNavigate();
-  const inputRef = useRef(null);
   const {
     selectedProductSector,
     selectedProductService,
@@ -122,13 +121,21 @@ export const ProductTemplate = () => {
   // already drifted out of sync with the real backend once before.
   const [warrantyHeaders, setWarrantyHeaders] = useState(null);
 
+  // Same live-fetch pattern for Product's default columns — pulled from the
+  // backend's own template response (calling generateProductTemplate with no
+  // headers asks for its default set) instead of trusting the hardcoded
+  // VERIFICATION_SERVICE_HEADERS to still match it.
+  const [productHeaders, setProductHeaders] = useState(null);
+
+  // third+party+qr1 removed for now, per explicit request — filtered out
+  // here regardless of source (hardcoded fallback or the backend's own live
+  // template response) so it can never resurface in the modal or in the
+  // actual downloaded file, even if the backend's default template still
+  // includes it. third+party+qr2 is unaffected and stays.
   const serviceHeaders = selectedProductService?.id === 'warranty'
     ? (warrantyHeaders || WARRANTY_SERVICE_HEADERS)
-    : VERIFICATION_SERVICE_HEADERS;
+    : (productHeaders || VERIFICATION_SERVICE_HEADERS).filter((h) => !h.includes('qr1'));
 
-  // custom extra headers (excluding product_name which is fixed)
-  const [customFields, setCustomFields] = useState([]);
-  const [fieldInput, setFieldInput] = useState('');
   const [modalOpen, setModalOpen] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [excelFile, setExcelFile] = useState(null);
@@ -137,14 +144,15 @@ export const ProductTemplate = () => {
 
   // Pre-batch serial reservation — the backend parses the uploaded Excel and
   // reserves a globally-unique TMZ-W-XXXXXXXX serial per valid row from a
-  // central registry, before any Batch/BatchUser exists. Response:
-  // { total_reserved, reserved_serial_nos }. These are sent back verbatim,
-  // in the same order, to /warranty-upload as reserved_serial_nos — never
-  // reordered, split, or generated client-side. This is purely an internal
-  // workflow detail: the reservation call and its TMZ-W serials are NEVER
-  // shown to the org user (see excelRows/docSelections below) — the user
-  // only ever sees their own Excel's record names and a document-upload UI
-  // per record.
+  // central registry, before any Batch/BatchUser exists. Verified response
+  // shape: { total_reserved, total_skipped, rows: [{ row, customer_name,
+  // model_no, serial_no }], skipped }. Each row already carries its own
+  // customer_name + serial_no together — no separate client-side Excel
+  // parse or index-based guessing needed to know which record a serial
+  // belongs to. This is purely an internal workflow detail otherwise: the
+  // reservation call and its TMZ-W serials are NEVER shown to the org user
+  // (see docSelections below, keyed by serial_no) — the user only ever sees
+  // their own Excel's record names and a document-upload UI per record.
   const [warrantyReservation, setWarrantyReservation] = useState(null);
   const [warrantyReserving, setWarrantyReserving] = useState(false);
 
@@ -167,53 +175,23 @@ export const ProductTemplate = () => {
     runWarrantyReservation(excelFile);
   }, [isWarranty, excelFile, runWarrantyReservation]);
 
-  // Excel record labels (customer_name per row), parsed client-side purely
-  // for display — index-aligned with warrantyReservation.reserved_serial_nos
-  // (row i's label pairs with reserved_serial_nos[i]), same non-empty-row
-  // filter used everywhere else on this page for warranty rows. The backend
-  // never returns names alongside reserved serials, so this ordering
-  // assumption is the only link available between a record and its serial.
-  const [excelRows, setExcelRows] = useState([]);
-
-  useEffect(() => {
-    if (!isWarranty || !excelFile) { setExcelRows([]); return; }
-    let cancelled = false;
-    (async () => {
-      try {
-        const buf = await excelFile.arrayBuffer();
-        const wb = XLSX.read(buf, { type: 'array' });
-        const ws = wb.Sheets[wb.SheetNames[0]];
-        const rows = XLSX.utils.sheet_to_json(ws, { header: 1 });
-        const headers = (rows[0] || []).map((h) => sanitizeKey(h));
-        const nameIdx = headers.indexOf('customer_name');
-        const dataRows = rows.slice(1).filter((row) => Array.isArray(row) && row.some((cell) => String(cell ?? '').trim() !== ''));
-        const labels = dataRows.map((row, i) => {
-          const name = nameIdx >= 0 ? String(row[nameIdx] ?? '').trim() : '';
-          return name || `Record ${i + 1}`;
-        });
-        if (!cancelled) setExcelRows(labels);
-      } catch {
-        if (!cancelled) setExcelRows([]);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [isWarranty, excelFile]);
-
-  // Per-record document staging — { [rowIndex]: { warrantyReport: File|null,
-  // productDetails: File|null } }. Files stay in memory only; nothing is
-  // uploaded until the final POST /products/warranty-upload call in
-  // ProductCostBreakdown.jsx, which maps each staged file to its row's
-  // reserved serial number via doc_files/doc_serial_nos/doc_labels.
+  // Per-record document staging — { [serial_no]: { warrantyReport: File|null,
+  // productDetails: File|null } }. Keyed by the reserved serial itself (not
+  // array index) since each row from the reservation response already
+  // carries its own serial_no — the most direct, unambiguous key available.
+  // Files stay in memory only; nothing is uploaded until the final
+  // POST /products/warranty-upload call in ProductCostBreakdown.jsx, which
+  // sends each staged file via doc_files/doc_serial_nos/doc_labels.
   const [docSelections, setDocSelections] = useState({});
 
   useEffect(() => {
-    if (!excelFile) setDocSelections({});
+    setDocSelections({});
   }, [excelFile]);
 
-  const setDocFile = (rowIndex, slot, file) => {
+  const setDocFile = (serialNo, slot, file) => {
     setDocSelections((prev) => ({
       ...prev,
-      [rowIndex]: { ...prev[rowIndex], [slot]: file },
+      [serialNo]: { ...prev[serialNo], [slot]: file },
     }));
   };
 
@@ -240,6 +218,30 @@ export const ProductTemplate = () => {
     return () => { cancelled = true; };
   }, [isWarranty]);
 
+  // Same idea for Product: ask the backend for its own default template (no
+  // headers override) and read back whatever columns it actually generates
+  // — including third+party+qr1/qr2 — instead of only ever trusting our own
+  // hardcoded guess. Falls back to VERIFICATION_SERVICE_HEADERS silently on
+  // failure (e.g. if the backend requires a non-empty headers field).
+  useEffect(() => {
+    if (isWarranty) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data } = await verificationAPI.generateProductTemplate();
+        const buf = await data.arrayBuffer();
+        const wb = XLSX.read(buf, { type: 'array' });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json(ws, { header: 1 });
+        const headers = (rows[0] || []).map((h) => sanitizeKey(h)).filter(Boolean);
+        if (!cancelled && headers.length > 0) setProductHeaders(headers);
+      } catch {
+        // silent — serviceHeaders already falls back to VERIFICATION_SERVICE_HEADERS
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [isWarranty]);
+
   const [batchNameValue, setBatchNameValue] = useState(() => {
     const d = new Date();
     const sector = selectedProductSector?.title || 'Product';
@@ -252,25 +254,10 @@ export const ProductTemplate = () => {
     }
   }, [selectedProductSector, selectedProductService, navigate]);
 
-  const templateHeaders = useMemo(
-    () => [
-      ...serviceHeaders,
-      ...customFields.filter((f) => !serviceHeaders.includes(f)),
-    ],
-    [serviceHeaders, customFields]
-  );
-
-  const handleAddField = () => {
-    const key = sanitizeKey(fieldInput);
-    if (!key) { toast.error('Enter a valid field name'); return; }
-    if (templateHeaders.includes(key)) { toast.error('Field already exists'); return; }
-    setCustomFields((prev) => [...prev, key]);
-    setFieldInput('');
-    inputRef.current?.focus();
-  };
-
-  const handleKeyDown = (e) => { if (e.key === 'Enter') { e.preventDefault(); handleAddField(); } };
-  const handleRemoveField = (key) => setCustomFields((prev) => prev.filter((f) => f !== key));
+  // No custom-field UI — the template's columns are fixed, sourced entirely
+  // from serviceHeaders (backend-verified for Product, see productHeaders
+  // above; hardcoded fixed list for Warranty).
+  const templateHeaders = serviceHeaders;
 
   const handleDownload = async () => {
     setDownloading(true);
@@ -316,15 +303,12 @@ export const ProductTemplate = () => {
 
       if (!isWarranty) {
         // product_name and sku_no are required for the normal Product flow —
-        // the rest of VERIFICATION_SERVICE_HEADERS (model_no, brand, and the
-        // two QR columns) are optional and must never block Continue.
-        // third+party+qr1/qr2 are only ever downloaded blank for column-
-        // structure parity with the backend template — even if present (or
-        // manually filled) in the uploaded sheet, they're never read as
-        // authoritative here. Both are populated exclusively by the
-        // backend's own qr_slot verifier-report workflow, assigned
-        // automatically by request-creation order once manual verifications
-        // are sent.
+        // the rest of VERIFICATION_SERVICE_HEADERS (model_no, brand, and
+        // third+party+qr2) are optional and must never block Continue.
+        // third+party+qr1 is excluded from this flow entirely. QR1/QR2 are
+        // populated exclusively by the backend's own qr_slot verifier-report
+        // workflow, assigned automatically by request-creation order once
+        // manual verifications are sent.
         const missingHeaders = VERIFICATION_REQUIRED_HEADERS.filter((h) => !uploadedHeaders.includes(h));
         if (missingHeaders.length > 0) {
           toast.error(`Missing required columns: ${missingHeaders.join(', ')}`);
@@ -341,18 +325,19 @@ export const ProductTemplate = () => {
         : rows.slice(1).filter((row) => Array.isArray(row) && row.some((cell) => String(cell ?? '').trim() !== '')).length;
       if (recordCount <= 0) { toast.error('The uploaded file has no data rows'); return; }
 
-      // Flatten per-row doc selections into the doc_files/doc_serial_nos/
-      // doc_labels triplet the final warranty-upload call needs — mapping
-      // by row index into reserved_serial_nos, never by array position of
-      // the documents themselves (a row may contribute 0, 1, or 2 files).
+      // Flatten per-record doc selections into the doc_files/doc_serial_nos/
+      // doc_labels triplet the final warranty-upload call needs — each row
+      // from the reservation response already carries its own serial_no, so
+      // this is keyed directly off that, never by array position (a row may
+      // contribute 0, 1, or 2 files).
+      const reservedRows = warrantyReservation?.rows || [];
       const documents = isWarranty
-        ? excelRows.flatMap((_, i) => {
-            const serial = warrantyReservation.reserved_serial_nos?.[i];
-            const sel = docSelections[i];
-            if (!serial || !sel) return [];
+        ? reservedRows.flatMap((row) => {
+            const sel = docSelections[row.serial_no];
+            if (!sel) return [];
             const out = [];
-            if (sel.warrantyReport) out.push({ file: sel.warrantyReport, serialNo: serial, label: 'Warranty Report' });
-            if (sel.productDetails) out.push({ file: sel.productDetails, serialNo: serial, label: 'Product Details' });
+            if (sel.warrantyReport) out.push({ file: sel.warrantyReport, serialNo: row.serial_no, label: 'Warranty Report' });
+            if (sel.productDetails) out.push({ file: sel.productDetails, serialNo: row.serial_no, label: 'Product Details' });
             return out;
           })
         : [];
@@ -368,7 +353,7 @@ export const ProductTemplate = () => {
         uploadResponse: null,
         // Sent back verbatim to POST /products/warranty-upload as
         // reserved_serial_nos — never reordered or regenerated.
-        ...(isWarranty ? { reservedSerialNos: warrantyReservation.reserved_serial_nos || [], documents } : {}),
+        ...(isWarranty ? { reservedSerialNos: reservedRows.map((r) => r.serial_no), documents } : {}),
       });
       navigate('/org/product/costing');
     } catch {
@@ -458,18 +443,12 @@ export const ProductTemplate = () => {
                 {/* Stats */}
                 <div className="flex-1 space-y-3 p-6">
 
-                  {/* Columns + Custom tiles (warranty fields are fixed — no custom fields) */}
-                  <div className={`grid gap-3 ${isWarranty ? 'grid-cols-1' : 'grid-cols-2'}`}>
+                  {/* Columns tile — fields are fixed for both flows, no custom fields */}
+                  <div className="grid grid-cols-1 gap-3">
                     <div className="rounded-xl border border-gray-200 bg-white p-4 text-center">
                       <p className="font-sora text-2xl font-bold text-brand-dark">{templateHeaders.length}</p>
                       <p className="mt-0.5 font-inter text-[11px] text-gray-400">Columns</p>
                     </div>
-                    {!isWarranty && (
-                      <div className="rounded-xl border border-gray-200 bg-white p-4 text-center">
-                        <p className="font-sora text-2xl font-bold text-brand-dark">{customFields.length}</p>
-                        <p className="mt-0.5 font-inter text-[11px] text-gray-400">Custom Fields</p>
-                      </div>
-                    )}
                   </div>
 
                   {/* Checklist */}
@@ -523,50 +502,47 @@ export const ProductTemplate = () => {
                           Upload your warranty Excel on the left to enable document upload for each record.
                         </p>
                       </div>
-                    ) : excelRows.length === 0 ? (
+                    ) : warrantyReserving ? (
                       <div className="flex flex-1 items-center justify-center gap-2 text-brand-blue">
                         <RefreshCw size={18} className="animate-spin" />
                         <span className="font-inter text-sm">Loading records…</span>
                       </div>
+                    ) : !warrantyReservation ? (
+                      <div className="flex flex-1 flex-col items-center justify-center gap-3 text-center">
+                        <p className="max-w-xs font-inter text-xs text-red-600">Couldn't process this file — documents can't be submitted yet.</p>
+                        <button
+                          type="button"
+                          onClick={() => runWarrantyReservation(excelFile)}
+                          className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-red-300 bg-white px-3 py-1.5 font-inter text-xs font-semibold text-red-600 transition-colors hover:bg-red-100"
+                        >
+                          <RefreshCw size={12} /> Retry
+                        </button>
+                      </div>
                     ) : (
-                      <>
-                        {!warrantyReserving && !warrantyReservation && (
-                          <div className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3">
-                            <p className="font-inter text-xs text-red-600">Couldn't process this file — documents can't be submitted yet.</p>
-                            <button
-                              type="button"
-                              onClick={() => runWarrantyReservation(excelFile)}
-                              className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-red-300 bg-white px-3 py-1.5 font-inter text-xs font-semibold text-red-600 transition-colors hover:bg-red-100"
-                            >
-                              <RefreshCw size={12} /> Retry
-                            </button>
-                          </div>
-                        )}
-                        <div className="space-y-3">
-                          {excelRows.map((label, i) => {
-                            const sel = docSelections[i] || {};
-                            return (
-                              <div key={i} className="rounded-xl border border-gray-200 bg-white p-3">
-                                <p className="mb-2 truncate font-inter text-xs font-semibold text-brand-dark">{label}</p>
-                                <div className="space-y-2">
-                                  <WarrantyDocSlot
-                                    label="Warranty Report"
-                                    file={sel.warrantyReport}
-                                    onChange={(f) => setDocFile(i, 'warrantyReport', f)}
-                                    onClear={() => setDocFile(i, 'warrantyReport', null)}
-                                  />
-                                  <WarrantyDocSlot
-                                    label="Product Details"
-                                    file={sel.productDetails}
-                                    onChange={(f) => setDocFile(i, 'productDetails', f)}
-                                    onClear={() => setDocFile(i, 'productDetails', null)}
-                                  />
-                                </div>
+                      <div className="space-y-3">
+                        {(warrantyReservation.rows || []).map((row) => {
+                          const sel = docSelections[row.serial_no] || {};
+                          return (
+                            <div key={row.serial_no || row.row} className="rounded-xl border border-gray-200 bg-white p-3">
+                              <p className="mb-2 truncate font-inter text-xs font-semibold text-brand-dark">{row.customer_name || `Record ${row.row}`}</p>
+                              <div className="space-y-2">
+                                <WarrantyDocSlot
+                                  label="Warranty Report"
+                                  file={sel.warrantyReport}
+                                  onChange={(f) => setDocFile(row.serial_no, 'warrantyReport', f)}
+                                  onClear={() => setDocFile(row.serial_no, 'warrantyReport', null)}
+                                />
+                                <WarrantyDocSlot
+                                  label="Product Details"
+                                  file={sel.productDetails}
+                                  onChange={(f) => setDocFile(row.serial_no, 'productDetails', f)}
+                                  onClear={() => setDocFile(row.serial_no, 'productDetails', null)}
+                                />
                               </div>
-                            );
-                          })}
-                        </div>
-                      </>
+                            </div>
+                          );
+                        })}
+                      </div>
                     )}
                   </div>
                 </div>
@@ -608,16 +584,16 @@ export const ProductTemplate = () => {
                 <span className="font-semibold text-brand-dark">{selectedProductService?.title}</span>{' '}
                 are fixed — download the template as-is.</>
             ) : (
-              <>Default columns for{' '}
+              <>Columns for{' '}
                 <span className="font-semibold text-brand-dark">{selectedProductService?.title}</span>{' '}
-                are pre-filled. Add any extra columns you need, then download.</>
+                are fixed — download the template as-is.</>
             )}
           </p>
 
           {/* Service default fields */}
           <div>
             <p className="font-inter text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
-              {isWarranty ? 'Fixed Fields' : 'Default Fields'} ({selectedProductService?.title})
+              Fixed Fields ({selectedProductService?.title})
             </p>
             <div className="space-y-2">
               {serviceHeaders.map((key) => (
@@ -649,66 +625,24 @@ export const ProductTemplate = () => {
             </div>
           </div>
 
-          {/* Add custom field — not applicable to warranty (fields are fixed) */}
+          {/* Final columns preview — fields are fixed for both flows, no
+              custom-field UI at all. */}
           {!isWarranty && (
-            <>
-              <div>
-                <p className="font-inter text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
-                  Custom Fields
-                </p>
-                <div className="flex gap-2">
-                  <input
-                    ref={inputRef}
-                    value={fieldInput}
-                    onChange={(e) => setFieldInput(e.target.value)}
-                    onKeyDown={handleKeyDown}
-                    placeholder="e.g. purchase_date"
-                    className="flex-1 rounded-xl border-2 border-slate-200 px-4 py-2.5 font-inter text-sm outline-none focus:border-brand-blue focus:ring-4 focus:ring-brand-blue/10 transition-all"
-                  />
-                  <Button variant="primary" size="sm" icon={Plus} onClick={handleAddField}>
-                    Add
-                  </Button>
-                </div>
-                <p className="font-inter text-[11px] text-slate-400 mt-1.5">Use snake_case — press Enter or click Add.</p>
+            <div className="rounded-xl bg-slate-50 border border-slate-100 p-3">
+              <p className="font-inter text-[11px] font-semibold text-slate-500 uppercase tracking-wide mb-2">
+                Final columns ({templateHeaders.length})
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {templateHeaders.map((col) => (
+                  <span
+                    key={col}
+                    className="rounded-full border border-slate-200 bg-white px-2.5 py-1 font-inter text-[11px] font-medium text-slate-600"
+                  >
+                    {col}
+                  </span>
+                ))}
               </div>
-
-              {customFields.length > 0 && (
-                <div className="flex flex-wrap gap-2">
-                  {customFields.map((field) => (
-                    <span
-                      key={field}
-                      className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 font-inter text-sm text-slate-700"
-                    >
-                      {field}
-                      <button
-                        type="button"
-                        onClick={() => handleRemoveField(field)}
-                        className="text-slate-400 hover:text-red-500 transition-colors ml-0.5"
-                      >
-                        <X size={13} />
-                      </button>
-                    </span>
-                  ))}
-                </div>
-              )}
-
-              {/* Final columns preview */}
-              <div className="rounded-xl bg-slate-50 border border-slate-100 p-3">
-                <p className="font-inter text-[11px] font-semibold text-slate-500 uppercase tracking-wide mb-2">
-                  Final columns ({templateHeaders.length})
-                </p>
-                <div className="flex flex-wrap gap-1.5">
-                  {templateHeaders.map((col) => (
-                    <span
-                      key={col}
-                      className="rounded-full border border-slate-200 bg-white px-2.5 py-1 font-inter text-[11px] font-medium text-slate-600"
-                    >
-                      {col}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            </>
+            </div>
           )}
 
           <div className="flex gap-2 pt-1">

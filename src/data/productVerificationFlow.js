@@ -124,22 +124,18 @@ export const WARRANTY_SERVICE_HEADERS = [
 // Canonical column set for the normal Product Verification flow. `sku_no` is
 // mandatory alongside product_name (it's the collision-proof key the backend
 // uses internally; the frontend no longer attaches any document during this
-// upload at all). third+party+qr1 and third+party+qr2 are included here so
-// the downloaded template's column structure matches the backend's — but
-// they must always download with EMPTY sample values (see downloadLocalFallback
-// in ProductTemplate.jsx) and are never in VERIFICATION_REQUIRED_HEADERS.
-// The org user must never fill these in manually; QR1/QR2 are populated
+// upload at all). third+party+qr1 is intentionally excluded (removed per
+// explicit request); third+party+qr2 is kept for column-structure parity
+// with the backend template, always downloaded blank — the org user must
+// never fill it in manually. Both QR columns are ultimately populated
 // exclusively by the backend's own qr_slot verifier-report workflow
-// (assigned automatically by request-creation order). Even if a user types
-// something into these columns before uploading, the frontend still never
-// treats it as authoritative — it just posts the whole file and lets the
-// backend's own ingestion decide what to trust, same as always.
+// (assigned automatically by request-creation order); the frontend never
+// selects or sends a qr_slot.
 export const VERIFICATION_SERVICE_HEADERS = [
   'product_name',
   'sku_no',
   'model_no',
   'brand',
-  'third+party+qr1',
   'third+party+qr2',
 ];
 

@@ -742,16 +742,17 @@ export const verificationAPI = {
     });
   },
 
-  // reservedSerialNos: the ordered reserved_serial_nos array from
-  // reserveWarrantySerials, sent back verbatim — sets use_reserved_serials=true
-  // whenever any are supplied, per the current backend contract.
+  // reservedSerialNos: the ordered serial_no values from
+  // reserveWarrantySerials's rows[], sent back verbatim as ONE comma-joined
+  // string — sets use_reserved_serials=true whenever any are supplied, per
+  // the verified backend contract.
   // documents: [{ file, serialNo, label }] — pre-batch documents staged on
   // the Template step, one entry per attached file (a record may contribute
-  // 0, 1, or 2 entries). Sent as three parallel repeated-key arrays
-  // (doc_files / doc_serial_nos / doc_labels), index-aligned — never by
-  // array position of the Excel rows themselves, since coverage is sparse.
-  // The backend uses each entry's serialNo (one of reservedSerialNos) to
-  // attach it to the right BatchUser once created.
+  // 0, 1, or 2 entries). Per the verified contract: doc_files is a repeated
+  // multipart field (one entry per file), while doc_serial_nos and
+  // doc_labels are each ONE comma-joined string, positionally aligned with
+  // doc_files by array order — never repeated fields for those two. The
+  // backend matches all three purely by index.
   uploadWarrantyExcel: (file, batchName, description = '', reservedSerialNos = [], documents = [], maybeProgress) => {
     const formData = new FormData();
     const { onProgress } = normalizeUploadArgs(undefined, maybeProgress);
@@ -765,11 +766,9 @@ export const verificationAPI = {
       formData.append('use_reserved_serials', 'true');
     }
     if (Array.isArray(documents) && documents.length > 0) {
-      documents.forEach(({ file: docFile, serialNo, label }) => {
-        formData.append('doc_files', docFile);
-        formData.append('doc_serial_nos', serialNo);
-        formData.append('doc_labels', label);
-      });
+      documents.forEach(({ file: docFile }) => formData.append('doc_files', docFile));
+      formData.append('doc_serial_nos', documents.map((d) => d.serialNo).join(','));
+      formData.append('doc_labels', documents.map((d) => d.label).join(','));
     }
 
     return verificationApi.post('/verification/products/warranty-upload', formData, {
