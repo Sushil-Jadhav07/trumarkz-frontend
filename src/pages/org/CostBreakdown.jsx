@@ -114,13 +114,39 @@ export const CostBreakdown = () => {
         }
       );
 
+      // bulkUpload returns 200 even when every row was skipped (duplicate
+      // email, missing required field, etc.) — total_uploaded === 0 there
+      // means no user, and no real batch content, actually got created, so
+      // a blind "Batch created successfully" would be actively misleading.
+      const totalUploaded = data?.total_uploaded ?? (data?.successful_users?.length || 0);
+      const totalSkipped = data?.total_skipped ?? (data?.skipped_users?.length || 0);
+      const skippedUsers = data?.skipped_users || [];
+
+      if (totalUploaded === 0 && totalSkipped > 0) {
+        // Deliberately NOT storing uploadResponse here — nothing was
+        // actually created, so the top-of-function "already uploaded" guard
+        // must not short-circuit a retry after the user fixes the file.
+        const reasons = [...new Set(skippedUsers.map((s) => s.reason).filter(Boolean))];
+        toast.error(
+          reasons.length > 0
+            ? `No users were added — ${reasons.join('; ')}`
+            : `No users were added — all ${totalSkipped} row(s) were skipped`,
+          { duration: 8000 }
+        );
+        return;
+      }
+
       setBatchData((current) => ({
         ...(current || {}),
         selectedHumanTemplate: DEFAULT_HUMAN_TEMPLATE,
         uploadResponse: data,
       }));
 
-      toast.success('Batch created successfully');
+      if (totalSkipped > 0) {
+        toast.success(`${totalUploaded} user${totalUploaded === 1 ? '' : 's'} created, ${totalSkipped} skipped — see Batch Status for details`);
+      } else {
+        toast.success('Batch created successfully');
+      }
       navigate('/org/batch-status');
     } catch (error) {
       toast.error(getApiError(error, 'Failed to create batch'));

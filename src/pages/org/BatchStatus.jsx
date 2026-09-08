@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { AuthLayout } from '@/components/layout/AuthLayout';
@@ -59,6 +59,18 @@ const getCertificateProductId = (rec) =>
   rec?.credential?.credentialSubject?.product_id ||
   rec?.credentialSubject?.product_id ||
   rec?.record?.credentialSubject?.product_id ||
+  null;
+
+// Same story for Human records — GET /sdc/records/{public_id} (the only
+// endpoint org callers can use) has no top-level title/recipients at all,
+// only public_id/credential/pdf/verify (confirmed live). The Human
+// identity actually lives at credential.credentialSubject.email, the exact
+// counterpart to Product's credentialSubject.product_id and Warranty's
+// credentialSubject.serial_no.
+const getCertificateEmail = (rec) =>
+  rec?.credential?.credentialSubject?.email ||
+  rec?.credentialSubject?.email ||
+  rec?.record?.credentialSubject?.email ||
   null;
 
 const VERIFIED_RECORD_STATUSES = new Set(['approved', 'verified']);
@@ -292,6 +304,11 @@ const BatchDetailModal = ({ batchId, batchName, onClose }) => {
   // certificate fetch) for batches where it came back empty.
   const [sdcStatus, setSdcStatus] = useState(null);
   const instanceKey = 'de';
+  // Bumped whenever a refreshCertificates call should be abandoned (a newer
+  // call started, or the batch/modal changed) — the polling loop below
+  // checks this before every state update so a stale, in-flight poll from a
+  // previous batch can never overwrite what's currently on screen.
+  const pollTokenRef = useRef(0);
 
   // Correct common certificate flow for an organization caller — never the
   // bulk GET /sdc/records list (Superadmin-only; an org calling it gets a
@@ -300,18 +317,42 @@ const BatchDetailModal = ({ batchId, batchName, onClose }) => {
   //   1. GET /sdc/batches/{batch_id}/status — the backend checks batch
   //      ownership + shared_with_org itself here and only returns
   //      certificate_ids once this org is actually allowed to see them.
+  //      Per its own documented contract this endpoint is "self-healing":
+  //      Dhiway's upload-csv is async, so the very first call can
+  //      legitimately come back done:false/certificate_ids:[] even after
+  //      generation succeeded — the doc explicitly says to "poll this after
+  //      generate until done is true" (each call re-checks and issues the
+  //      moment drafts appear). So this polls, it doesn't just call once.
   //   2. GET /sdc/records/{public_id} per id — fetch each certificate's own
   //      full detail directly, never search a bulk list for it.
   //   3. Match each fetched certificate to a record by identity (never by
   //      array position/order, which can silently swap two records):
-  //      product_id (== the record's own id, i.e. BatchUser.id) for Product
-  //      records, recipient email or exact title for Human records.
+  //      credentialSubject.product_id (== the record's own id, i.e.
+  //      BatchUser.id) for Product records, credentialSubject.email for
+  //      Human records (confirmed live — this endpoint's response has no
+  //      usable top-level title/recipients/email at all, only
+  //      public_id/credential/pdf/verify).
+  const POLL_INTERVAL_MS = 2500;
+  const POLL_MAX_ATTEMPTS = 12; // ~30s total — bounded wait, not indefinite
+
   const refreshCertificates = useCallback(async (records, batchType) => {
     if (!batchId || !records?.length) return;
+    const myToken = ++pollTokenRef.current;
     setCertsLoading(true);
     try {
-      const { data: statusData } = await sdcAPI.getBatchStatus(batchId);
-      setSdcStatus(statusData || null);
+      let statusData = null;
+      for (let attempt = 0; attempt < POLL_MAX_ATTEMPTS; attempt++) {
+        if (pollTokenRef.current !== myToken) return; // superseded by a newer call/batch change
+        const { data } = await sdcAPI.getBatchStatus(batchId);
+        statusData = data;
+        if (pollTokenRef.current !== myToken) return;
+        setSdcStatus(data || null);
+        const ready = data?.done || (Array.isArray(data?.certificate_ids) && data.certificate_ids.length > 0);
+        if (ready || attempt === POLL_MAX_ATTEMPTS - 1) break;
+        await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+      }
+      if (pollTokenRef.current !== myToken) return;
+
       const certIds = Array.isArray(statusData?.certificate_ids) ? statusData.certificate_ids : [];
       if (certIds.length === 0) { setSdcByRecordId({}); return; }
 
@@ -328,9 +369,8 @@ const BatchDetailModal = ({ batchId, batchName, onClose }) => {
               // reading top-level keys that don't exist on this endpoint.
               id: rec?.id || rec?.credential?.id || null,
               publicId: rec?.publicId || rec?.public_id || publicId,
-              title: rec?.title || null,
-              recipients: Array.isArray(rec?.recipients) ? rec.recipients : [],
               productId: getCertificateProductId(rec),
+              email: getCertificateEmail(rec),
               anchorTime: rec?.anchorTime || rec?.credential?.validFrom || rec?.credential?.issuanceDate || null,
               revoked: !!rec?.revoked,
               // Presence in certificate_ids already means the backend
@@ -344,6 +384,7 @@ const BatchDetailModal = ({ batchId, batchName, onClose }) => {
             .catch(() => null)
         )
       );
+      if (pollTokenRef.current !== myToken) return;
       const certs = fetched.filter(Boolean);
 
       const byId = {};
@@ -354,20 +395,14 @@ const BatchDetailModal = ({ batchId, batchName, onClose }) => {
         const recordId = getRecordKey(record);
         if (!recordId) return;
         const recordEmail = record?.email?.trim().toLowerCase();
-        const recordName = getRecordTitle(record)?.trim().toLowerCase();
         // batchType (this batch's own real batch_type) decides the branch —
         // Product batch users carry no product_name/category_name field at
         // all (their name is under full_name, exactly like a Human record),
         // so per-record sniffing alone silently misroutes every product
-        // here into the email/title branch, where it can never match.
+        // here into the email branch, where it can never match.
         const match = isProductRecord(record, batchType)
           ? certs.find((c) => c.productId && c.productId === recordId && !usedPublicIds.has(c.publicId))
-          : certs.find((c) => {
-              const recipients = c.recipients.map((v) => v?.trim().toLowerCase()).filter(Boolean);
-              const title = c.title?.trim().toLowerCase();
-              return !usedPublicIds.has(c.publicId) &&
-                ((recordEmail && recipients.includes(recordEmail)) || (recordName && title === recordName));
-            });
+          : certs.find((c) => recordEmail && c.email?.trim().toLowerCase() === recordEmail && !usedPublicIds.has(c.publicId));
         if (match) {
           usedPublicIds.add(match.publicId);
           byId[recordId] = match;
@@ -375,10 +410,12 @@ const BatchDetailModal = ({ batchId, batchName, onClose }) => {
       });
       setSdcByRecordId(byId);
     } catch (err) {
-      setSdcByRecordId({});
-      toast.error(getApiError(err, 'Failed to fetch certificates'));
+      if (pollTokenRef.current === myToken) {
+        setSdcByRecordId({});
+        toast.error(getApiError(err, 'Failed to fetch certificates'));
+      }
     } finally {
-      setCertsLoading(false);
+      if (pollTokenRef.current === myToken) setCertsLoading(false);
     }
   }, [batchId]);
 
@@ -402,6 +439,10 @@ const BatchDetailModal = ({ batchId, batchName, onClose }) => {
       })
       .catch((err) => toast.error(getApiError(err, 'Failed to load batch details')))
       .finally(() => setLoading(false));
+    // Cancel any in-flight poll (see refreshCertificates) when the batch
+    // changes or this modal unmounts, so a stale poll from a previous
+    // batch can never overwrite what's now on screen.
+    return () => { pollTokenRef.current += 1; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [batchId]);
 
