@@ -724,6 +724,14 @@ export const verificationAPI = {
   runAutoVerification: (verificationTypeName, userId) =>
     verificationApi.post(`/verification/verification/automatic/${verificationTypeName}/${userId}`),
 
+  // POST /verification/batches/{batch_id}/run-automatic — batch-level: runs
+  // every automatic verification check across all of the batch's users in
+  // one call. Distinct from runAutoVerification above, which is a single
+  // user + single type. Refetch the batch detail after this resolves so
+  // verification_checks statuses and can_generate_sdc reflect the new state.
+  runBatchAutomaticChecks: (batchId) =>
+    verificationApi.post(`/verification/batches/${batchId}/run-automatic`),
+
   // ── Product Warranty ──────────────────────────────────────────────────────
   downloadWarrantyTemplate: () =>
     verificationApi.get('/verification/products/warranty-template', { responseType: 'blob' }),

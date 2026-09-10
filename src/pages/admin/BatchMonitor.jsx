@@ -16,7 +16,7 @@ import { GenerateSDCModal, CertificateDetailModal } from '@/pages/admin/SDCVerif
 import { normalizeDhiwayDetails, resolveDhiwaySpaceId } from '@/utils/dhiway';
 import {
   ArrowRight, Building2, Calendar, CheckCircle, ChevronDown, ChevronLeft, ChevronRight, Clock, Download, Eye, Info,
-  Layers, Mail, MoreVertical, Package, Plus, RefreshCw, Search, Send, ShieldCheck, Sparkles, Trash2, User, Users, X, XCircle, Zap,
+  Layers, Mail, MoreVertical, Package, Play, Plus, RefreshCw, Search, Send, ShieldCheck, Sparkles, Trash2, User, Users, X, XCircle, Zap,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -1406,6 +1406,7 @@ export const BatchMonitor = () => {
   // Action loading states
   const [resending, setResending] = useState(null); // request token being resent
   const [sendingToOrg, setSendingToOrg] = useState(false);
+  const [runningAutomatic, setRunningAutomatic] = useState(false);
 
   // Submitted verifier reports (real backend data)
   const [submittedReports, setSubmittedReports] = useState(null);
@@ -1594,6 +1595,26 @@ export const BatchMonitor = () => {
   const paginatedBatches = visibleBatches.slice((safePage - 1) * pageSize, safePage * pageSize);
 
   const selectedBatch = batches.find((b) => b.id === selectedBatchId) || null;
+
+  // "Email to Verifiers" vs "Run Automatic Checks" visibility is driven
+  // entirely by the batch's own check labels from GET /verification/batches/
+  // {id} — never by any hardcoded verification name. Each entry carries
+  // label: "automatic" | "manual". `verification_checks` is the current
+  // field; `verification_types` is the older name for the same list, kept
+  // as a fallback for batch details that predate the rename.
+  const selectedBatchChecks = Array.isArray(batchDetail?.verification_checks)
+    ? batchDetail.verification_checks
+    : (Array.isArray(batchDetail?.verification_types) ? batchDetail.verification_types : []);
+  // Email to Verifiers: shown when any manual check exists (rules 2 & 3),
+  // hidden only when every check is automatic (rule 1). Anything not
+  // explicitly "automatic" counts as manual, and an unknown/not-yet-loaded
+  // list shows the button so the existing manual workflow is never hidden.
+  const batchHasManualCheck =
+    selectedBatchChecks.length === 0 ||
+    selectedBatchChecks.some((c) => c?.label !== 'automatic');
+  // Run Automatic Checks: shown only when the batch positively has at least
+  // one automatic check (rules 1 & 3).
+  const batchHasAutomaticCheck = selectedBatchChecks.some((c) => c?.label === 'automatic');
 
   const total    = batches.reduce((s, b) => s + b.total,    0);
   const pending  = batches.reduce((s, b) => s + b.pending,  0);
@@ -1934,6 +1955,28 @@ export const BatchMonitor = () => {
     }
     setSmartSendOpen(true);
   }, [batchDetail]);
+
+  // Batch-level automatic verification — fires POST /verification/batches/
+  // {id}/run-automatic (runs every automatic check across the batch's
+  // users), then refetches the batch detail so verification_checks status
+  // and can_generate_sdc reflect the backend's new state, plus the outer
+  // list so the row's status badge updates too.
+  const handleRunAutomaticChecks = useCallback(async () => {
+    const batchId = selectedBatchId;
+    if (!batchId) return;
+    setRunningAutomatic(true);
+    try {
+      await verificationAPI.runBatchAutomaticChecks(batchId);
+      toast.success('Automatic checks started');
+      const detailRes = await verificationAPI.getBatchDetails(batchId).catch(() => null);
+      if (detailRes) setBatchDetail(detailRes.data);
+      fetchData(true);
+    } catch (err) {
+      toast.error(getApiError(err, 'Failed to run automatic checks'));
+    } finally {
+      setRunningAutomatic(false);
+    }
+  }, [selectedBatchId, fetchData]);
 
   // Opens a blank tab synchronously (in the same tick as the click) and
   // redirects it once the URL arrives — awaiting the fetch first and only
@@ -2604,8 +2647,22 @@ export const BatchMonitor = () => {
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-1 gap-2">
 
-                  {/* Smart Send — assign multiple verifiers per type with random split */}
-                  {(selectedBatch.status === 'pending' || selectedBatch.status === 'processing' || selectedBatch.status === 'verification_in_progress') && (
+                  {/* Run Automatic Checks — batch-level automatic verification.
+                      Shown whenever the batch has ≥1 automatic check (all-automatic
+                      or mixed), while verification is still in progress. */}
+                  {batchHasAutomaticCheck
+                    && (selectedBatch.status === 'pending' || selectedBatch.status === 'processing' || selectedBatch.status === 'verification_in_progress') && (
+                    <Button variant="primary" size="sm" icon={runningAutomatic ? RefreshCw : Play} className="justify-start"
+                      disabled={runningAutomatic}
+                      onClick={handleRunAutomaticChecks}>
+                      {runningAutomatic ? 'Running…' : 'Run Automatic Checks'}
+                    </Button>
+                  )}
+
+                  {/* Smart Send — assign multiple verifiers per type with random split.
+                      Hidden for all-automatic batches (no verifier email step). */}
+                  {batchHasManualCheck
+                    && (selectedBatch.status === 'pending' || selectedBatch.status === 'processing' || selectedBatch.status === 'verification_in_progress') && (
                     <Button variant="primary" size="sm" icon={Zap} className="justify-start"
                       onClick={() => openSmartSend(selectedBatch)}>
                       Email to Verifiers
@@ -2613,11 +2670,11 @@ export const BatchMonitor = () => {
                   )}
 
                   {/* Generate SDC — same generate → poll /status → issue flow as SDC Verification.
-                      Backend now 400s with "no approved users" if none are approved yet, so
-                      disable proactively instead of letting the admin hit that round-trip. */}
+                      Eligibility is the backend's call: use can_generate_sdc from the
+                      batch detail directly, never a frontend-computed condition. */}
                   <Button variant="outline" size="sm" icon={Sparkles} className="justify-start"
-                    disabled={selectedBatch.verified === 0}
-                    title={selectedBatch.verified === 0 ? 'No approved users in this batch yet' : undefined}
+                    disabled={!batchDetail?.can_generate_sdc}
+                    title={!batchDetail?.can_generate_sdc ? 'This batch is not ready for SDC generation yet' : undefined}
                     onClick={() => setSdcGenerateBatch(selectedBatch)}>
                     {sdcInfo?.status ? 'Regenerate SDC' : 'Generate SDC'}
                   </Button>

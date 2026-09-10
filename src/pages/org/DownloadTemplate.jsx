@@ -58,6 +58,58 @@ const FIELD_ALIASES = {
   state:          ['state'],
 };
 
+// Document-type-aware field sets. The backend classifies each uploaded
+// document and returns `document_type` on every successful_users[] entry
+// (canonical: "driving_license" | "aadhaar" | "pan"); we render ONLY that
+// type's fields — the type is never inferred from OCR field names, formats,
+// or filenames. `custom: true` marks a field whose value lives in
+// custom_fields (both when reading it back and when PATCHing) rather than as
+// a top-level batch-user column. `aliases` are the OCR `extracted`-blob key
+// variants to prefill from.
+const DOC_TYPE_FIELDS = {
+  driving_license: [
+    { key: 'full_name',      label: 'Full Name',      aliases: ['full_name', 'name'] },
+    { key: 'dob',            label: 'Date of Birth', hint: 'YYYY-MM-DD', aliases: ['dob', 'date_of_birth'] },
+    { key: 'license_number', label: 'License Number', aliases: ['license_number', 'dl_number', 'dl_no', 'licence_number', 'dl'] },
+    { key: 'issue_date',     label: 'Issue Date',     custom: true, aliases: ['issue_date', 'doi', 'date_of_issue'] },
+    { key: 'valid_till',     label: 'Valid Till',     custom: true, aliases: ['valid_till', 'valid_upto', 'doe', 'date_of_expiry', 'expiry_date'] },
+    { key: 'address_line1',  label: 'Address',        aliases: ['address_line1', 'address', 'full_address'] },
+    { key: 'pincode',        label: 'Pincode',        aliases: ['pincode', 'pin_code', 'pin'] },
+  ],
+  aadhaar: [
+    { key: 'full_name',     label: 'Full Name',      aliases: ['full_name', 'name'] },
+    { key: 'dob',           label: 'Date of Birth', hint: 'YYYY-MM-DD', aliases: ['dob', 'date_of_birth'] },
+    { key: 'birth_year',    label: 'Birth Year',     custom: true, aliases: ['birth_year', 'year_of_birth', 'yob'] },
+    { key: 'gender',        label: 'Gender',         custom: true, aliases: ['gender', 'sex'] },
+    { key: 'aadhar_number', label: 'Aadhaar Number', aliases: ['aadhar_number', 'aadhaar_number', 'aadhaar_no', 'aadhar_no', 'uid'] },
+    { key: 'address_line1', label: 'Address',        aliases: ['address_line1', 'address', 'full_address'] },
+    { key: 'pincode',       label: 'Pincode',        aliases: ['pincode', 'pin_code', 'pin'] },
+  ],
+  pan: [
+    { key: 'full_name',   label: 'Full Name',     aliases: ['full_name', 'name'] },
+    { key: 'father_name', label: "Father's Name", custom: true, aliases: ['father_name', 'fathers_name', 'father_s_name', 'father'] },
+    { key: 'pan_number',  label: 'PAN Number',    aliases: ['pan_number', 'pan', 'pan_no'] },
+    { key: 'dob',         label: 'Date of Birth', hint: 'YYYY-MM-DD', aliases: ['dob', 'date_of_birth'] },
+  ],
+};
+
+const DOC_TYPE_LABELS = {
+  driving_license: 'Driving License',
+  aadhaar: 'Aadhaar',
+  pan: 'PAN',
+};
+
+const normalizeDocType = (value) =>
+  (typeof value === 'string' ? value.trim().toLowerCase() : '');
+
+// Only the backend value decides. Anything that isn't one of the three
+// canonical types — including "document", null, undefined, "" — falls back
+// to the existing generic field list. We never guess DL/Aadhaar/PAN.
+const getReviewFields = (documentType) => {
+  const dt = normalizeDocType(documentType);
+  return DOC_TYPE_FIELDS[dt] || REVIEW_FIELDS;
+};
+
 // OCR commonly returns DOB as DD/MM/YYYY or DD-MM-YYYY — PATCH expects
 // YYYY-MM-DD (per the documented example "1998-04-12").
 const normalizeDob = (value) => {
@@ -74,22 +126,27 @@ const sanitizeKey = (value) =>
     .replace(/[^a-z0-9]+/g, '_')
     .replace(/^_+|_+$/g, '');
 
-// Builds each user's editable form: known fields prefilled by trying every
-// alias in FIELD_ALIASES against the raw `extracted` blob (falling back to
-// the top-level user field first, since that's sometimes already normalised
-// server-side). Anything in `extracted` that isn't consumed by any alias is
-// kept in `_customFields` so it isn't silently lost — it goes out under
-// PATCH's `custom_fields` on confirm instead of just being shown as text.
+// Builds each user's editable form. Which fields are shown is decided
+// solely by the backend's `document_type` (getReviewFields). Each field is
+// prefilled from the top-level user column (or custom_fields for `custom`
+// fields), falling back to any alias against the raw `extracted` blob.
+// Anything in `extracted` that no field consumed — plus any pre-existing
+// custom_fields not surfaced as an editable field — is kept in
+// `_customFields` so it's never silently lost; it goes out under PATCH's
+// `custom_fields` on confirm and is shown in the "Also Extracted" row.
 const buildInitialForms = (result) => {
   const users = result?.successful_users || [];
   const map = {};
   users.forEach((u) => {
-    const extracted = u.extracted || {};
+    const extracted = (u.extracted && typeof u.extracted === 'object') ? u.extracted : {};
+    const existingCustom = (u.custom_fields && typeof u.custom_fields === 'object') ? u.custom_fields : {};
+    const docType = normalizeDocType(u.document_type);
+    const fields = getReviewFields(docType);
     const consumedKeys = new Set();
     const values = {};
-    REVIEW_FIELDS.forEach((f) => {
-      const aliases = FIELD_ALIASES[f.key] || [f.key];
-      let value = u[f.key];
+    fields.forEach((f) => {
+      const aliases = f.aliases || FIELD_ALIASES[f.key] || [f.key];
+      let value = f.custom ? existingCustom[f.key] : u[f.key];
       if (value === undefined || value === null || value === '') {
         const aliasKey = aliases.find((a) => extracted[a] !== undefined && extracted[a] !== null && extracted[a] !== '');
         if (aliasKey) {
@@ -97,11 +154,23 @@ const buildInitialForms = (result) => {
           consumedKeys.add(aliasKey);
         }
       }
+      // `dob` is always normalized DD/MM/YYYY → YYYY-MM-DD (both generic and
+      // document-typed flows, PATCH expects the ISO form). Everything else,
+      // including issue_date / valid_till, is shown exactly as extracted.
       values[f.key] = f.key === 'dob' ? normalizeDob(value) : (value ?? '');
     });
-    values._customFields = Object.fromEntries(
+
+    const leftover = Object.fromEntries(
       Object.entries(extracted).filter(([k]) => !consumedKeys.has(k))
     );
+    const surfacedCustomKeys = new Set(fields.filter((f) => f.custom).map((f) => f.key));
+    Object.entries(existingCustom).forEach(([k, v]) => {
+      if (!surfacedCustomKeys.has(k) && !(k in leftover)) leftover[k] = v;
+    });
+
+    values._docType = DOC_TYPE_FIELDS[docType] ? docType : '';
+    values._customKeys = fields.filter((f) => f.custom).map((f) => f.key);
+    values._customFields = leftover;
     map[u.id] = values;
   });
   return map;
@@ -130,9 +199,31 @@ const ReviewOcrModal = ({ isOpen, ocrResult, onClose, onDone }) => {
   const updateField = (userId, key, value) =>
     setForms((prev) => ({ ...prev, [userId]: { ...prev[userId], [key]: value } }));
 
+  // Split the form back into top-level batch-user fields and custom_fields:
+  // fields flagged `custom` in DOC_TYPE_FIELDS (issue_date, valid_till,
+  // gender, father_name) are merged into custom_fields alongside the
+  // untouched leftover OCR data, never sent as top-level PATCH keys.
+  // `_docType` / `_customKeys` are internal-only and never sent.
   const buildPayload = (userId) => {
-    const { _customFields, ...fields } = forms[userId] || {};
-    return { ...fields, custom_fields: _customFields, mark_reviewed: true };
+    const { _customFields, _customKeys, _docType, ...allFields } = forms[userId] || {};
+    const customKeySet = new Set(_customKeys || []);
+    const topLevel = {};
+    const customFromForm = {};
+    Object.entries(allFields).forEach(([k, v]) => {
+      if (customKeySet.has(k)) {
+        // Only carry a non-empty edit into custom_fields — mirrors how
+        // cleanObject already drops empty top-level fields, so an untouched
+        // empty field never overwrites anything server-side.
+        if (v !== undefined && v !== null && String(v).trim() !== '') customFromForm[k] = v;
+      } else {
+        topLevel[k] = v;
+      }
+    });
+    return {
+      ...topLevel,
+      custom_fields: { ...(_customFields || {}), ...customFromForm },
+      mark_reviewed: true,
+    };
   };
 
   const confirmUser = async (userId) => {
@@ -173,12 +264,16 @@ const ReviewOcrModal = ({ isOpen, ocrResult, onClose, onDone }) => {
           {users.map((u) => {
             const isConfirmed = confirmedIds.has(u.id);
             const values = forms[u.id] || {};
+            const docTypeLabel = DOC_TYPE_LABELS[normalizeDocType(u.document_type)] || null;
+            const userFields = getReviewFields(u.document_type);
             return (
               <div key={u.id} className={`rounded-2xl border p-4 ${isConfirmed ? 'border-emerald-200 bg-emerald-50/40' : 'border-slate-200 bg-white'}`}>
                 <div className="mb-3 flex items-center justify-between gap-3">
                   <div className="min-w-0">
                     <p className="truncate font-sora text-sm font-semibold text-slate-950">{u.full_name || 'Unnamed record'}</p>
-                    <p className="truncate font-inter text-xs text-slate-400">{u.email || 'No email extracted'}</p>
+                    <p className="truncate font-inter text-xs text-slate-400">
+                      {docTypeLabel || u.email || 'No email extracted'}
+                    </p>
                   </div>
                   {isConfirmed ? (
                     <span className="flex shrink-0 items-center gap-1 rounded-full bg-emerald-100 px-2.5 py-1 text-[11px] font-semibold text-emerald-700">
@@ -197,7 +292,7 @@ const ReviewOcrModal = ({ isOpen, ocrResult, onClose, onDone }) => {
                 </div>
 
                 <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
-                  {REVIEW_FIELDS.map((f) => (
+                  {userFields.map((f) => (
                     <div key={f.key}>
                       <label className="block font-inter text-[11px] font-medium text-slate-500 mb-1">{f.label}</label>
                       <input
