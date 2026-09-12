@@ -2,7 +2,11 @@ import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X } from 'lucide-react';
 
-export const Modal = ({ isOpen, onClose, title, children, size = 'md' }) => {
+// `sidePanel` is optional — when provided (and isOpen), it renders as a
+// second card docked to the right of the main dialog, inside the same
+// overlay, sliding in/out independently. Existing callers that don't pass
+// it are completely unaffected.
+export const Modal = ({ isOpen, onClose, title, children, size = 'md', sidePanel = null, sidePanelWidth = 'max-w-sm' }) => {
   const sizes = {
     sm: 'max-w-sm',
     md: 'max-w-md',
@@ -27,26 +31,41 @@ export const Modal = ({ isOpen, onClose, title, children, size = 'md' }) => {
             className="absolute inset-0 bg-black/50 backdrop-blur-sm"
             onClick={onClose}
           />
-          <motion.div
-            initial={{ scale: 0.95, opacity: 0, y: 20 }}
-            animate={{ scale: 1, opacity: 1, y: 0 }}
-            exit={{ scale: 0.95, opacity: 0, y: 20 }}
-            transition={{ duration: 0.2 }}
-            className={`relative w-full ${sizes[size]} bg-white rounded-2xl shadow-xl overflow-hidden max-h-[92vh] flex flex-col`}
-          >
-            {title && (
-              <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
-                <h3 className="font-sora font-semibold text-lg text-brand-dark">{title}</h3>
-                <button
-                  onClick={onClose}
-                  className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors"
+          <div className="relative flex max-h-[92vh] items-stretch gap-4">
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.95, opacity: 0, y: 20 }}
+              transition={{ duration: 0.2 }}
+              className={`w-full ${sizes[size]} bg-white rounded-2xl shadow-xl overflow-hidden max-h-[92vh] flex flex-col`}
+            >
+              {title && (
+                <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+                  <h3 className="font-sora font-semibold text-lg text-brand-dark">{title}</h3>
+                  <button
+                    onClick={onClose}
+                    className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors"
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
+              )}
+              <div className="p-6 overflow-y-auto scrollbar-hidden">{children}</div>
+            </motion.div>
+            <AnimatePresence>
+              {sidePanel && (
+                <motion.div
+                  initial={{ opacity: 0, x: 24 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: 24 }}
+                  transition={{ duration: 0.18 }}
+                  className={`hidden w-full ${sidePanelWidth} bg-white rounded-2xl shadow-xl overflow-hidden max-h-[92vh] flex-col sm:flex`}
                 >
-                  <X size={20} />
-                </button>
-              </div>
-            )}
-            <div className="p-6 overflow-y-auto scrollbar-hidden">{children}</div>
-          </motion.div>
+                  {sidePanel}
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
         </motion.div>
       )}
     </AnimatePresence>

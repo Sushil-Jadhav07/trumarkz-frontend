@@ -483,27 +483,40 @@ export const GenerateSDCModal = ({ batch, onClose, onGenerated, liveStatus, poll
     }
 
     // Done — minimal summary + a direct way to actually view the certificate.
+    const issuedLabel = liveStatus
+      ? `${liveStatus.ready}/${liveStatus.total} issued`
+      : `${result.issued_count ?? 0}/${result.records_sent ?? '—'} issued`;
     return (
       <Modal isOpen onClose={onClose} title="Certificates Issued" size="md">
-        <div className="space-y-4">
-          <div className="flex items-center gap-2 px-4 py-3 rounded-xl border bg-green-50 border-green-100">
-            <Badge status="success">SDC Created</Badge>
-            <span className="text-xs text-green-700 font-inter">
-              {liveStatus ? `${liveStatus.ready}/${liveStatus.total} issued` : `${result.issued_count ?? 0}/${result.records_sent ?? '—'} issued`}
-            </span>
+        <div className="space-y-5">
+          {/* Success summary */}
+          <div className="flex items-center gap-3 rounded-2xl border border-emerald-100 bg-gradient-to-r from-emerald-50 to-green-50 px-4 py-3.5">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-emerald-500/15 text-emerald-600">
+              <CheckCircle size={20} />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold text-brand-dark font-inter">SDC Certificates Created</p>
+              <p className="text-xs text-emerald-700 font-inter">{issuedLabel}</p>
+            </div>
           </div>
 
           <div>
-            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 font-inter">Certificates</p>
+            <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-gray-400 font-inter">Certificates</p>
             {certLoading ? (
-              <div className="flex items-center justify-center gap-2 py-6 text-sm text-gray-400 font-inter">
-                <RefreshCw size={14} className="animate-spin" /> Fetching issued certificates…
+              <div className="flex flex-col items-center justify-center gap-2 rounded-2xl border border-gray-100 bg-gray-50/60 py-8">
+                <RefreshCw size={16} className="animate-spin text-brand-blue" />
+                <p className="text-xs text-gray-400 font-inter">Fetching issued certificates…</p>
               </div>
             ) : certMatches.length > 0 ? (
-              <div className="space-y-2">
+              <div className="max-h-64 space-y-2 overflow-y-auto pr-1">
                 {certMatches.map((m) => (
-                  <div key={m.publicId} className="flex items-center justify-between gap-3 rounded-xl border border-gray-100 bg-gray-50 px-3 py-2.5">
-                    <span className="min-w-0 flex-1 truncate text-sm font-medium text-brand-dark font-inter">{m.title}</span>
+                  <div key={m.publicId} className="flex items-center justify-between gap-3 rounded-xl border border-gray-100 bg-white px-3.5 py-2.5 transition-colors hover:border-brand-blue/30 hover:bg-blue-50/30">
+                    <div className="flex min-w-0 items-center gap-2.5">
+                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand-blue/10 text-brand-blue">
+                        <ShieldCheck size={14} />
+                      </div>
+                      <span className="min-w-0 truncate text-sm font-medium text-brand-dark font-inter">{m.title}</span>
+                    </div>
                     <Button variant="ghost" size="sm" loading={openingId === m.publicId} onClick={() => handleViewCertificate(m.publicId)}>
                       <Eye size={13} /> View
                     </Button>
@@ -511,9 +524,12 @@ export const GenerateSDCModal = ({ batch, onClose, onGenerated, liveStatus, poll
                 ))}
               </div>
             ) : (
-              <p className="text-xs text-gray-400 font-inter">
-                Not matched yet — Dhiway can take a minute to index new certificates. Reopen "Generate SDC" or use "Refresh Certificates" shortly.
-              </p>
+              <div className="flex items-start gap-2 rounded-xl border border-amber-100 bg-amber-50 px-3 py-2.5">
+                <AlertCircle size={13} className="mt-0.5 shrink-0 text-amber-500" />
+                <p className="text-xs text-amber-700 font-inter leading-relaxed">
+                  Not matched yet — Dhiway can take a minute to index new certificates. Reopen "Generate SDC" or use "Refresh Certificates" shortly.
+                </p>
+              </div>
             )}
           </div>
 

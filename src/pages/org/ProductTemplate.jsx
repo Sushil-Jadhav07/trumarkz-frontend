@@ -8,7 +8,7 @@ import { Card } from '@/components/ui/Card';
 import { Modal } from '@/components/ui/Modal';
 import { StepWizard } from '@/components/ui/StepWizard';
 import { FileUpload } from '@/components/ui/FileUpload';
-import { ArrowRight, CheckCircle, Download, FileText, RefreshCw, Upload, X } from 'lucide-react';
+import { ArrowRight, CheckCircle, Download, FileText, Image as ImageIcon, RefreshCw, Upload, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useApp } from '@/context/AppContext';
 import {
@@ -37,9 +37,15 @@ const BASE_FIELD = { key: 'product_name', label: 'Product Name', fixed: true };
 const downloadLocalFallback = (headers, fileName = 'product-template') => {
   const buildExample = (h) => {
     const k = h.toLowerCase();
-    // third+party+qr2 must always download blank — backend-populated only,
-    // via the verifier-report qr_slot workflow, never filled by hand.
+    // No third+party+qr field ever ships in the template, but stays blank
+    // defensively if one ever appears — backend-populated only, via the
+    // verifier-report qr_slot workflow, never filled by hand.
     if (k.includes('qr')) return '';
+    // product_image / blow_up_image are embedded-Excel-image cells (Insert →
+    // Image → Place in Cell), never typed text — must always download
+    // blank, and must be checked before the generic 'product' text match
+    // below (product_image contains "product").
+    if (k.includes('image')) return '';
     if (k.includes('customer')) return 'Aniket Jha';
     if (k.includes('sku')) return 'SKU-1001';
     if (k.includes('product')) return 'Example Product';
@@ -127,14 +133,14 @@ export const ProductTemplate = () => {
   // VERIFICATION_SERVICE_HEADERS to still match it.
   const [productHeaders, setProductHeaders] = useState(null);
 
-  // third+party+qr1 removed for now, per explicit request — filtered out
-  // here regardless of source (hardcoded fallback or the backend's own live
-  // template response) so it can never resurface in the modal or in the
-  // actual downloaded file, even if the backend's default template still
-  // includes it. third+party+qr2 is unaffected and stays.
+  // No third+party+qr field is ever part of the Product template anymore
+  // (backend removed all of qr1..4 from it) — strip any regardless of
+  // source (hardcoded fallback or the backend's own live template response)
+  // so one can never resurface in the modal or the actual downloaded file,
+  // even if a stale/cached template response still includes one.
   const serviceHeaders = selectedProductService?.id === 'warranty'
     ? (warrantyHeaders || WARRANTY_SERVICE_HEADERS)
-    : (productHeaders || VERIFICATION_SERVICE_HEADERS).filter((h) => !h.includes('qr1'));
+    : (productHeaders || VERIFICATION_SERVICE_HEADERS).filter((h) => !h.includes('qr'));
 
   const [modalOpen, setModalOpen] = useState(false);
   const [downloading, setDownloading] = useState(false);
@@ -220,9 +226,10 @@ export const ProductTemplate = () => {
 
   // Same idea for Product: ask the backend for its own default template (no
   // headers override) and read back whatever columns it actually generates
-  // — including third+party+qr1/qr2 — instead of only ever trusting our own
-  // hardcoded guess. Falls back to VERIFICATION_SERVICE_HEADERS silently on
-  // failure (e.g. if the backend requires a non-empty headers field).
+  // — including product_image/blow_up_image — instead of only ever trusting
+  // our own hardcoded guess. Falls back to VERIFICATION_SERVICE_HEADERS
+  // silently on failure (e.g. if the backend requires a non-empty headers
+  // field).
   useEffect(() => {
     if (isWarranty) return;
     let cancelled = false;
@@ -303,9 +310,11 @@ export const ProductTemplate = () => {
 
       if (!isWarranty) {
         // product_name and sku_no are required for the normal Product flow —
-        // the rest of VERIFICATION_SERVICE_HEADERS (model_no, brand, and
-        // third+party+qr2) are optional and must never block Continue.
-        // third+party+qr1 is excluded from this flow entirely. QR1/QR2 are
+        // the rest of VERIFICATION_SERVICE_HEADERS (model_no, brand,
+        // product_image, blow_up_image) are optional and must never block
+        // Continue — the two image columns especially, since a row with no
+        // embedded image for either is a normal, valid upload. No
+        // third+party+qr field is part of this flow at all; QR1..4 are
         // populated exclusively by the backend's own qr_slot verifier-report
         // workflow, assigned automatically by request-creation order once
         // manual verifications are sent.
@@ -611,9 +620,9 @@ export const ProductTemplate = () => {
                     <span className="rounded-full bg-brand-blue/10 px-2.5 py-1 font-inter text-[10px] font-semibold uppercase text-brand-blue">
                       Fixed
                     </span>
-                  ) : key.includes('qr') ? (
-                    <span className="rounded-full bg-amber-50 px-2.5 py-1 font-inter text-[10px] font-semibold uppercase text-amber-600">
-                      Leave Empty
+                  ) : key.includes('image') ? (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-indigo-50 px-2.5 py-1 font-inter text-[10px] font-semibold uppercase text-indigo-600">
+                      <ImageIcon size={10} /> Embedded Image
                     </span>
                   ) : VERIFICATION_REQUIRED_HEADERS.includes(key) && (
                     <span className="rounded-full bg-red-50 px-2.5 py-1 font-inter text-[10px] font-semibold uppercase text-red-500">
@@ -623,6 +632,12 @@ export const ProductTemplate = () => {
                 </div>
               ))}
             </div>
+            {!isWarranty && serviceHeaders.some((key) => key.includes('image')) && (
+              <p className="mt-2.5 rounded-xl border border-indigo-100 bg-indigo-50/60 px-3 py-2 font-inter text-[11px] text-indigo-700">
+                Image columns aren't typed text — in Excel, use <span className="font-semibold">Insert → Picture → Place in Cell</span> on that
+                cell for each product's row. Leave the cell empty for a row with no image; the product still uploads normally.
+              </p>
+            )}
           </div>
 
           {/* Final columns preview — fields are fixed for both flows, no

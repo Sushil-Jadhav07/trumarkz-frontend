@@ -121,22 +121,23 @@ export const WARRANTY_SERVICE_HEADERS = [
   'expiration_date',
 ];
 
-// Canonical column set for the normal Product Verification flow. `sku_no` is
-// mandatory alongside product_name (it's the collision-proof key the backend
-// uses internally; the frontend no longer attaches any document during this
-// upload at all). third+party+qr1 is intentionally excluded (removed per
-// explicit request); third+party+qr2 is kept for column-structure parity
-// with the backend template, always downloaded blank — the org user must
-// never fill it in manually. Both QR columns are ultimately populated
-// exclusively by the backend's own qr_slot verifier-report workflow
-// (assigned automatically by request-creation order); the frontend never
-// selects or sends a qr_slot.
+// Canonical column set for the normal Product Verification flow, matching
+// the backend's current DEFAULT_PRODUCT_HEADERS (2026-09 Dhiway schema
+// update). `sku_no` is mandatory alongside product_name (it's the
+// collision-proof key the backend uses internally). `product_image` /
+// `blow_up_image` are embedded-Excel-image columns (Insert → Image → Place
+// in Cell), never typed text — see the "Image" field badge and the blank
+// example value in downloadLocalFallback. third+party+qr1..4 are NOT part of
+// the template at all anymore (removed on the backend side) — they're
+// backend/verification outputs only, populated exclusively via the
+// qr_slot verifier-report workflow; the frontend never selects or sends one.
 export const VERIFICATION_SERVICE_HEADERS = [
   'product_name',
   'sku_no',
   'model_no',
   'brand',
-  'third+party+qr2',
+  'product_image',
+  'blow_up_image',
 ];
 
 export const VERIFICATION_REQUIRED_HEADERS = ['product_name', 'sku_no'];

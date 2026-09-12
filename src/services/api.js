@@ -559,6 +559,24 @@ export const verificationAPI = {
   shareWithOrganization: (batchId) =>
     verificationApi.post(`/verification/batches/${batchId}/share-with-organization`),
 
+  // DELETE /verification/batches/{batch_id} — superadmin only. Permanently
+  // hard-deletes the ENTIRE batch: BatchUsers, UserDocuments, manual
+  // verification requests, audit logs, verification/SDC state, and every
+  // batch-owned GCS file (uploaded documents/photos, Product images/
+  // blow-up images, verification reports, Excel/CSV, manual verifier
+  // reports). For a Warranty batch, its reserved WarrantySerialNumber rows
+  // are deleted too (serial-number registry reset — generation logic
+  // itself is unchanged). Works from pending/completed/approved/rejected/
+  // sdc_generated/issued/shared states; 409 if the batch is currently
+  // "processing" (nothing deleted — safe to retry once it settles), 404 if
+  // it's already gone. If a Dhiway credential was already issued, it is
+  // NOT revoked by this call (Dhiway has no such API) — the local batch and
+  // its data are still deleted, and the response may carry orphaned
+  // credential/public-id info to warn about, never implying the external
+  // credential itself was removed.
+  deleteBatch: (batchId) =>
+    verificationApi.delete(`/verification/batches/${batchId}`),
+
   // DELETE /verification/batches/{batch_id}/users/{batch_user_id} —
   // superadmin only. Permanently removes one customer from a batch (cascades
   // their documents/audit logs) without touching the batch or its other
@@ -723,14 +741,6 @@ export const verificationAPI = {
   // ── Run automatic verification ────────────────────────────────────────────
   runAutoVerification: (verificationTypeName, userId) =>
     verificationApi.post(`/verification/verification/automatic/${verificationTypeName}/${userId}`),
-
-  // POST /verification/batches/{batch_id}/run-automatic — batch-level: runs
-  // every automatic verification check across all of the batch's users in
-  // one call. Distinct from runAutoVerification above, which is a single
-  // user + single type. Refetch the batch detail after this resolves so
-  // verification_checks statuses and can_generate_sdc reflect the new state.
-  runBatchAutomaticChecks: (batchId) =>
-    verificationApi.post(`/verification/batches/${batchId}/run-automatic`),
 
   // ── Product Warranty ──────────────────────────────────────────────────────
   downloadWarrantyTemplate: () =>
