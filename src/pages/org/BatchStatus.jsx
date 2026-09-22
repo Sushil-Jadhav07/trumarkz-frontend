@@ -892,7 +892,7 @@ const BatchDetailModal = ({ batchId, batchName, onClose, asPage = false, onLoade
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[860px]">
-                  <thead className="border-b border-gray-100 bg-white">
+                  <thead className="bg-gray-50">
                     <tr>
                       <th className="px-5 py-3 text-left font-inter text-[10px] font-bold uppercase tracking-[0.12em] text-gray-400">
                         #
@@ -914,7 +914,7 @@ const BatchDetailModal = ({ batchId, batchName, onClose, asPage = false, onLoade
                       </th>
                     </tr>
                   </thead>
-                  <tbody>
+                  <tbody className="divide-y divide-gray-100">
                     {pagedRecords.map((record, i) => {
                       const Icon = isProductRecord(record, detail.batchType) ? Package : User;
                       // overall_status_label (verified/partially_verified/rejected/
@@ -933,7 +933,7 @@ const BatchDetailModal = ({ batchId, batchName, onClose, asPage = false, onLoade
                           initial={{ opacity: 0 }}
                           animate={{ opacity: 1 }}
                           transition={{ delay: i * 0.04 }}
-                          className="border-b border-gray-50 transition-colors last:border-0 hover:bg-gray-50/60"
+                          className="transition-colors hover:bg-gray-50/60"
                         >
                           <td className="px-5 py-3.5 font-inter text-sm text-gray-400">{recordStart + i + 1}</td>
                           <td className="px-5 py-3.5">
