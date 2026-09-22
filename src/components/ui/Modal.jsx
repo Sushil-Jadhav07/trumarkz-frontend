@@ -6,7 +6,7 @@ import { X } from 'lucide-react';
 // second card docked to the right of the main dialog, inside the same
 // overlay, sliding in/out independently. Existing callers that don't pass
 // it are completely unaffected.
-export const Modal = ({ isOpen, onClose, title, children, size = 'md', sidePanel = null, sidePanelWidth = 'max-w-sm' }) => {
+export const Modal = ({ isOpen, onClose, title, description = null, children, size = 'md', sidePanel = null, sidePanelWidth = 'max-w-sm' }) => {
   const sizes = {
     sm: 'max-w-sm',
     md: 'max-w-md',
@@ -15,6 +15,8 @@ export const Modal = ({ isOpen, onClose, title, children, size = 'md', sidePanel
     '2xl': 'max-w-2xl',
     '4xl': 'max-w-4xl',
     '5xl': 'max-w-5xl',
+    '6xl': 'max-w-6xl',
+    '7xl': 'max-w-7xl',
     full: 'max-w-full'
   };
 
@@ -41,7 +43,10 @@ export const Modal = ({ isOpen, onClose, title, children, size = 'md', sidePanel
             >
               {title && (
                 <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
-                  <h3 className="font-sora font-semibold text-lg text-brand-dark">{title}</h3>
+                  <div className="min-w-0">
+                    <h3 className="font-sora font-semibold text-lg text-brand-dark">{title}</h3>
+                    {description && <p className="mt-0.5 text-xs text-gray-400 font-inter">{description}</p>}
+                  </div>
                   <button
                     onClick={onClose}
                     className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors"

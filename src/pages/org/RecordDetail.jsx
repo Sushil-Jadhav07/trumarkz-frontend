@@ -57,8 +57,14 @@ const DeleteDocumentModal = ({ doc, deleting, onClose, onConfirm }) => (
   </Modal>
 );
 
+// Accepts either the internal `verification_status` (unchanged) or the
+// newer, purely-presentational `overall_status_label` — callers should
+// prefer `record.overall_status_label || record.verification_status` for
+// display. A user with one rejected type and one approved type must read as
+// "Partially Verified", never fall through to "Rejected" below.
 const StatusBadge = ({ status }) => {
-  if (status === 'approved') return <Badge status="success">Approved</Badge>;
+  if (status === 'approved' || status === 'verified') return <Badge status="success">{status === 'verified' ? 'Verified' : 'Approved'}</Badge>;
+  if (status === 'partially_verified') return <Badge status="partial">Partially Verified</Badge>;
   if (status === 'rejected') return <Badge status="error">Rejected</Badge>;
   return <Badge status="pending">Pending</Badge>;
 };
@@ -222,7 +228,7 @@ export const RecordDetail = () => {
               <h2 className="font-sora font-bold text-lg text-brand-dark">{recordTitle}</h2>
               <div className="flex items-center gap-2 mt-1 flex-wrap">
                 <Badge status="default">{recordTypeLabel}</Badge>
-                <StatusBadge status={record.verification_status} />
+                <StatusBadge status={record.overall_status_label || record.verification_status} />
                 {record.verified_at && (
                   <span className="text-xs text-gray-400 font-inter">{formatDate(record.verified_at)}</span>
                 )}
@@ -261,6 +267,55 @@ export const RecordDetail = () => {
             </div>
           )}
         </Card>
+
+        {/* Per-type verification breakdown — verification_type_status isn't
+            confirmed present on this page's GET /verification/user/{id}
+            response (unlike the batch-detail endpoint), so this renders
+            defensively and simply stays hidden if the field is absent,
+            rather than assuming it's there. */}
+        {Object.keys(record.verification_type_status || {}).length > 0 && (
+          <Card className="p-5 mb-4">
+            <h3 className="font-sora font-semibold text-brand-dark mb-3 flex items-center gap-2">
+              <FileText size={16} className="text-brand-blue" />
+              Verification Details
+            </h3>
+            <div className="space-y-2.5">
+              {Object.entries(record.verification_type_status).map(([name, info]) => {
+                const checkStatus = info?.status || 'pending';
+                const tone = checkStatus === 'approved' ? 'text-green-600' : checkStatus === 'rejected' ? 'text-red-500' : 'text-amber-500';
+                const statusLabel = checkStatus === 'approved' ? 'Verified' : checkStatus === 'rejected' ? 'Rejected' : 'Pending';
+                const reportUrl = info?.report_url;
+                const canView = typeof reportUrl === 'string' && /^https?:\/\//i.test(reportUrl);
+                return (
+                  <div key={name} className="rounded-xl border border-gray-100 px-4 py-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-brand-dark font-inter truncate">{name}</p>
+                        {info?.label && <p className="text-[11px] uppercase tracking-wide text-gray-400 font-inter">{info.label}</p>}
+                      </div>
+                      <span className={`shrink-0 text-xs font-semibold font-inter ${tone}`}>{statusLabel}</span>
+                    </div>
+                    {checkStatus === 'rejected' && info?.rejection_reason && (
+                      <p className="mt-2 rounded-lg bg-red-50 px-2.5 py-1.5 text-xs text-red-600 font-inter">
+                        <span className="font-semibold">Reason: </span>{info.rejection_reason}
+                      </p>
+                    )}
+                    {canView && (
+                      <a
+                        href={reportUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="mt-2 inline-flex items-center gap-1.5 text-xs font-semibold text-brand-blue font-inter hover:underline"
+                      >
+                        <ExternalLink size={12} /> View Report
+                      </a>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </Card>
+        )}
 
         {record.documents?.length > 0 && (
           <Card className="p-5 mb-4">

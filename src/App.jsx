@@ -46,7 +46,7 @@ import DownloadTemplate from '@/pages/org/DownloadTemplate';
 import CostBreakdown from '@/pages/org/CostBreakdown';
 // import CertificatePreview from '@/pages/org/CertificatePreview';
 import CreateBatch from '@/pages/org/CreateBatch';
-import BatchStatus from '@/pages/org/BatchStatus';
+import BatchStatus, { BatchStatusDetail } from '@/pages/org/BatchStatus';
 import RecordDetail from '@/pages/org/RecordDetail';
 import PermissionSettings from '@/pages/org/PermissionSettings';
 import SelectProductSector from '@/pages/org/SelectProductSector';
@@ -80,7 +80,8 @@ import IndividualCredentials from '@/pages/individual/IndividualCredentials';
 import AllSkills from '@/pages/individual/AllSkills';
 import ShareProfile from '@/pages/individual/ShareProfile';
 import AdminDashboard from '@/pages/admin/AdminDashboard';
-import BatchMonitor from '@/pages/admin/BatchMonitor';
+import BatchMonitor, { WarrantyControlCenter } from '@/pages/admin/BatchMonitor';
+import BatchControlCenter from '@/pages/admin/BatchControlCenter';
 import Verifiers from '@/pages/admin/Verifiers';
 import SDCVerification from '@/pages/admin/SDCVerification';
 import PromoteSuperAdmin from '@/pages/admin/PromoteSuperAdmin';
@@ -169,6 +170,7 @@ const AnimatedRoutes = () => {
           {/* <Route path="/org/certificate-preview" element={<CertificatePreview />} /> */}
           <Route path="/org/create-batch" element={<CreateBatch />} />
           <Route path="/org/batch-status" element={<ProtectedRoute><BatchStatus /></ProtectedRoute>} />
+          <Route path="/org/batch-status/:batchId" element={<ProtectedRoute><BatchStatusDetail /></ProtectedRoute>} />
           <Route path="/org/record/:id" element={<RecordDetail />} />
 
           {/* ── Product verification flow ── */}
@@ -215,6 +217,8 @@ const AnimatedRoutes = () => {
           {/* ── Admin routes ── */}
           <Route path="/admin/dashboard" element={<ProtectedRoute><AdminRoute><AdminDashboard /></AdminRoute></ProtectedRoute>} />
           <Route path="/admin/batch-monitor" element={<ProtectedRoute><AdminRoute><BatchMonitor /></AdminRoute></ProtectedRoute>} />
+          <Route path="/admin/batch-monitor/:batchId" element={<ProtectedRoute><AdminRoute><BatchControlCenter /></AdminRoute></ProtectedRoute>} />
+          <Route path="/admin/batch-monitor/warranty/:batchId" element={<ProtectedRoute><AdminRoute><WarrantyControlCenter /></AdminRoute></ProtectedRoute>} />
           <Route path="/admin/verifiers" element={<ProtectedRoute><AdminRoute><Verifiers /></AdminRoute></ProtectedRoute>} />
           <Route path="/admin/sdc-verification" element={<ProtectedRoute><AdminRoute><SDCVerification /></AdminRoute></ProtectedRoute>} />
           <Route path="/admin/promote-super-admin" element={<ProtectedRoute><AdminRoute><PromoteSuperAdmin /></AdminRoute></ProtectedRoute>} />

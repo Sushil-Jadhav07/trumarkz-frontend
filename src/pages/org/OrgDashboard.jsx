@@ -10,7 +10,7 @@ import { useAuth } from '@/context/AuthContext';
 import { authAPI, verificationAPI, getApiError } from '@/services/api';
 import {
   Layers, Award, ArrowRight, Wallet,
-  Clock, CheckCircle, TrendingUp, Users, Shield, Globe, Lock, Zap, Briefcase
+  Clock, CheckCircle, TrendingUp, Users, Shield, Globe, Lock, Zap, Briefcase, AlertCircle
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -22,7 +22,9 @@ const activityStyles = {
 };
 
 const statusMeta = {
+  verified: { action: 'Verification completed', color: 'green', icon: CheckCircle },
   approved: { action: 'Verification completed', color: 'green', icon: CheckCircle },
+  partially_verified: { action: 'Verification partially completed', color: 'blue', icon: AlertCircle },
   rejected: { action: 'Verification failed', color: 'red', icon: Clock },
   pending: { action: 'Verification pending', color: 'orange', icon: Clock },
 };
@@ -162,7 +164,7 @@ export const OrgDashboard = () => {
     .sort((a, b) => new Date(b.updated_at || b.created_at || 0) - new Date(a.updated_at || a.created_at || 0))
     .slice(0, 4)
     .map((item) => {
-      const meta = statusMeta[item.verification_status] || statusMeta.pending;
+      const meta = statusMeta[item.overall_status_label || item.verification_status] || statusMeta.pending;
       return {
         action: meta.action,
         detail: item.full_name || item.email || 'Verification record',

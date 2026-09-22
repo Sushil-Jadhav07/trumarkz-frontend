@@ -1,16 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { AuthLayout } from '@/components/layout/AuthLayout';
 import { PageHeader } from '@/components/shared/PageHeader';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { ProgressBar } from '@/components/ui/ProgressBar';
 import { Modal } from '@/components/ui/Modal';
-import { verificationAPI, sdcAPI, getApiError } from '@/services/api';
+import { verificationAPI, sdcAPI, getApiError, triggerBlobDownload } from '@/services/api';
 import { useAuth } from '@/context/AuthContext';
 import { CertificateDetailModal } from '@/pages/admin/SDCVerification';
+import { VerificationDetailsModal } from '@/components/shared/VerificationDetailsModal';
 import { WarrantyDocumentCell } from '@/components/shared/WarrantyDocumentCell';
+import { TablePagination } from '@/components/shared/TablePagination';
 import { loadWarrantyCertificates } from '@/utils/warrantyCertificates';
 import {
   ChevronLeft, ChevronRight, CheckCircle, Clock, Download,
@@ -103,9 +105,15 @@ const summarizeRecordCounts = (records = []) => (
 const hasRenderableRecords = (batch) =>
   !!batch && (batch.total > 0 || batch.records.length > 0);
 
+// Accepts either the internal `verification_status` (unchanged) or the
+// newer, purely-presentational `overall_status_label` — callers should
+// prefer `record.overall_status_label || record.verification_status` for
+// display. A user with one rejected type and one approved type must read as
+// "Partially Verified", never fall through to "Rejected" below.
 const recordStatusBadge = (status) => {
   if (status === 'approved') return { variant: 'success', label: 'Approved' };
   if (status === 'verified') return { variant: 'success', label: 'Verified' };
+  if (status === 'partially_verified') return { variant: 'partial', label: 'Partially Verified' };
   if (status === 'rejected' || status === 'failed') return { variant: 'error',   label: 'Rejected' };
   return                            { variant: 'pending',  label: 'Pending' };
 };
@@ -224,6 +232,11 @@ const normaliseBatch = (b) => {
     verificationTypes,
     credentialVisibility: b.credential_visibility || '',
     verificationProgress: b.verification_progress || {},
+    // Only present on the single-batch detail response (GET
+    // /verification/batches/{batch_id}), not the list endpoint — null there,
+    // which is exactly "no rejected list generated yet" so no extra check
+    // is needed to tell the two cases apart.
+    rejectedList:         b.rejected_list || null,
     records,
   };
 };
@@ -288,14 +301,57 @@ const SegmentedBar = ({ total, verified, failed, pending }) => {
   );
 };
 
+// Swaps between rendering as the old <Modal> popup or a plain page div,
+// based on `asPage`, without remounting its children — same pattern as
+// WarrantyShell on the admin side's BatchMonitor.jsx.
+const BatchDetailShell = ({ asPage, isOpen, onClose, title, children }) => (
+  asPage
+    ? <div className="space-y-4">{children}</div>
+    : <Modal isOpen={isOpen} onClose={onClose} title={title} size="4xl">{children}</Modal>
+);
+
 // ── Batch Detail Modal ────────────────────────────────────────────────────────
-const BatchDetailModal = ({ batchId, batchName, onClose }) => {
+const BatchDetailModal = ({ batchId, batchName, onClose, asPage = false, onLoaded }) => {
   const [detail,  setDetail]  = useState(null);
   const [loading, setLoading] = useState(true);
   const [sdcByRecordId, setSdcByRecordId] = useState({});
   const [certsLoading, setCertsLoading] = useState(false);
   const [downloadingId, setDownloadingId] = useState(null);
   const [detailRecord, setDetailRecord] = useState(null);
+  // Records table — same TablePagination component the SuperAdmin's
+  // Verification Records table uses, instead of the old internal
+  // max-h-72 scrollbox that hid most rows behind a tiny scroll area.
+  const [recordPage, setRecordPage] = useState(1);
+  const [recordPageSize, setRecordPageSize] = useState(10);
+  // Rejected List — GET /verification/batches/{batch_id}'s own
+  // `rejected_list` field. NOT an email attachment; the file lives in a
+  // private GCS bucket, reachable only through these two authenticated
+  // endpoints (never a raw URL), which is why both are fetched as a blob
+  // rather than just navigating the browser to them.
+  const [rejectedListAction, setRejectedListAction] = useState(null); // 'view' | 'download' | null
+
+  const handleRejectedList = async (mode) => {
+    if (rejectedListAction) return;
+    setRejectedListAction(mode);
+    try {
+      const { data } = mode === 'download'
+        ? await verificationAPI.getRejectedListDownload(batchId)
+        : await verificationAPI.getRejectedListView(batchId);
+      const filename = detail?.rejectedList?.filename || 'rejected_list.xlsx';
+      if (mode === 'download') {
+        triggerBlobDownload(data, filename);
+      } else {
+        const url = URL.createObjectURL(data);
+        window.open(url, '_blank', 'noopener,noreferrer');
+        setTimeout(() => URL.revokeObjectURL(url), 60000);
+      }
+    } catch (err) {
+      toast.error(getApiError(err, 'Failed to fetch the rejected list'));
+    } finally {
+      setRejectedListAction(null);
+    }
+  };
+  const [verificationDetailsRecord, setVerificationDetailsRecord] = useState(null); // record shown in the per-user Verification Details modal
   // The real, authoritative SDC/sharing state — from GET /sdc/batches/
   // {batch_id}/status itself (sdc_status, shared_with_org, ready/total),
   // never from GET /verification/batches/{batch_id}'s verification_progress.sdc,
@@ -425,10 +481,12 @@ const BatchDetailModal = ({ batchId, batchName, onClose }) => {
     setDetail(null);
     setSdcByRecordId({});
     setSdcStatus(null);
+    setRecordPage(1);
     verificationAPI.getBatchDetails(batchId)
       .then(({ data }) => {
         const normalised = normaliseBatch(data);
         setDetail(normalised);
+        onLoaded?.(normalised);
         // Always check — GET /sdc/batches/{batch_id}/status is cheap and
         // safely returns an empty certificate_ids for a batch with nothing
         // generated/shared yet, so there's no need to gate this behind a
@@ -459,7 +517,10 @@ const BatchDetailModal = ({ batchId, batchName, onClose }) => {
         if (win) win.location.href = data.pdf;
       } else {
         win?.close();
-        toast.error('No PDF link on this certificate yet');
+        // Anchoring is async on Dhiway's side — a cert can appear issued
+        // slightly before its .vc endpoint actually has a PDF. Expected,
+        // brief finalizing window, not a real failure.
+        toast('This certificate is still finalizing — try again in a moment.', { icon: '⏳' });
       }
     } catch (err) {
       win?.close();
@@ -488,9 +549,12 @@ const BatchDetailModal = ({ batchId, batchName, onClose }) => {
   const hasMeta      = detail &&
     (detail.industryType.length > 0 || detail.verificationTypes.length > 0 || detail.credentialVisibility);
 
+  const recordStart = (recordPage - 1) * recordPageSize;
+  const pagedRecords = detail ? detail.records.slice(recordStart, recordStart + recordPageSize) : [];
+
   return (
     <>
-    <Modal isOpen={!!batchId} onClose={onClose} title={`${batchName} — Details`} size="4xl">
+    <BatchDetailShell asPage={asPage} isOpen={!!batchId} onClose={onClose} title={`${batchName || detail?.name || 'Batch'} — Details`}>
       {loading ? (
         <div className="flex flex-col items-center justify-center gap-3 py-16">
           <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-brand-blue/10 bg-brand-blue/5">
@@ -754,6 +818,69 @@ const BatchDetailModal = ({ batchId, batchName, onClose }) => {
             </div>
           )}
 
+          {/* ── Rejected List — generated by SuperAdmin, made available here
+              directly (never emailed, never a raw GCS URL — always the two
+              authenticated proxy endpoints below). Only rendered once one
+              has actually been generated for this batch
+              (detail.rejectedList != null — the backend's own
+              `rejected_list` field on GET /verification/batches/{id}). ── */}
+          {detail?.rejectedList && (
+            <div className="overflow-hidden rounded-2xl border border-red-100 bg-white">
+              <div className="flex flex-wrap items-start justify-between gap-4 p-4">
+                <div className="flex min-w-0 items-start gap-3">
+                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-red-50 text-red-500">
+                    <FileText size={18} />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="font-sora text-sm font-semibold text-brand-dark">Rejected List</p>
+                      <Badge status="success">Available</Badge>
+                    </div>
+                    <p className="mt-1 truncate font-inter text-xs text-gray-500">
+                      {detail.rejectedList.filename || 'Rejected users'}
+                    </p>
+                    <p className="mt-1.5 font-inter text-xs text-gray-400">
+                      {detail.rejectedList.total_rejected_users ?? 0} rejected user{(detail.rejectedList.total_rejected_users ?? 0) === 1 ? '' : 's'}
+                      {detail.rejectedList.generated_at ? ` · Generated ${formatDate(detail.rejectedList.generated_at)}` : ''}
+                    </p>
+                    {Array.isArray(detail.rejectedList.rejected_by_type) && detail.rejectedList.rejected_by_type.length > 0 && (
+                      <div className="mt-2.5 flex flex-wrap gap-1.5">
+                        {detail.rejectedList.rejected_by_type.map((t) => (
+                          <span
+                            key={t.verification_type_name}
+                            className="rounded-lg bg-red-50/60 px-2.5 py-1 font-inter text-[11px] text-gray-600"
+                          >
+                            {t.verification_type_name}: <span className="font-semibold text-red-500">{t.rejected_count}</span>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={!!rejectedListAction}
+                    onClick={() => handleRejectedList('view')}
+                    className="flex items-center gap-1.5 rounded-xl border border-gray-200 bg-white px-3 py-2 font-inter text-xs font-semibold text-gray-600 transition-colors hover:bg-gray-50 disabled:opacity-50"
+                  >
+                    {rejectedListAction === 'view' ? <RefreshCw size={12} className="animate-spin" /> : <Eye size={12} />}
+                    View
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!!rejectedListAction}
+                    onClick={() => handleRejectedList('download')}
+                    className="flex items-center gap-1.5 rounded-xl bg-red-500 px-3 py-2 font-inter text-xs font-semibold text-white transition-colors hover:bg-red-600 disabled:opacity-50"
+                  >
+                    {rejectedListAction === 'download' ? <RefreshCw size={12} className="animate-spin" /> : <Download size={12} />}
+                    Download
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* ── Records table ─────────────────────────────────────────────── */}
           {detail.records.length > 0 && (
             <div className="overflow-hidden rounded-2xl border border-gray-100">
@@ -763,26 +890,43 @@ const BatchDetailModal = ({ batchId, batchName, onClose }) => {
                   {detail.records.length} total
                 </span>
               </div>
-              <div className="max-h-72 overflow-y-auto">
-                <table className="w-full min-w-[680px]">
-                  <thead className="sticky top-0 z-10 border-b border-gray-100 bg-white">
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[860px]">
+                  <thead className="border-b border-gray-100 bg-white">
                     <tr>
+                      <th className="px-5 py-3 text-left font-inter text-[10px] font-bold uppercase tracking-[0.12em] text-gray-400">
+                        #
+                      </th>
                       <th className="px-5 py-3 text-left font-inter text-[10px] font-bold uppercase tracking-[0.12em] text-gray-400">
                         Record
                       </th>
                       <th className="px-5 py-3 text-left font-inter text-[10px] font-bold uppercase tracking-[0.12em] text-gray-400">
                         Status
                       </th>
-                      <th className="px-5 py-3 text-left font-inter text-[10px] font-bold uppercase tracking-[0.12em] text-gray-400 w-56">
+                      <th className="px-5 py-3 text-left font-inter text-[10px] font-bold uppercase tracking-[0.12em] text-gray-400 w-48">
+                        Verification
+                      </th>
+                      <th className="px-5 py-3 text-left font-inter text-[10px] font-bold uppercase tracking-[0.12em] text-gray-400">
                         Certificate
+                      </th>
+                      <th className="px-5 py-3 text-left font-inter text-[10px] font-bold uppercase tracking-[0.12em] text-gray-400">
+                        Actions
                       </th>
                     </tr>
                   </thead>
                   <tbody>
-                    {detail.records.map((record, i) => {
+                    {pagedRecords.map((record, i) => {
                       const Icon = isProductRecord(record, detail.batchType) ? Package : User;
-                      const sb   = recordStatusBadge(record.verification_status);
+                      // overall_status_label (verified/partially_verified/rejected/
+                      // pending) is the new user-facing status — prefer it for
+                      // display; verification_status stays the internal fallback.
+                      const sb   = recordStatusBadge(record.overall_status_label || record.verification_status);
                       const sdcMatch = sdcByRecordId[getRecordKey(record)] || null;
+                      // Per-user verification-type breakdown — already present on
+                      // every record from GET /verification/batches/{batch_id},
+                      // just not read before now.
+                      const checkEntries = Object.entries(record.verification_type_status || {});
+                      const approvedChecks = checkEntries.filter(([, v]) => v?.status === 'approved').length;
                       return (
                         <motion.tr
                           key={getRecordKey(record)}
@@ -791,6 +935,7 @@ const BatchDetailModal = ({ batchId, batchName, onClose }) => {
                           transition={{ delay: i * 0.04 }}
                           className="border-b border-gray-50 transition-colors last:border-0 hover:bg-gray-50/60"
                         >
+                          <td className="px-5 py-3.5 font-inter text-sm text-gray-400">{recordStart + i + 1}</td>
                           <td className="px-5 py-3.5">
                             <div className="flex items-center gap-3">
                               <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-brand-blue/10 bg-brand-blue/5">
@@ -810,29 +955,73 @@ const BatchDetailModal = ({ batchId, batchName, onClose }) => {
                             <Badge status={sb.variant}>{sb.label}</Badge>
                           </td>
                           <td className="px-5 py-3.5">
-                            {sdcMatch?.issued ? (
-                              <div className="flex items-center gap-2">
-                                <Badge status="info">Ready</Badge>
-                                <div className="flex items-center gap-0.5 rounded-lg border border-gray-100 bg-gray-50 p-0.5">
+                            {checkEntries.length === 0 ? (
+                              <span className="text-xs text-gray-300 font-inter">—</span>
+                            ) : (
+                              <div className="space-y-1">
+                                {checkEntries.map(([name, info]) => {
+                                  const checkStatus = info?.status || 'pending';
+                                  const dotTone = checkStatus === 'approved'
+                                    ? 'bg-green-500'
+                                    : checkStatus === 'rejected'
+                                      ? 'bg-red-500'
+                                      : 'bg-amber-400';
+                                  const rejectionReason = info?.rejection_reason;
+                                  const tooltip = checkStatus === 'rejected' && rejectionReason
+                                    ? `${name}: rejected — ${rejectionReason}`
+                                    : `${name}: ${checkStatus}`;
+                                  return (
+                                    <div key={name} className="flex items-center gap-1.5" title={tooltip}>
+                                      <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${dotTone}`} />
+                                      <span className="truncate text-[11px] text-gray-600 font-inter">{name}</span>
+                                    </div>
+                                  );
+                                })}
+                                <div className="mt-1 flex items-center justify-between gap-2">
+                                  <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 font-inter">
+                                    {approvedChecks}/{checkEntries.length} approved
+                                  </p>
                                   <button
                                     type="button"
-                                    disabled={downloadingId === sdcMatch.publicId}
-                                    onClick={() => handleDownloadCertificate(sdcMatch.publicId)}
-                                    className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold font-inter text-brand-blue transition-colors hover:bg-white hover:shadow-sm disabled:opacity-50"
+                                    onClick={() => setVerificationDetailsRecord(record)}
+                                    className="text-[10px] font-semibold text-brand-blue font-inter hover:underline"
                                   >
-                                    <Download size={12} className={downloadingId === sdcMatch.publicId ? 'animate-spin' : ''} /> Download
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => setDetailRecord(record)}
-                                    className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold font-inter text-gray-500 transition-colors hover:bg-white hover:text-brand-blue hover:shadow-sm"
-                                  >
-                                    <Info size={12} /> Detail
+                                    View Details
                                   </button>
                                 </div>
                               </div>
+                            )}
+                          </td>
+                          <td className="px-5 py-3.5">
+                            {sdcMatch?.issued ? (
+                              <span className="rounded-full bg-brand-blue px-3 py-1.5 text-xs font-semibold text-white font-inter">
+                                Ready
+                              </span>
                             ) : sdcMatch ? (
                               <Badge status="pending">Draft</Badge>
+                            ) : (
+                              <span className="text-xs text-gray-300 font-inter">-</span>
+                            )}
+                          </td>
+                          <td className="px-5 py-3.5">
+                            {sdcMatch?.issued ? (
+                              <div className="flex items-center gap-1.5">
+                                <button
+                                  type="button"
+                                  disabled={downloadingId === sdcMatch.publicId}
+                                  onClick={() => handleDownloadCertificate(sdcMatch.publicId)}
+                                  className="flex items-center gap-1 rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs font-semibold font-inter text-brand-blue transition-colors hover:bg-blue-50 disabled:opacity-50"
+                                >
+                                  <Download size={12} className={downloadingId === sdcMatch.publicId ? 'animate-spin' : ''} /> Download
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setDetailRecord(record)}
+                                  className="flex items-center gap-1 rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs font-semibold font-inter text-gray-500 transition-colors hover:bg-gray-50 hover:text-brand-blue"
+                                >
+                                  <Info size={12} /> Detail
+                                </button>
+                              </div>
                             ) : (
                               <span className="text-xs text-gray-300 font-inter">-</span>
                             )}
@@ -843,11 +1032,18 @@ const BatchDetailModal = ({ batchId, batchName, onClose }) => {
                   </tbody>
                 </table>
               </div>
+              <TablePagination
+                page={recordPage}
+                pageSize={recordPageSize}
+                total={detail.records.length}
+                onPageChange={setRecordPage}
+                onPageSizeChange={setRecordPageSize}
+              />
             </div>
           )}
         </div>
       )}
-    </Modal>
+    </BatchDetailShell>
 
     <CertificateDetailModal
       record={detailRecord}
@@ -855,7 +1051,50 @@ const BatchDetailModal = ({ batchId, batchName, onClose }) => {
       instanceKey={instanceKey}
       onClose={() => setDetailRecord(null)}
     />
+
+    <VerificationDetailsModal
+      record={verificationDetailsRecord}
+      title={verificationDetailsRecord ? getRecordTitle(verificationDetailsRecord) : ''}
+      subtitle={verificationDetailsRecord ? getRecordSubtitle(verificationDetailsRecord, detail?.batchType) : ''}
+      onClose={() => setVerificationDetailsRecord(null)}
+    />
     </>
+  );
+};
+
+// ── Batch Status Detail — dedicated page (was previously an in-page Modal
+// on the batch list, see BatchDetailShell above). Reached at
+// /org/batch-status/:batchId. Doesn't need the outer list's own batches
+// array — BatchDetailModal already fetches its own full detail from
+// batchId alone; onLoaded just reports the loaded name up for this page's
+// own heading (the Modal-mode title bar isn't rendered at all in page mode).
+export const BatchStatusDetail = () => {
+  const { batchId } = useParams();
+  const navigate = useNavigate();
+  const [batchName, setBatchName] = useState('');
+
+  return (
+    <AuthLayout title="Batch Status">
+      <div className="space-y-4">
+        <div>
+          <button
+            type="button"
+            onClick={() => navigate('/org/batch-status')}
+            className="mb-3 flex items-center gap-1.5 font-inter text-sm font-semibold text-brand-blue hover:underline"
+          >
+            <ChevronLeft size={14} /> Back to Batch Status
+          </button>
+          <h1 className="font-sora text-2xl font-bold text-brand-dark">{batchName || 'Batch Details'}</h1>
+        </div>
+        <BatchDetailModal
+          asPage
+          batchId={batchId}
+          batchName={batchName}
+          onLoaded={(detail) => setBatchName(detail?.name || '')}
+          onClose={() => navigate('/org/batch-status')}
+        />
+      </div>
+    </AuthLayout>
   );
 };
 
@@ -920,7 +1159,10 @@ const WarrantyDetailModal = ({ batchId, batchName, onClose }) => {
         if (win) win.location.href = rec.pdf;
       } else {
         win?.close();
-        toast.error('No PDF link on this certificate yet');
+        // Anchoring is async on Dhiway's side — a cert can appear issued
+        // slightly before its .vc endpoint actually has a PDF. Expected,
+        // brief finalizing window, not a real failure.
+        toast('This certificate is still finalizing — try again in a moment.', { icon: '⏳' });
       }
     } catch (err) {
       win?.close();
@@ -1109,8 +1351,6 @@ export const BatchStatus = () => {
   const [refreshing,   setRefreshing]   = useState(false);
   const [statusFilter, setStatusFilter] = useState('');
   const [page,         setPage]         = useState(0);
-  const [selectedId,   setSelectedId]   = useState(null);
-  const [selectedName, setSelectedName] = useState('');
   const [selectedWarrantyId,   setSelectedWarrantyId]   = useState(null);
   const [selectedWarrantyName, setSelectedWarrantyName] = useState('');
   const [showGstGate,  setShowGstGate]  = useState(false);
@@ -1437,7 +1677,14 @@ export const BatchStatus = () => {
                           animate={{ opacity: 1, y: 0 }}
                           exit={{ opacity: 0 }}
                           transition={{ delay: index * 0.04, duration: 0.22, ease: 'easeOut' }}
-                          className="border-b border-gray-50 transition-colors last:border-0 hover:bg-gray-50/60"
+                          onClick={() => {
+                            if (batch.batchType === 'warranty') {
+                              setSelectedWarrantyId(batch.id); setSelectedWarrantyName(batch.name);
+                            } else {
+                              navigate(`/org/batch-status/${batch.id}`);
+                            }
+                          }}
+                          className="cursor-pointer border-b border-gray-50 transition-colors last:border-0 hover:bg-gray-50/60"
                         >
                           <td className="px-5 py-4">
                             <div className="flex items-center gap-3">
@@ -1473,11 +1720,12 @@ export const BatchStatus = () => {
                           </td>
                           <td className="px-5 py-4 text-right">
                             <button
-                              onClick={() => {
+                              onClick={(e) => {
+                                e.stopPropagation();
                                 if (batch.batchType === 'warranty') {
                                   setSelectedWarrantyId(batch.id); setSelectedWarrantyName(batch.name);
                                 } else {
-                                  setSelectedId(batch.id); setSelectedName(batch.name);
+                                  navigate(`/org/batch-status/${batch.id}`);
                                 }
                               }}
                               className="inline-flex items-center gap-1.5 rounded-xl border border-brand-blue/20 bg-brand-blue/5 px-3 py-1.5 font-inter text-xs font-semibold text-brand-blue transition-all hover:bg-brand-blue hover:text-white"
@@ -1546,12 +1794,6 @@ export const BatchStatus = () => {
           </motion.div>
         )}
       </div>
-
-      <BatchDetailModal
-        batchId={selectedId}
-        batchName={selectedName}
-        onClose={() => { setSelectedId(null); setSelectedName(''); }}
-      />
 
       <WarrantyDetailModal
         batchId={selectedWarrantyId}

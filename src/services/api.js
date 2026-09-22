@@ -29,6 +29,18 @@ const PUBLIC_AUTH_ENDPOINTS = [
 const isPublicAuthEndpoint = (url = '') =>
   PUBLIC_AUTH_ENDPOINTS.some((endpoint) => url.includes(endpoint));
 
+// The three token-authenticated, no-login verifier endpoints (Human and
+// Product share this exact same flow — there is no separate Product
+// variant). A verifier hitting any of these must never carry the logged-in
+// admin/org's bearer token, and a 401 from any of them (bad/expired verifier
+// token) must never be treated as "the real user's session died" — that
+// would wipe the actual logged-in user's auth storage and bounce them to
+// /login mid-review just because a verifier link elsewhere was stale.
+const isPublicManualVerificationEndpoint = (url = '') =>
+  url.includes('/verification/manual/request-info/') ||
+  url.includes('/verification/manual/upload/') ||
+  url.includes('/verification/manual/verify/');
+
 const clearAuthStorage = () => {
   localStorage.removeItem('access_token');
   localStorage.removeItem('user_id');
@@ -115,7 +127,7 @@ verificationApi.interceptors.request.use(
     const isPublicUpload =
       config.url?.includes('/verification/upload/photo') ||
       config.url?.includes('/verification/upload/document') ||
-      config.url?.includes('/verification/manual/upload/');
+      isPublicManualVerificationEndpoint(config.url);
 
     if (token && !isPublicUpload) {
       config.headers.Authorization = `Bearer ${token}`;
@@ -131,7 +143,7 @@ verificationApi.interceptors.request.use(
 verificationApi.interceptors.response.use(
   (response) => response,
   (error) => {
-    const isPublicRoute = error.config?.url?.includes('/verification/manual/upload/');
+    const isPublicRoute = isPublicManualVerificationEndpoint(error.config?.url);
     if (error.response?.status === 401 && !isPublicRoute) {
       clearAuthStorage();
       if (window.location.pathname !== '/login') window.location.replace('/login');
@@ -577,6 +589,38 @@ export const verificationAPI = {
   deleteBatch: (batchId) =>
     verificationApi.delete(`/verification/batches/${batchId}`),
 
+  // POST /verification/batches/{batch_id}/send-rejected-list — superadmin
+  // only. Generates an Excel of every user with at least one rejected
+  // verification_type_status entry (not just users whose overall status is
+  // "rejected" — a partially-verified user with one rejected type is
+  // included too) and stores it privately in GCS. NOT emailed — there is no
+  // email delivery in this flow at all (removed entirely, per the backend's
+  // own doc). The organization reaches it only through the two authenticated
+  // rejected-list view/download endpoints below, gated on the batch's own
+  // `rejected_list` field from GET /verification/batches/{batch_id}. No
+  // request body. 404 if the batch has no rejected users, 400 if the org has
+  // no email on file (a well-formedness check, independent of delivery — no
+  // email is sent either way), 502 if Excel generation/GCS upload fails.
+  // Calling this again overwrites the same stored file/metadata — the
+  // organization always sees the latest generated list, never a stale one.
+  sendRejectedList: (batchId) =>
+    verificationApi.post(`/verification/batches/${batchId}/send-rejected-list`),
+
+  // GET /verification/batches/{batch_id}/rejected-list/view — inline view of
+  // the stored Excel (Content-Disposition: inline). Authenticated: the
+  // owning organization or SuperAdmin only (a different org's batch id 404s,
+  // same as every other batch-scoped endpoint — never confirms the batch
+  // exists). The raw GCS path is never exposed; this is the only way to
+  // reach the file — never construct or store a GCS URL directly.
+  getRejectedListView: (batchId) =>
+    verificationApi.get(`/verification/batches/${batchId}/rejected-list/view`, { responseType: 'blob' }),
+
+  // GET /verification/batches/{batch_id}/rejected-list/download — identical
+  // file/authorization to the view endpoint above, just served as an
+  // attachment (Content-Disposition: attachment) instead of inline.
+  getRejectedListDownload: (batchId) =>
+    verificationApi.get(`/verification/batches/${batchId}/rejected-list/download`, { responseType: 'blob' }),
+
   // DELETE /verification/batches/{batch_id}/users/{batch_user_id} —
   // superadmin only. Permanently removes one customer from a batch (cascades
   // their documents/audit logs) without touching the batch or its other
@@ -614,15 +658,37 @@ export const verificationAPI = {
   requestManualVerification: (payload) =>
     verificationApi.post('/verification/verification/manual/request', payload),
 
-  // Check whether a manual upload token is still valid / already used
-  checkManualUploadToken: (token) =>
-    verificationApi.get(`/verification/manual/upload/${token}`),
+  // Source of truth for the verifier-facing upload/review page — token-
+  // authenticated, public. Returns the request's verification type, status,
+  // and the exact list of assigned users/products (users[]: batch_user_id,
+  // full_name, status, reason, rejection_reason, report_url, file_index).
+  // Re-fetch this after every upload/verify call rather than trusting any
+  // locally-computed state — same Human/Product shape, no branching needed.
+  getManualVerificationRequestInfo: (token) =>
+    verificationApi.get(`/verification/manual/request-info/${token}`),
 
-  // Verifier uploads report files against the token
-  // Let Axios no-set Content-Type with correct multipart boundary
-  uploadManualReport: (token, files) => {
+  // Verifier's own approve/reject decision per assigned user/product —
+  // token-authenticated, public, independent of the org/admin review
+  // endpoint below. Reason is required by the backend for any "rejected"
+  // decision; omitting it for an approval is fine.
+  verifyManualVerificationRequest: (token, decisions) =>
+    verificationApi.post(`/verification/manual/verify/${token}`, { decisions }),
+
+  // Verifier uploads report files against the token.
+  // Let Axios no-set Content-Type with correct multipart boundary.
+  // batchUserIds (optional) is the exact per-file tagging the backend added
+  // (manual_verification_request_files / Change 6): batchUserIds[i] names
+  // which BatchUser files[i] belongs to — a strict parallel array, never
+  // inferred from file order. Omit it entirely (don't pass an empty array
+  // either) to keep the legacy behavior: every user associated with the
+  // request shares file index 0. The backend treats an empty list the same
+  // as "not provided", so this only ever appends when there's real tagging.
+  uploadManualReport: (token, files, batchUserIds) => {
     const formData = new FormData();
     Array.from(files || []).forEach((file) => formData.append('files', file));
+    if (Array.isArray(batchUserIds) && batchUserIds.length > 0) {
+      batchUserIds.forEach((id) => formData.append('batch_user_ids', id));
+    }
     return verificationApi.post(`/verification/manual/upload/${token}`, formData);
   },
 
@@ -643,7 +709,10 @@ export const verificationAPI = {
   sendBulkManualVerification: (payload) =>
     verificationApi.post('/verification/manual/send-bulk', payload),
 
-  // ── Smart Send: multiple verifiers per type, users split randomly ─────────
+  // ── Smart Send: multiple verifiers per type — users are split sequentially
+  // from the deterministic batch user order (created_at ASC, id ASC) and the
+  // exact resulting user_ids are sent in the payload; the backend never
+  // splits or reorders them itself. ──────────────────────────────────────
   smartSendManualVerification: (payload) =>
     verificationApi.post('/verification/manual/smart-send', payload),
 
@@ -656,6 +725,16 @@ export const verificationAPI = {
     verificationApi.get(`/verification/batches/${batchId}/submitted-reports`, {
       params: submittedOnly ? { submitted_only: true } : undefined,
     }),
+
+  // GET /verification/batches/{batch_id}/manual-assignments — authenticated
+  // (owning organization or SuperAdmin, same as every other admin batch
+  // endpoint — not a public/tokenized route). Read-only: the exact persisted
+  // verifier -> assigned-user/product mapping Smart Send created. Once Smart
+  // Send has run, this is the ONLY source of truth for assignment visibility
+  // and verifier-based filtering — never reconstruct it from batch position,
+  // name, email, submitted-report filenames, or verification status.
+  getManualAssignments: (batchId) =>
+    verificationApi.get(`/verification/batches/${batchId}/manual-assignments`),
 
   // ── Download one report file from a verifier's submission (binary stream) ──
   downloadManualReport: (requestId, fileIndex) =>
@@ -674,6 +753,15 @@ export const verificationAPI = {
   // "approved" one.
   updateManualVerificationStatus: (requestId, status, reason) =>
     verificationApi.patch(`/verification/manual/requests/${requestId}/status`, cleanObject({ status, reason })),
+
+  // Additive per-user sibling of the whole-request call above — same
+  // endpoint, new decisions[] shape the backend now also accepts
+  // ({ batch_user_id, status, reason }), for approving/rejecting one
+  // assigned user/product independently of the rest of the request. Kept
+  // as a separate helper rather than overloading updateManualVerificationStatus's
+  // signature, so neither call site has to guess which shape it's sending.
+  updateManualVerificationDecisions: (requestId, decisions) =>
+    verificationApi.patch(`/verification/manual/requests/${requestId}/status`, { decisions }),
 
   // ── Email Drafts ──────────────────────────────────────────────────────────
   // NOTE: the latest backend integration doc documents these five CRUD

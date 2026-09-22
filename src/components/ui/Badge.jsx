@@ -1,6 +1,6 @@
 import React from 'react';
 import clsx from 'clsx';
-import { Check, Clock, X, Loader2 } from 'lucide-react';
+import { Check, Clock, X, Loader2, AlertCircle } from 'lucide-react';
 
 export const Badge = ({ status, children, className }) => {
   const variants = {
@@ -12,6 +12,10 @@ export const Badge = ({ status, children, className }) => {
     warning: 'bg-orange-500 text-white',
     error: 'bg-red-500 text-white',
     info: 'bg-brand-blue text-white',
+    // overall_status_label's "partially_verified" state — reuses the
+    // existing info/in-progress blue rather than inventing a new color,
+    // since green/orange/red are already claimed by verified/pending/rejected.
+    partial: 'bg-brand-blue text-white',
     default: 'bg-brand-gray text-brand-dark'
   };
 
@@ -22,6 +26,7 @@ export const Badge = ({ status, children, className }) => {
     warning: Clock,
     failed: X,
     error: X,
+    partial: AlertCircle,
     'in-progress': Loader2
   };
 

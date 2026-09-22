@@ -134,7 +134,10 @@ const fetchAndOpenCertificate = async (publicId, instanceKey, kind) => {
       if (win) win.location.href = url;
     } else {
       win?.close();
-      toast.error(`No ${kind === 'pdf' ? 'PDF' : 'verify'} link on this certificate yet`);
+      // Anchoring is async on Dhiway's side — a cert can appear issued
+      // slightly before its .vc endpoint actually has a PDF/verify link.
+      // Expected, brief finalizing window, not a real failure.
+      toast('This certificate is still finalizing — try again in a moment.', { icon: '⏳' });
     }
     return data;
   } catch (err) {
@@ -859,6 +862,14 @@ const BatchDetail = ({ batchSummary, onBack }) => {
       // accumulates more than that many issued records.
       const orgId   = batchSummary.sdcInfo?.org_id || undefined;
       const spaceId = batchSummary.sdcInfo?.space_id || batchSummary.spaceId || undefined;
+      // GET /sdc/batches/{batch_id}/status's certificate_ids is the backend's
+      // own authoritative "issued for this batch" set — confirmed backend-
+      // side that these ids can be present before anchorTime is populated
+      // (anchoring is async on Dhiway's end). anchorTime alone was
+      // mislabeling genuinely-issued certs as still-draft.
+      const certIds = await sdcAPI.getBatchStatus(batchSummary.id)
+        .then(({ data }) => new Set(Array.isArray(data?.certificate_ids) ? data.certificate_ids : []))
+        .catch(() => new Set());
       const allRecords = [];
       let page = 1;
       let hasMore = true;
@@ -873,9 +884,9 @@ const BatchDetail = ({ batchSummary, onBack }) => {
       const map = {};
       const byName = {};
       allRecords.forEach((r) => {
-        // anchorTime is the source of truth for issued-vs-draft: set = issued,
-        // null = still a draft on Dhiway's side (no PDF yet).
-        const issued = !!r.anchorTime && !r.revoked;
+        // Issued if either signal says so: anchored, or already present in
+        // this batch's own confirmed certificate_ids.
+        const issued = !r.revoked && (!!r.anchorTime || certIds.has(r.publicId));
         const entry = {
           id: r.id, publicId: r.publicId, updatedAt: r.updatedAt, title: r.title,
           anchorTime: r.anchorTime || null, revoked: !!r.revoked, issued,
