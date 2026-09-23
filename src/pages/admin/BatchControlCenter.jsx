@@ -6,13 +6,13 @@ import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
 import { CustomSelect } from '@/components/ui/CustomSelect';
-import { verificationAPI, sdcAPI, getApiError, triggerBlobDownload } from '@/services/api';
+import { verificationAPI, sdcAPI, getApiError } from '@/services/api';
 import { GenerateSDCModal, CertificateDetailModal } from '@/pages/admin/SDCVerification';
 import { VerificationDetailsModal } from '@/components/shared/VerificationDetailsModal';
 import { TablePagination } from '@/components/shared/TablePagination';
 import {
   useBatchList, WORKFLOW_STEPS, isProductRecord, recordTitle, getCertificateProductId,
-  formatVerifTypeLabel, countPendingReview, statusBadge,
+  formatVerifTypeLabel, statusBadge,
   SmartSendModal, SendRejectedListModal, DeleteBatchModal,
 } from '@/pages/admin/BatchMonitor';
 import {
@@ -75,133 +75,6 @@ const EditBatchModal = ({ batch, onClose, onSave }) => {
   );
 };
 
-// ── Assigned Verifiers — renders GET /verification/batches/{id}/
-// manual-assignments, the exact persisted verifier -> assigned-user mapping
-// Smart Send created. One generic component for both Human and Product
-// batches (the backend uses the same assignment shape for both — users[]
-// full_name may hold a product's display name on a Product batch, since the
-// backend reuses the same field, so the UI never guesses entity type and
-// always labels the list neutrally as "Assigned Users / Products").
-const AssignedVerifiersCard = ({ loading, error, assignments, onRefresh }) => {
-  const [expanded, setExpanded] = useState(() => new Set());
-  const toggle = (key) => setExpanded((prev) => {
-    const next = new Set(prev);
-    if (next.has(key)) next.delete(key); else next.add(key);
-    return next;
-  });
-
-  // Grouped by verification_type_name — the same verifier can appear under
-  // several types with different assigned-user sets, so these are never
-  // merged into one global row per verifier (Task C).
-  const grouped = (() => {
-    const map = new Map();
-    (assignments || []).forEach((a) => {
-      const type = a.verification_type_name || 'Verification';
-      if (!map.has(type)) map.set(type, []);
-      map.get(type).push(a);
-    });
-    return Array.from(map.entries());
-  })();
-
-  return (
-    <div className="rounded-2xl border border-gray-100 bg-white p-5">
-      <div className="mb-4 flex items-center justify-between gap-3 flex-wrap">
-        <div>
-          <p className="font-sora font-semibold text-brand-dark">Assigned Verifiers</p>
-          <p className="text-xs text-gray-400 font-inter mt-1">Exact users assigned to each verifier</p>
-        </div>
-        <button
-          type="button"
-          onClick={onRefresh}
-          disabled={loading}
-          className="flex items-center gap-1 text-xs font-semibold text-brand-blue font-inter hover:opacity-70 disabled:opacity-50"
-        >
-          <RefreshCw size={12} className={loading ? 'animate-spin' : ''} /> Refresh
-        </button>
-      </div>
-
-      {loading ? (
-        <div className="flex items-center justify-center gap-2 py-6">
-          <RefreshCw size={15} className="animate-spin text-brand-blue" />
-          <p className="text-sm text-gray-400 font-inter">Loading verifier assignments...</p>
-        </div>
-      ) : error ? (
-        <div className="flex flex-col items-center justify-center gap-2 py-6 text-center">
-          <p className="text-sm text-red-500 font-inter">{error}</p>
-          <button
-            type="button"
-            onClick={onRefresh}
-            className="flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-semibold font-inter text-gray-600 hover:bg-gray-50 transition-colors"
-          >
-            <RefreshCw size={12} /> Retry
-          </button>
-        </div>
-      ) : grouped.length === 0 ? (
-        <p className="py-6 text-center text-sm text-gray-400 font-inter">No manual verifier assignments have been sent for this batch yet.</p>
-      ) : (
-        <div className="space-y-4">
-          {grouped.map(([typeName, rows]) => (
-            <div key={typeName}>
-              <span className="inline-block rounded-full bg-blue-50 px-2.5 py-1 text-[11px] font-semibold text-brand-blue font-inter mb-2">
-                {typeName}
-              </span>
-              <div className="space-y-2">
-                {rows.map((a) => {
-                  const key = a.request_id;
-                  const isOpen = expanded.has(key);
-                  const users = Array.isArray(a.users) ? a.users : [];
-                  return (
-                    <div key={key} className="rounded-xl border border-gray-100">
-                      <button
-                        type="button"
-                        onClick={() => toggle(key)}
-                        className="flex w-full items-center justify-between gap-3 px-3.5 py-2.5 text-left hover:bg-gray-50/70 transition-colors"
-                      >
-                        <div className="flex min-w-0 items-center gap-2.5">
-                          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-indigo-100 text-indigo-600">
-                            <Users size={14} />
-                          </span>
-                          <div className="min-w-0">
-                            <p className="truncate text-sm font-semibold text-brand-dark font-inter">{a.verifier_email || 'Unknown verifier'}</p>
-                            <p className="flex items-center gap-2 text-xs text-gray-400 font-inter">
-                              {a.assigned_count ?? users.length} assigned
-                              {a.is_legacy_whole_batch && (
-                                <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-600 font-inter">Legacy assignment</span>
-                              )}
-                            </p>
-                          </div>
-                        </div>
-                        <ChevronDown size={15} className={`shrink-0 text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
-                      </button>
-                      {isOpen && (
-                        <div className="border-t border-gray-100 px-3.5 py-2.5">
-                          <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-gray-400 font-inter">Assigned Users / Products</p>
-                          {users.length === 0 ? (
-                            <p className="text-xs text-gray-400 font-inter">No users recorded for this assignment.</p>
-                          ) : (
-                            <div className="space-y-1.5">
-                              {users.map((u) => (
-                                <div key={u.batch_user_id} className="flex items-center justify-between gap-2 rounded-lg bg-gray-50/70 px-2.5 py-1.5">
-                                  <span className="truncate text-xs font-medium text-brand-dark font-inter">{u.full_name || 'Unnamed record'}</span>
-                                  {u.email && <span className="shrink-0 truncate pl-2 text-[11px] text-gray-400 font-inter">{u.email}</span>}
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-};
-
 // ── Batch Control Center — a dedicated page (was previously an in-page
 // Modal on the batch list). Shares its batches array with the list page via
 // useBatchList() so it works correctly even reached directly by URL (not
@@ -230,23 +103,10 @@ export const BatchControlCenter = () => {
   const [loadingReports, setLoadingReports] = useState(false);
 
   // Manual assignments — the exact persisted verifier -> assigned-user
-  // mapping from GET /verification/batches/{id}/manual-assignments. Kept
-  // entirely separate from submittedReports: that endpoint is the report/
-  // review source of truth, this one is the assignment source of truth, and
-  // this page must never blur the two back together.
+  // mapping from GET /verification/batches/{id}/manual-assignments. This is
+  // the Verification Records table's Verifier column and verifier filter's
+  // only source of truth — never inferred from submittedReports, name, or email.
   const [manualAssignments, setManualAssignments] = useState(null);
-  const [manualAssignmentsLoading, setManualAssignmentsLoading] = useState(false);
-  const [manualAssignmentsError, setManualAssignmentsError] = useState(null);
-  const [decidingRequestId, setDecidingRequestId] = useState(null);
-  const [approvingAllReports, setApprovingAllReports] = useState(false);
-  const [rejectingRequestId, setRejectingRequestId] = useState(null);
-  const [rejectReason, setRejectReason] = useState('');
-  const [downloadingFileKey, setDownloadingFileKey] = useState(null);
-  // Per-user (not whole-request) review — keyed by `${requestId}:${batchUserId}`
-  // so two different users' inline reject boxes never collide.
-  const [decidingUserKey, setDecidingUserKey] = useState(null);
-  const [rejectingUserKey, setRejectingUserKey] = useState(null);
-  const [userRejectReason, setUserRejectReason] = useState('');
 
   const [rejectedListTarget, setRejectedListTarget] = useState(null);
   const [verificationDetailsRecord, setVerificationDetailsRecord] = useState(null);
@@ -507,24 +367,20 @@ export const BatchControlCenter = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Fetches (or retries) manual-assignments on its own — deliberately not
+  // Fetches (or refreshes) manual-assignments on its own — deliberately not
   // folded into the detail+reports Promise.all below, since its failure must
-  // never block the rest of the page; the Assigned Verifiers section shows
-  // its own loading/error/retry state instead. Reused for the initial load,
-  // the section's own Retry button, and the post-Smart-Send refresh (Task P)
-  // so there's exactly one place that knows how to fetch this.
+  // never block the rest of the page from rendering. Feeds the Verification
+  // Records table's Verifier column and the verifier filter; reused for the
+  // initial load and the post-Smart-Send refresh, so there's exactly one
+  // place that knows how to fetch this.
   const loadManualAssignments = useCallback(async (batchIdArg) => {
     const id = batchIdArg || batchId;
     if (!id) return;
-    setManualAssignmentsLoading(true);
-    setManualAssignmentsError(null);
     try {
       const { data } = await verificationAPI.getManualAssignments(id);
       setManualAssignments(data);
     } catch (err) {
-      setManualAssignmentsError(getApiError(err, 'Unable to load verifier assignments'));
-    } finally {
-      setManualAssignmentsLoading(false);
+      toast.error(getApiError(err, 'Unable to load verifier assignments'));
     }
   }, [batchId]);
 
@@ -537,7 +393,6 @@ export const BatchControlCenter = () => {
     setBatchDetail(null);
     setSubmittedReports(null);
     setManualAssignments(null);
-    setManualAssignmentsError(null);
     setSdcRecordsByEmail({});
     setSdcRecordsByName({});
     setBatchSdcRecords([]);
@@ -669,8 +524,8 @@ export const BatchControlCenter = () => {
     });
     fetchData(true);
     // Smart Send just persisted new verifier -> user assignment rows —
-    // refetch so Assigned Verifiers / the verifier filter reflect them
-    // immediately, no full page reload required.
+    // refetch so the Verification Records table's Verifier column and the
+    // verifier filter reflect them immediately, no full page reload required.
     loadManualAssignments(batch.id);
   };
 
@@ -683,166 +538,6 @@ export const BatchControlCenter = () => {
       toast.error(getApiError(err, 'Failed to resend verification link'));
     } finally {
       setResending(null);
-    }
-  };
-
-  // ── Action: Download an individual verifier-submitted report file ────────
-  const handleDownloadReportFile = async (requestId, fileIndex, filename) => {
-    const key = `${requestId}-${fileIndex}`;
-    setDownloadingFileKey(key);
-    try {
-      const { data } = await verificationAPI.downloadManualReport(requestId, fileIndex);
-      triggerBlobDownload(data, filename || `report-${fileIndex}`);
-    } catch (err) {
-      toast.error(getApiError(err, 'Failed to download report file'));
-    } finally {
-      setDownloadingFileKey(null);
-    }
-  };
-
-  // Approve/reject a submitted manual verification report. The backend
-  // derives every affected user's status and the batch's own `status` as a
-  // side effect of this call — the frontend never sets those directly, it
-  // just re-fetches: submitted-reports + batch detail (for this page) and
-  // the outer batch list (so the Batch Queue row's counts/status badge
-  // reflect the decision too).
-  const handleDecideReport = async (requestId, status, reason) => {
-    setDecidingRequestId(requestId);
-    try {
-      const { data } = await verificationAPI.updateManualVerificationStatus(requestId, status, reason);
-      // "Reject wins" precedence (backend, Sept 2026): an approval decision
-      // can never silently un-reject a user already rejected elsewhere in a
-      // split-verifier batch. users_protected_from_downgrade tells us when
-      // that guard actually fired — surface it, or an admin approving a
-      // request that reports users_updated: 0 has no way to know why.
-      const protectedCount = data?.users_protected_from_downgrade || 0;
-      toast.success(
-        protectedCount > 0
-          ? `${data?.message || `Marked ${status}`} — ${protectedCount} already-rejected user${protectedCount === 1 ? '' : 's'} protected from being re-approved`
-          : (data?.message || `Marked ${status}`)
-      );
-      setRejectingRequestId(null);
-      setRejectReason('');
-      if (batchId) {
-        const [reportsRes, detailRes] = await Promise.all([
-          verificationAPI.getSubmittedReports(batchId).catch(() => null),
-          verificationAPI.getBatchDetails(batchId).catch(() => null),
-        ]);
-        if (reportsRes) setSubmittedReports(reportsRes.data);
-        if (detailRes) setBatchDetail(detailRes.data);
-      }
-      fetchData(true);
-    } catch (err) {
-      toast.error(getApiError(err, `Failed to mark ${status}`));
-    } finally {
-      setDecidingRequestId(null);
-    }
-  };
-
-  // Approve/reject ONE assigned user/product on a request, independent of
-  // every other user on that same request — the additive decisions[] shape
-  // the backend now accepts alongside the legacy whole-request one above.
-  // Backend's sticky-rejection guard still applies; this call only ever
-  // carries one decision, for exactly the row that was clicked.
-  const handleDecideReportUser = async (requestId, batchUserId, status, reason) => {
-    const key = `${requestId}:${batchUserId}`;
-    setDecidingUserKey(key);
-    try {
-      const decisions = status === 'approved'
-        ? [{ batch_user_id: batchUserId, status: 'approved' }]
-        : [{ batch_user_id: batchUserId, status: 'rejected', reason }];
-      const { data } = await verificationAPI.updateManualVerificationDecisions(requestId, decisions);
-      toast.success(data?.message || `Marked ${status}`);
-      setRejectingUserKey(null);
-      setUserRejectReason('');
-      if (batchId) {
-        const [reportsRes, detailRes] = await Promise.all([
-          verificationAPI.getSubmittedReports(batchId).catch(() => null),
-          verificationAPI.getBatchDetails(batchId).catch(() => null),
-        ]);
-        if (reportsRes) setSubmittedReports(reportsRes.data);
-        if (detailRes) setBatchDetail(detailRes.data);
-      }
-      fetchData(true);
-    } catch (err) {
-      toast.error(getApiError(err, `Failed to mark ${status}`));
-    } finally {
-      setDecidingUserKey(null);
-    }
-  };
-
-  // Approve every still-pending assigned record on ONE report in a single
-  // PATCH carrying one "approved" decision per not-yet-decided user —
-  // confirmed backend-side (regression-tested: 3 decisions -> 3 users) that
-  // the endpoint applies every entry in decisions[], not just the first. A
-  // per-call, one-decision-at-a-time workaround was tried here briefly but
-  // was unnecessary and has been reverted; this sends the full array in one
-  // request. Falls back to the legacy whole-request approve only when this
-  // report has no per-user breakdown at all (a legacy whole-batch request).
-  const handleApproveAllAssigned = async (report) => {
-    const assignedUsers = Array.isArray(report.assigned_users) ? report.assigned_users : [];
-    if (assignedUsers.length === 0) return handleDecideReport(report.request_id, 'approved');
-    const pending = assignedUsers.filter((u) => u.status !== 'approved' && u.status !== 'rejected');
-    if (pending.length === 0) return;
-    setDecidingRequestId(report.request_id);
-    try {
-      const decisions = pending.map((u) => ({ batch_user_id: u.batch_user_id, status: 'approved' }));
-      const { data } = await verificationAPI.updateManualVerificationDecisions(report.request_id, decisions);
-      toast.success(data?.message || `${pending.length} record${pending.length === 1 ? '' : 's'} approved`);
-      if (batchId) {
-        const [reportsRes, detailRes] = await Promise.all([
-          verificationAPI.getSubmittedReports(batchId).catch(() => null),
-          verificationAPI.getBatchDetails(batchId).catch(() => null),
-        ]);
-        if (reportsRes) setSubmittedReports(reportsRes.data);
-        if (detailRes) setBatchDetail(detailRes.data);
-      }
-      fetchData(true);
-    } catch (err) {
-      toast.error(getApiError(err, 'Failed to approve records'));
-    } finally {
-      setDecidingRequestId(null);
-    }
-  };
-
-  // Approve every still-awaiting-review report in this batch in one go —
-  // same PATCH per request as handleDecideReport above, just fired for all
-  // of them together (Promise.allSettled so one failure doesn't block the
-  // rest) and refetched once at the end instead of after each one.
-  const handleApproveAllReports = async () => {
-    const pending = (submittedReports?.reports || []).filter((r) => r.status === 'doc_uploaded');
-    if (pending.length === 0) return;
-    setApprovingAllReports(true);
-    try {
-      const results = await Promise.allSettled(
-        pending.map((r) => verificationAPI.updateManualVerificationStatus(r.request_id, 'approved'))
-      );
-      const failed = results.filter((r) => r.status === 'rejected').length;
-      const succeeded = results.length - failed;
-      const protectedTotal = results.reduce(
-        (sum, r) => sum + (r.status === 'fulfilled' ? (r.value?.data?.users_protected_from_downgrade || 0) : 0),
-        0
-      );
-      if (failed > 0) {
-        toast.error(`${succeeded}/${pending.length} approved — ${failed} failed, try those again individually`);
-      } else {
-        toast.success(
-          protectedTotal > 0
-            ? `${succeeded} report${succeeded === 1 ? '' : 's'} approved — ${protectedTotal} already-rejected user${protectedTotal === 1 ? '' : 's'} protected from being re-approved`
-            : `${succeeded} report${succeeded === 1 ? '' : 's'} approved`
-        );
-      }
-      if (batchId) {
-        const [reportsRes, detailRes] = await Promise.all([
-          verificationAPI.getSubmittedReports(batchId).catch(() => null),
-          verificationAPI.getBatchDetails(batchId).catch(() => null),
-        ]);
-        if (reportsRes) setSubmittedReports(reportsRes.data);
-        if (detailRes) setBatchDetail(detailRes.data);
-      }
-      fetchData(true);
-    } finally {
-      setApprovingAllReports(false);
     }
   };
 
@@ -960,6 +655,27 @@ export const BatchControlCenter = () => {
       if (!map.has(key)) map.set(key, { key, email: a.verifier_email || key });
     });
     return Array.from(map.values());
+  })();
+
+  // ── Per-record, per-verification-type verifier — the same manual-
+  // assignments data, indexed the other way round for the table/modal: given
+  // a record's exact BatchUser id and a verification type name, which
+  // verifier (if any) is assigned to it. Never matched by name/email — only
+  // assignment.users[].batch_user_id, exactly as Task I requires. A manual
+  // type with no match here genuinely has no assignment recorded (not
+  // "Automatic" — that's reserved for a type whose own label says so).
+  const verifierByRecordAndType = (() => {
+    const map = {};
+    (manualAssignments?.assignments || []).forEach((a) => {
+      const type = a.verification_type_name;
+      if (!type) return;
+      (a.users || []).forEach((u) => {
+        if (!u.batch_user_id) return;
+        if (!map[u.batch_user_id]) map[u.batch_user_id] = {};
+        map[u.batch_user_id][type] = a.verifier_email || null;
+      });
+    });
+    return map;
   })();
 
   // ── Exact verifier (+ optional verification-type) assignment lookup —
@@ -1255,6 +971,13 @@ export const BatchControlCenter = () => {
                     {sendingToOrg ? 'Sending…' : 'Send to Organization'}
                   </Button>
                 )}
+                {!!sdcInfo?.status && (
+                  <Button variant="outline" size="sm" icon={RefreshCw} className={`!px-2 text-xs text-center leading-tight ${sdcCertsLoading ? 'animate-pulse' : ''}`}
+                    disabled={sdcCertsLoading}
+                    onClick={() => refreshSdcCertificates(selectedBatch.id, batchDetail?.users || selectedBatch.records || [], batchDetail?.verification_progress?.sdc)}>
+                    {sdcCertsLoading ? 'Refreshing…' : 'Refresh Certificates'}
+                  </Button>
+                )}
               </div>
               <div className="mt-3 flex items-start gap-2 rounded-xl border border-blue-100 bg-blue-50/60 px-3 py-2.5">
                 <Info size={12} className="mt-0.5 shrink-0 text-brand-blue" />
@@ -1265,14 +988,6 @@ export const BatchControlCenter = () => {
             </div>
           </div>
         </div>
-
-        {/* ── Assigned Verifiers ───────────────────────────────────────────── */}
-        <AssignedVerifiersCard
-          loading={manualAssignmentsLoading}
-          error={manualAssignmentsError}
-          assignments={manualAssignments?.assignments}
-          onRefresh={() => loadManualAssignments(batchId)}
-        />
 
         {/* ── Verification Records ─────────────────────────────────────────── */}
           <div id="records-section" className="rounded-2xl border border-gray-100 bg-white overflow-hidden">
@@ -1375,7 +1090,7 @@ export const BatchControlCenter = () => {
                   <p className="text-sm text-gray-400 font-inter">{detailRecords.length === 0 ? 'No records found for this batch' : 'No records match the selected filters.'}</p>
                 </div>
               ) : (
-                <table className="w-full min-w-[1000px]">
+                <table className="w-full min-w-[1300px]">
                   <thead className="bg-gray-50">
                     <tr>
                       <th className="px-4 py-2.5 w-10">
@@ -1394,11 +1109,14 @@ export const BatchControlCenter = () => {
                         />
                       </th>
                       <th className="px-2 py-2.5 text-left text-[11px] font-semibold uppercase text-gray-500 font-inter">#</th>
-                      <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase text-gray-500 font-inter">Name / Email</th>
-                      <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase text-gray-500 font-inter w-56">Verification Types</th>
-                      <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase text-gray-500 font-inter">Overall Status</th>
-                      <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase text-gray-500 font-inter w-56">Issues / Rejection Reason</th>
-                      <th className="px-4 py-2.5 text-right text-[11px] font-semibold uppercase text-gray-500 font-inter">Actions</th>
+                      <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase text-gray-500 font-inter">Record</th>
+                      <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase text-gray-500 font-inter w-48">Verification</th>
+                      <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase text-gray-500 font-inter w-48">Verifier</th>
+                      <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase text-gray-500 font-inter w-36">Report</th>
+                      <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase text-gray-500 font-inter">Overall</th>
+                      <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase text-gray-500 font-inter">Certificate</th>
+                      <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase text-gray-500 font-inter w-44">Issues</th>
+                      <th className="px-4 py-2.5 text-right text-[11px] font-semibold uppercase text-gray-500 font-inter">Action</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
@@ -1408,8 +1126,14 @@ export const BatchControlCenter = () => {
                       const batchUserId = record.id || record.user_id || record.entity_id;
                       const checkEntries = Object.entries(record.verification_type_status || {});
                       const rejections = checkEntries.filter(([, v]) => v?.status === 'rejected' && v?.rejection_reason);
+                      // Certificate — same matchSdcRecord() this page already
+                      // uses for the modal's SDC column, keyed by stable
+                      // BatchUser/product identity, never by display name.
+                      const certMatch = matchSdcRecord(record);
+                      const certState = certMatch ? (certMatch.issued ? 'Ready' : 'Draft') : 'Not Generated';
+                      const certBadgeStatus = certMatch ? (certMatch.issued ? 'info' : 'pending') : 'default';
                       return (
-                        <tr key={batchUserId} className="hover:bg-gray-50/70 transition-colors">
+                        <tr key={batchUserId} className="hover:bg-gray-50/70 transition-colors align-top">
                           <td className="px-4 py-3.5">
                             <input
                               type="checkbox"
@@ -1430,6 +1154,7 @@ export const BatchControlCenter = () => {
                               </div>
                             </div>
                           </td>
+                          {/* Verification — one compact line per type: dot + name + status. */}
                           <td className="px-4 py-3.5">
                             {checkEntries.length === 0 ? (
                               <span className="text-xs text-gray-300 font-inter">—</span>
@@ -1439,15 +1164,58 @@ export const BatchControlCenter = () => {
                                   const checkStatus = info?.status || 'pending';
                                   const dotTone = checkStatus === 'approved' ? 'bg-green-500' : checkStatus === 'rejected' ? 'bg-red-500' : 'bg-amber-400';
                                   const textTone = checkStatus === 'approved' ? 'text-green-600' : checkStatus === 'rejected' ? 'text-red-500' : 'text-amber-600';
-                                  const label = checkStatus === 'approved' ? 'Verified' : checkStatus === 'rejected' ? 'Failed' : 'Pending';
+                                  const label = checkStatus === 'approved' ? 'Verified' : checkStatus === 'rejected' ? 'Rejected' : 'Pending';
                                   return (
-                                    <div key={name} className="flex items-center justify-between gap-2">
-                                      <span className="flex min-w-0 items-center gap-1.5">
-                                        <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${dotTone}`} />
-                                        <span className="truncate text-[11px] text-gray-600 font-inter">{name}</span>
-                                      </span>
-                                      <span className={`shrink-0 text-[11px] font-semibold font-inter ${textTone}`}>{label}</span>
+                                    <div key={name} className="flex min-w-0 items-start gap-1.5" title={name}>
+                                      <span className={`mt-1 h-1.5 w-1.5 shrink-0 rounded-full ${dotTone}`} />
+                                      <div className="min-w-0">
+                                        <p className="truncate text-[11px] text-gray-600 font-inter">{name}</p>
+                                        <p className={`text-[11px] font-semibold font-inter ${textTone}`}>{label}</p>
+                                      </div>
                                     </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </td>
+                          {/* Verifier — per type, from manual-assignments (exact
+                              batch_user_id match), never inferred from name/email. */}
+                          <td className="px-4 py-3.5">
+                            {checkEntries.length === 0 ? (
+                              <span className="text-xs text-gray-300 font-inter">—</span>
+                            ) : (
+                              <div className="space-y-1.5">
+                                {checkEntries.map(([name, info]) => {
+                                  const isAutomatic = info?.label === 'automatic';
+                                  const verifierEmail = verifierByRecordAndType[batchUserId]?.[name];
+                                  return (
+                                    <div key={name} className="min-w-0">
+                                      <p className="truncate text-[10px] uppercase tracking-wide text-gray-400 font-inter">{name}</p>
+                                      <p className="truncate text-[11px] font-medium text-gray-600 font-inter" title={verifierEmail || undefined}>
+                                        {isAutomatic ? 'Automatic' : (verifierEmail || '—')}
+                                      </p>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </td>
+                          {/* Report — availability per type, from the same
+                              verification_type_status.report_url every "View
+                              Report" action already uses; never a raw gs://
+                              path treated as directly openable. */}
+                          <td className="px-4 py-3.5">
+                            {checkEntries.length === 0 ? (
+                              <span className="text-xs text-gray-300 font-inter">—</span>
+                            ) : (
+                              <div className="space-y-1.5">
+                                {checkEntries.map(([name, info]) => {
+                                  const reportUrl = info?.report_url;
+                                  const canView = typeof reportUrl === 'string' && /^https?:\/\//i.test(reportUrl);
+                                  const state = canView ? 'Available' : (reportUrl ? 'Pending' : 'Not Uploaded');
+                                  const tone = canView ? 'text-green-600' : 'text-gray-400';
+                                  return (
+                                    <p key={name} className={`text-[11px] font-medium font-inter ${tone}`}>{state}</p>
                                   );
                                 })}
                               </div>
@@ -1457,11 +1225,14 @@ export const BatchControlCenter = () => {
                             <Badge status={status.variant}>{status.label}</Badge>
                           </td>
                           <td className="px-4 py-3.5">
+                            <Badge status={certBadgeStatus}>{certState}</Badge>
+                          </td>
+                          <td className="px-4 py-3.5">
                             {rejections.length === 0 ? (
                               <span className="text-xs text-gray-300 font-inter">-</span>
                             ) : (
                               <p className="text-xs text-red-500 font-inter leading-snug">
-                                <span className="font-semibold">{rejections.length}</span> {rejections[0][1].rejection_reason}
+                                {rejections[0][1].rejection_reason}
                                 {rejections.length > 1 && <span className="text-gray-400"> (+{rejections.length - 1} more)</span>}
                               </p>
                             )}
@@ -1524,7 +1295,10 @@ export const BatchControlCenter = () => {
               />
             )}
           </div>
-        {/* ══ Submitted Reports ═══════════════════════════════════════════════ */}
+        {/* ── Manual Verifications Sent — resend-link utility, distinct from the
+            removed standalone Submitted Reports section; report status/
+            verifier/report data now lives in Verification Records + its View
+            modal instead. ── */}
         <div id="reports-section">
             {selectedBatch.sentRequests?.length > 0 && (
               <div className="rounded-2xl border border-blue-100 bg-white p-5 mb-4">
@@ -1570,315 +1344,6 @@ export const BatchControlCenter = () => {
               </div>
             )}
 
-            <div className="rounded-2xl border border-gray-100 bg-white p-5">
-              <div className="mb-4 flex items-center justify-between gap-3 flex-wrap">
-                <div>
-                  <p className="font-sora font-semibold text-brand-dark">Submitted Reports</p>
-                  <p className="text-xs text-gray-400 font-inter mt-1">Files uploaded by each verifier for this batch.</p>
-                </div>
-                <div className="flex items-center gap-2">
-                  {countPendingReview(submittedReports?.reports) > 0 && (
-                    <Button
-                      variant="success" size="sm" icon={CheckCircle}
-                      loading={approvingAllReports}
-                      disabled={!!decidingRequestId}
-                      onClick={handleApproveAllReports}
-                    >
-                      Approve All ({countPendingReview(submittedReports?.reports)})
-                    </Button>
-                  )}
-                  {submittedReports && (
-                    <Badge status={submittedReports.total_submitted === submittedReports.total_requests ? 'success' : 'default'}>
-                      {submittedReports.total_submitted}/{submittedReports.total_requests} submitted
-                    </Badge>
-                  )}
-                </div>
-              </div>
-
-              {loadingReports ? (
-                <div className="flex items-center justify-center gap-2 py-8">
-                  <RefreshCw size={16} className="animate-spin text-brand-blue" />
-                  <p className="text-sm text-gray-400 font-inter">Loading submitted reports…</p>
-                </div>
-              ) : !submittedReports?.reports?.length ? (
-                <p className="py-4 text-center text-sm text-gray-400 font-inter">No reports submitted for this batch yet.</p>
-              ) : (
-                <div className="space-y-3">
-                  {submittedReports.reports.map((report) => {
-                    const decided = report.status === 'approved' || report.status === 'rejected';
-                    const awaitingReview = report.status === 'doc_uploaded' && !decided;
-                    const isDeciding = decidingRequestId === report.request_id;
-                    const badge = report.status === 'approved'
-                      ? { status: 'success', label: 'Approved' }
-                      : report.status === 'rejected'
-                        ? { status: 'error', label: 'Rejected' }
-                        : report.status === 'doc_uploaded'
-                          ? { status: 'pending', label: 'Awaiting Review' }
-                          : { status: 'default', label: 'Awaiting Upload' };
-                    // Per-user/product attribution — same shape as request-info's
-                    // users[] (batch_user_id, full_name, status, reason,
-                    // rejection_reason, report_url, file_index). Absent on legacy
-                    // whole-batch requests, so this section only renders when the
-                    // backend actually supplied it.
-                    const assignedUsers = Array.isArray(report.assigned_users) ? report.assigned_users : [];
-                    const assignedUploaded = assignedUsers.filter((u) => !!u.report_url).length;
-                    const assignedDecided = assignedUsers.filter((u) => u.status === 'approved' || u.status === 'rejected').length;
-                    return (
-                    <div key={report.request_id} className={`rounded-xl border px-4 py-3 ${report.submitted ? 'border-green-100 bg-green-50/40' : 'border-gray-100 bg-gray-50'}`}>
-                      <div className="flex items-center justify-between gap-3 flex-wrap">
-                        <div className="flex items-center gap-3 min-w-0">
-                          <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${report.submitted ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-400'}`}>
-                            {report.submitted ? <CheckCircle size={14} /> : <Clock size={14} />}
-                          </div>
-                          <div className="min-w-0">
-                            <p className="text-sm font-semibold text-brand-dark font-inter truncate">{formatVerifTypeLabel(report)}</p>
-                            <p className="text-xs text-gray-500 font-inter truncate">{report.verifier_email}</p>
-                            {assignedUsers.length > 0 && (
-                              <p className="text-[11px] text-gray-400 font-inter mt-0.5">
-                                {assignedUsers.length} assigned · {assignedUploaded} uploaded · {assignedDecided} decided
-                              </p>
-                            )}
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2 shrink-0">
-                          {report.submitted && (
-                            <span className="text-xs text-gray-400 font-inter">{report.report_count} file{report.report_count !== 1 ? 's' : ''}</span>
-                          )}
-                          {awaitingReview && (
-                            <Button
-                              variant="success" size="sm" icon={CheckCircle} loading={isDeciding}
-                              disabled={approvingAllReports}
-                              onClick={() => handleApproveAllAssigned(report)}
-                            >
-                              {assignedUsers.length > 0 ? 'Approve All' : 'Approve'}
-                            </Button>
-                          )}
-                          <Badge status={badge.status}>{badge.label}</Badge>
-                        </div>
-                      </div>
-
-                      {report.submitted && report.report_files?.length > 0 && (
-                        <div className="mt-3 flex flex-wrap gap-2 pl-11">
-                          {report.report_files.map((file, fileIndex) => {
-                            const key = `${report.request_id}-${fileIndex}`;
-                            const isDownloading = downloadingFileKey === key;
-                            return (
-                              <button
-                                key={key}
-                                type="button"
-                                disabled={isDownloading}
-                                onClick={() => handleDownloadReportFile(report.request_id, fileIndex, file.filename)}
-                                className="flex items-center gap-1.5 rounded-lg border border-blue-200 bg-white px-3 py-1.5 text-xs font-semibold font-inter text-brand-blue hover:bg-blue-50 disabled:opacity-50 transition-colors"
-                              >
-                                {isDownloading ? <RefreshCw size={12} className="animate-spin" /> : <Download size={12} />}
-                                {file.filename}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      )}
-
-                      {/* Per-user/product attribution — exact mapping of which
-                          uploaded report/status belongs to which assigned
-                          record, from report.assigned_users. */}
-                      {assignedUsers.length > 0 && (
-                        <div className="mt-3 pl-11 space-y-2">
-                          {assignedUsers.map((u) => {
-                            const userKey = `${report.request_id}:${u.batch_user_id}`;
-                            const uDecided = u.status === 'approved' || u.status === 'rejected';
-                            const uBadge = u.status === 'approved'
-                              ? { status: 'success', label: 'Approved' }
-                              : u.status === 'rejected'
-                                ? { status: 'error', label: 'Rejected' }
-                                : { status: 'pending', label: 'Pending' };
-                            const reportUrl = u.report_url;
-                            // Automatic checks can carry a raw gs:// path — never
-                            // openable directly; only ever offer an http(s) proxy URL.
-                            const canView = typeof reportUrl === 'string' && /^https?:\/\//i.test(reportUrl);
-                            const uIsDeciding = decidingUserKey === userKey;
-                            return (
-                              <div key={userKey} className="rounded-lg border border-gray-100 bg-white px-3 py-2">
-                                <div className="flex items-center justify-between gap-2 flex-wrap">
-                                  <p className="text-xs font-semibold text-brand-dark font-inter truncate">{u.full_name || 'Assigned record'}</p>
-                                  <div className="flex items-center gap-2 shrink-0">
-                                    {canView && (
-                                      <button
-                                        type="button"
-                                        onClick={() => window.open(reportUrl, '_blank', 'noopener,noreferrer')}
-                                        className="flex items-center gap-1 text-[11px] font-semibold text-brand-blue font-inter hover:underline"
-                                      >
-                                        <Eye size={11} /> View
-                                      </button>
-                                    )}
-                                    <Badge status={uBadge.status}>{uBadge.label}</Badge>
-                                  </div>
-                                </div>
-                                {u.status === 'rejected' && (u.rejection_reason || u.reason) && (
-                                  <p className="mt-1 text-[11px] text-red-500 font-inter">
-                                    <span className="font-semibold">Reason: </span>{u.rejection_reason || u.reason}
-                                  </p>
-                                )}
-                                {!uDecided && (
-                                  rejectingUserKey === userKey ? (
-                                    <div className="mt-2 space-y-1.5">
-                                      <input
-                                        value={userRejectReason}
-                                        onChange={(e) => setUserRejectReason(e.target.value)}
-                                        placeholder="Reason for rejection (required)"
-                                        className="w-full rounded-lg border border-gray-200 px-2.5 py-1.5 text-[11px] font-inter focus:outline-none focus:ring-2 focus:ring-red-200"
-                                      />
-                                      <div className="flex gap-1.5">
-                                        <Button
-                                          variant="danger" size="sm" loading={uIsDeciding}
-                                          disabled={!userRejectReason.trim()}
-                                          onClick={() => handleDecideReportUser(report.request_id, u.batch_user_id, 'rejected', userRejectReason.trim())}
-                                        >
-                                          Confirm Reject
-                                        </Button>
-                                        <Button
-                                          variant="ghost" size="sm" disabled={uIsDeciding}
-                                          onClick={() => { setRejectingUserKey(null); setUserRejectReason(''); }}
-                                        >
-                                          Cancel
-                                        </Button>
-                                      </div>
-                                    </div>
-                                  ) : (
-                                    <div className="mt-2 flex gap-1.5">
-                                      <Button
-                                        variant="success" size="sm" icon={CheckCircle} loading={uIsDeciding}
-                                        onClick={() => handleDecideReportUser(report.request_id, u.batch_user_id, 'approved')}
-                                      >
-                                        Approve
-                                      </Button>
-                                      <Button
-                                        variant="outline" size="sm" icon={XCircle} disabled={uIsDeciding}
-                                        onClick={() => { setRejectingUserKey(userKey); setUserRejectReason(''); }}
-                                      >
-                                        Reject
-                                      </Button>
-                                    </div>
-                                  )
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
-
-                      {awaitingReview && (
-                        <div className="mt-3 pl-11">
-                          {assignedUsers.length > 0 && (
-                            <p className="mb-2 text-[11px] text-gray-400 font-inter">
-                              Reject below applies to every assigned record at once — prefer the per-record actions above for independent decisions. Use Approve All beside the heading to approve every assigned record in one step.
-                            </p>
-                          )}
-                          {rejectingRequestId === report.request_id ? (
-                            <div className="space-y-2">
-                              <input
-                                value={rejectReason}
-                                onChange={(e) => setRejectReason(e.target.value)}
-                                placeholder="Reason for rejection (optional)"
-                                className="w-full rounded-lg border border-gray-200 px-3 py-2 text-xs font-inter focus:outline-none focus:ring-2 focus:ring-brand-blue/20"
-                              />
-                              <div className="flex gap-2">
-                                <Button
-                                  variant="danger" size="sm" loading={isDeciding} disabled={approvingAllReports}
-                                  onClick={() => handleDecideReport(report.request_id, 'rejected', rejectReason.trim() || undefined)}
-                                >
-                                  Confirm Reject
-                                </Button>
-                                <Button
-                                  variant="ghost" size="sm" disabled={isDeciding || approvingAllReports}
-                                  onClick={() => { setRejectingRequestId(null); setRejectReason(''); }}
-                                >
-                                  Cancel
-                                </Button>
-                              </div>
-                            </div>
-                          ) : (
-                            <div className="flex gap-2">
-                              <Button
-                                variant="outline" size="sm" icon={XCircle} disabled={isDeciding || approvingAllReports}
-                                onClick={() => { setRejectingRequestId(report.request_id); setRejectReason(''); }}
-                              >
-                                Reject
-                              </Button>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-        </div>
-
-        {/* ── SDC Certificates ──────────────────────────────────────────────── */}
-        <div id="sdc-section">
-          <div className="rounded-2xl border border-gray-100 bg-white p-5">
-            <div className="mb-4 flex items-center justify-between gap-3 flex-wrap">
-              <div>
-                <p className="font-sora font-semibold text-brand-dark">SDC Certificates</p>
-                <p className="text-xs text-gray-400 font-inter mt-1">Issued/draft certificates matched to this batch's records.</p>
-              </div>
-              <div className="flex items-center gap-2">
-                <Button variant="outline" size="sm" icon={Sparkles}
-                  disabled={!batchDetail?.can_generate_sdc}
-                  title={!batchDetail?.can_generate_sdc ? 'This batch is not ready for SDC generation yet' : undefined}
-                  onClick={() => setSdcGenerateBatch(selectedBatch)}>
-                  {sdcInfo?.status ? 'Regenerate SDC' : 'Generate SDC'}
-                </Button>
-                <button
-                  type="button"
-                  onClick={() => refreshSdcCertificates(selectedBatch.id, batchDetail?.users || selectedBatch.records || [], batchDetail?.verification_progress?.sdc)}
-                  disabled={sdcCertsLoading}
-                  className="flex items-center gap-1 text-xs font-semibold text-brand-blue font-inter hover:opacity-70 disabled:opacity-50"
-                >
-                  <RefreshCw size={12} className={sdcCertsLoading ? 'animate-spin' : ''} /> Refresh
-                </button>
-              </div>
-            </div>
-
-            {!sdcInfo?.status && batchSdcRecords.length === 0 ? (
-              <p className="py-4 text-center text-sm text-gray-400 font-inter">No certificates generated yet.</p>
-            ) : batchSdcRecords.length === 0 ? (
-              <div className="flex items-center justify-center gap-2 py-10">
-                <RefreshCw size={16} className="animate-spin text-brand-blue" />
-                <p className="text-sm text-gray-400 font-inter">Matching certificates…</p>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {batchSdcRecords.map((cert) => (
-                  <div key={cert.publicId} className="flex items-center justify-between gap-3 rounded-xl border border-gray-100 px-4 py-3">
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold text-brand-dark font-inter">{cert.title || cert.publicId}</p>
-                      <p className="text-xs text-gray-400 font-inter">{cert.recipients?.join(', ') || '—'}</p>
-                    </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      <Badge status={cert.issued ? 'info' : 'pending'}>{cert.issued ? 'Ready' : 'Draft'}</Badge>
-                      {/* Dhiway generates the PDF as soon as the draft is created —
-                          `issued` (anchorTime set) only tracks blockchain anchoring,
-                          not whether a PDF exists, so gating Download on it hid a
-                          working download for every not-yet-anchored draft.
-                          openSdcCertificate already fetches the record and shows
-                          "No PDF link yet" if one genuinely isn't there yet. */}
-                      <button
-                        type="button"
-                        disabled={downloadingSdcId === cert.publicId}
-                        onClick={() => openSdcCertificate(cert.publicId, 'pdf')}
-                        className="flex items-center gap-1 rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs font-semibold font-inter text-brand-blue hover:bg-blue-50 disabled:opacity-50 transition-colors"
-                      >
-                        <Download size={12} className={downloadingSdcId === cert.publicId ? 'animate-spin' : ''} /> Download
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
         </div>
       </div>
 
@@ -1910,13 +1375,34 @@ export const BatchControlCenter = () => {
         onClose={() => setRejectedListTarget(null)}
       />
 
-      {/* ── Verification Details Modal (per-user type/status/reason/report) ─── */}
-      <VerificationDetailsModal
-        record={verificationDetailsRecord}
-        title={verificationDetailsRecord ? recordTitle(verificationDetailsRecord) : ''}
-        subtitle={verificationDetailsRecord?.email || verificationDetailsRecord?.product_name || ''}
-        onClose={() => setVerificationDetailsRecord(null)}
-      />
+      {/* ── Verification Details Modal (per-type status/verifier/report + certificate) ─── */}
+      {(() => {
+        const vdRecordId = verificationDetailsRecord
+          ? (verificationDetailsRecord.id || verificationDetailsRecord.user_id || verificationDetailsRecord.entity_id)
+          : null;
+        const vdCertMatch = verificationDetailsRecord ? matchSdcRecord(verificationDetailsRecord) : null;
+        const vdCertificate = verificationDetailsRecord
+          ? {
+              status: vdCertMatch ? (vdCertMatch.issued ? 'ready' : 'draft') : 'not_generated',
+              label: vdCertMatch ? (vdCertMatch.issued ? 'Ready' : 'Draft') : 'Not Generated',
+              canView: !!vdCertMatch,
+              canDownload: !!vdCertMatch,
+              downloading: vdCertMatch ? downloadingSdcId === vdCertMatch.publicId : false,
+            }
+          : null;
+        return (
+          <VerificationDetailsModal
+            record={verificationDetailsRecord}
+            title={verificationDetailsRecord ? recordTitle(verificationDetailsRecord) : ''}
+            subtitle={verificationDetailsRecord?.email || verificationDetailsRecord?.product_name || ''}
+            onClose={() => setVerificationDetailsRecord(null)}
+            verifierByType={vdRecordId ? verifierByRecordAndType[vdRecordId] : undefined}
+            certificate={vdCertificate}
+            onViewCertificate={() => vdCertMatch && openSdcCertificate(vdCertMatch.publicId, 'verify')}
+            onDownloadCertificate={() => vdCertMatch && openSdcCertificate(vdCertMatch.publicId, 'pdf')}
+          />
+        );
+      })()}
 
       {/* ── Generate SDC Modal — same component/flow as SDC Verification ─── */}
       {sdcGenerateBatch && (

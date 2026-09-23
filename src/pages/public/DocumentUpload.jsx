@@ -24,6 +24,15 @@ const isInvalidTokenError = (err) => {
   return msg.includes('invalid token') || msg.includes('token not found') || msg.includes('expired');
 };
 
+// The upload endpoint's link is single-use per token, for the whole
+// request — once any upload call against it has succeeded, every later
+// call fails this way, even for a different record. Once we see it, there
+// is no point offering "Upload File" anywhere on the page any more.
+const isLinkAlreadyUsedError = (err) => {
+  const msg = (err?.response?.data?.detail || err?.response?.data?.message || err?.message || '').toLowerCase();
+  return msg.includes('already used') || msg.includes('already uploaded');
+};
+
 const ROW_STATUS_META = {
   approved: { label: 'Approved', tone: 'text-green-700 bg-green-50 border-green-100', icon: CheckCircle },
   rejected: { label: 'Rejected', tone: 'text-red-700 bg-red-50 border-red-100', icon: XCircle },
@@ -41,7 +50,7 @@ const reportLabel = (url) => {
   }
 };
 
-const ROW_GRID = 'grid-cols-[28px_minmax(0,1.3fr)_170px_170px_130px_120px]';
+const ROW_GRID = 'grid-cols-[minmax(0,1.3fr)_170px_170px_120px_190px]';
 
 export const DocumentUpload = () => {
   const { token: pathToken } = useParams();
@@ -54,16 +63,22 @@ export const DocumentUpload = () => {
   const [loadError, setLoadError] = useState(null);
 
   const [search, setSearch] = useState('');
-  const [pendingOnly, setPendingOnly] = useState(false);
-  const [selectedIds, setSelectedIds] = useState(() => new Set());
   // Locally staged (not-yet-uploaded) files, keyed by batch_user_id — lifted
-  // up here (rather than kept inside each row) so "Submit Selected Reports"
-  // can upload every checked row's staged file in one action.
+  // up here (rather than kept inside each row) so one combined submit can
+  // upload every staged row's file in one action.
   const [pendingFiles, setPendingFiles] = useState({});
+  // Locally staged (not-yet-submitted) approve/reject decisions, keyed by
+  // batch_user_id: { status: 'approved'|'rejected', reason? }. Clicking
+  // Approve/Reject only stages the decision here — nothing is sent to the
+  // backend until "Submit Reports" is clicked, same as an attached file.
+  // That way upload + review always land together in one submit, matching
+  // what a verifier actually expects: attach it, decide on it, submit it.
+  const [pendingDecisions, setPendingDecisions] = useState({});
   const [bulkSubmitting, setBulkSubmitting] = useState(false);
+  // Once an upload attempt comes back "already used", the token's one
+  // upload call is spent for good — stop offering "Upload File" anywhere.
+  const [uploadLinkUsed, setUploadLinkUsed] = useState(false);
 
-  const [decidingId, setDecidingId] = useState(null);
-  const [reviewingId, setReviewingId] = useState(null); // row whose inline approve/reject panel is open
   const [rejectingId, setRejectingId] = useState(null); // row whose reject-reason input is open
   const [rejectReason, setRejectReason] = useState('');
 
@@ -97,42 +112,15 @@ export const DocumentUpload = () => {
   const progressPct = users.length ? Math.round((uploadedCount / users.length) * 100) : 0;
 
   const filteredUsers = users.filter((u) => {
-    if (pendingOnly && (u.status || 'pending') !== 'pending') return false;
     if (search.trim() && !(u.full_name || '').toLowerCase().includes(search.trim().toLowerCase())) return false;
     return true;
   });
 
-  const toggleSelected = (id) => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
-    });
-  };
-
-  // Rows with a staged file are the only ones a bulk submit can act on —
-  // this is what "select all" toggles and what the submit button gates on.
   const stagedIds = Object.keys(pendingFiles);
-  const allStagedSelected = stagedIds.length > 0 && stagedIds.every((id) => selectedIds.has(id));
-  const selectedSubmittableCount = stagedIds.filter((id) => selectedIds.has(id)).length;
-  const toggleSelectAll = () => {
-    setSelectedIds((prev) => {
-      if (allStagedSelected) {
-        const next = new Set(prev);
-        stagedIds.forEach((id) => next.delete(id));
-        return next;
-      }
-      return new Set([...prev, ...stagedIds]);
-    });
-  };
 
-  // Picking a file for a row is the clear signal the admin wants it
-  // submitted, so it auto-checks itself — no separate "now also tick the
-  // box" step needed before "Submit Selected Reports" will pick it up.
   const stageFile = (batchUserId, file) => {
     if (!file) return;
     setPendingFiles((prev) => ({ ...prev, [batchUserId]: file }));
-    setSelectedIds((prev) => new Set(prev).add(batchUserId));
   };
   const clearStagedFile = (batchUserId) => {
     setPendingFiles((prev) => {
@@ -140,9 +128,23 @@ export const DocumentUpload = () => {
       delete next[batchUserId];
       return next;
     });
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      next.delete(batchUserId);
+  };
+
+  const decisionIds = Object.keys(pendingDecisions);
+
+  // Approve/Reject only stage the decision locally — nothing is sent until
+  // Submit Reports fires. Matches the flow the verifier actually follows:
+  // attach the file, decide on it, then submit both together.
+  const stageApprove = (batchUserId) => {
+    setPendingDecisions((prev) => ({ ...prev, [batchUserId]: { status: 'approved' } }));
+  };
+  const stageReject = (batchUserId, reason) => {
+    setPendingDecisions((prev) => ({ ...prev, [batchUserId]: { status: 'rejected', reason } }));
+  };
+  const clearStagedDecision = (batchUserId) => {
+    setPendingDecisions((prev) => {
+      const next = { ...prev };
+      delete next[batchUserId];
       return next;
     });
   };
@@ -152,65 +154,64 @@ export const DocumentUpload = () => {
   // call after it with "Link already used", even for a different record.
   // Firing one call per row (or racing several in parallel) let the first
   // one claim the token and broke every other row's upload. So every staged
-  // file for every selected record must go up together, in this one call,
-  // tagged by the parallel batch_user_ids array — never as separate calls.
-  const handleSubmitSelected = async () => {
-    const targets = [...selectedIds].filter((id) => pendingFiles[id]);
-    if (targets.length === 0) { toast.error('Select at least one record with a report attached'); return; }
+  // file goes up together, in this one call, tagged by the parallel
+  // batch_user_ids array — never as separate calls. Decisions submit as
+  // their own combined call, sequenced after the upload rather than in
+  // parallel: if the upload succeeds its staged files are cleared right
+  // away (the link is consumed either way), independently of whether the
+  // decisions call that follows succeeds — so a decisions failure never
+  // leaves a record trying to re-upload against an already-used link.
+  const handleSubmitReports = async () => {
+    const fileTargets = stagedIds;
+    const decisionTargets = decisionIds;
+    if (fileTargets.length === 0 && decisionTargets.length === 0) {
+      toast.error('Attach a report or make a decision first');
+      return;
+    }
     setBulkSubmitting(true);
-    try {
-      const files = targets.map((id) => pendingFiles[id]);
-      await verificationAPI.uploadManualReport(token, files, targets);
-      toast.success(`${targets.length} report${targets.length === 1 ? '' : 's'} uploaded`);
-      setPendingFiles((prev) => {
-        const next = { ...prev };
-        targets.forEach((id) => delete next[id]);
-        return next;
-      });
-      setSelectedIds((prev) => {
-        const next = new Set(prev);
-        targets.forEach((id) => next.delete(id));
-        return next;
-      });
-      await loadRequestInfo();
-    } catch (err) {
-      toast.error(getApiError(err, 'Upload failed — the link may have already been used. Please contact the admin if this persists.'));
-    } finally {
-      setBulkSubmitting(false);
-    }
-  };
+    let uploadFailed = false;
+    let decisionsFailed = false;
 
-  const handleApprove = async (batchUserId, name) => {
-    setDecidingId(batchUserId);
-    try {
-      await verificationAPI.verifyManualVerificationRequest(token, [{ batch_user_id: batchUserId, status: 'approved' }]);
-      toast.success(`${name || 'Record'} approved`);
-      setReviewingId(null);
-      await loadRequestInfo();
-    } catch (err) {
-      toast.error(getApiError(err, 'Failed to approve'));
-    } finally {
-      setDecidingId(null);
+    if (fileTargets.length > 0) {
+      try {
+        const files = fileTargets.map((id) => pendingFiles[id]);
+        await verificationAPI.uploadManualReport(token, files, fileTargets);
+        setPendingFiles({});
+      } catch (err) {
+        uploadFailed = true;
+        if (isLinkAlreadyUsedError(err)) {
+          // The link is spent for good — stop holding files nobody can
+          // ever attach now, and stop offering the option on any row.
+          setUploadLinkUsed(true);
+          setPendingFiles({});
+        }
+        toast.error(getApiError(err, 'Upload failed — the link may have already been used. Please contact the admin if this persists.'));
+      }
     }
-  };
 
-  const handleReject = async (batchUserId, name) => {
-    if (!rejectReason.trim()) { toast.error('A rejection reason is required'); return; }
-    setDecidingId(batchUserId);
-    try {
-      await verificationAPI.verifyManualVerificationRequest(token, [
-        { batch_user_id: batchUserId, status: 'rejected', reason: rejectReason.trim() },
-      ]);
-      toast.success(`${name || 'Record'} rejected`);
-      setReviewingId(null);
-      setRejectingId(null);
-      setRejectReason('');
-      await loadRequestInfo();
-    } catch (err) {
-      toast.error(getApiError(err, 'Failed to reject'));
-    } finally {
-      setDecidingId(null);
+    if (decisionTargets.length > 0) {
+      try {
+        const decisions = decisionTargets.map((id) => ({
+          batch_user_id: id,
+          status: pendingDecisions[id].status,
+          ...(pendingDecisions[id].status === 'rejected' ? { reason: pendingDecisions[id].reason } : {}),
+        }));
+        await verificationAPI.verifyManualVerificationRequest(token, decisions);
+        setPendingDecisions({});
+      } catch (err) {
+        decisionsFailed = true;
+        toast.error(getApiError(err, 'Failed to submit decisions'));
+      }
     }
+
+    if (!uploadFailed && !decisionsFailed) {
+      const parts = [];
+      if (fileTargets.length) parts.push(`${fileTargets.length} report${fileTargets.length === 1 ? '' : 's'} uploaded`);
+      if (decisionTargets.length) parts.push(`${decisionTargets.length} decision${decisionTargets.length === 1 ? '' : 's'} submitted`);
+      toast.success(parts.join(' · '));
+    }
+    await loadRequestInfo();
+    setBulkSubmitting(false);
   };
 
   // ── Loading / error states ──────────────────────────────────────────────
@@ -252,8 +253,6 @@ export const DocumentUpload = () => {
       </CenteredCard>
     );
   }
-
-  const tokenMasked = token && token.length > 10 ? `${token.slice(0, 6)}…${token.slice(-4)}` : token;
 
   return (
     <div className="min-h-screen bg-[#f5f6fa]">
@@ -302,15 +301,23 @@ export const DocumentUpload = () => {
               </div>
             )}
 
+            {uploadLinkUsed && (
+              <div className="rounded-2xl border border-orange-100 bg-orange-50 px-5 py-4 flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-orange-100 flex items-center justify-center shrink-0">
+                  <AlertTriangle size={18} className="text-orange-600" />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-orange-800 font-inter">Upload link already used</p>
+                  <p className="text-xs text-orange-700 font-inter">Reports can no longer be attached on this link. You can still approve or reject records below — contact the admin if you need to upload another file.</p>
+                </div>
+              </div>
+            )}
+
             {/* Assigned Records table */}
             <div className="rounded-2xl bg-white border border-gray-100 shadow-sm overflow-hidden">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-5 py-4 border-b border-gray-100">
                 <p className="text-sm font-semibold text-brand-dark font-inter">Assigned Records ({users.length})</p>
                 <div className="flex items-center gap-3 flex-wrap">
-                  <label className="flex items-center gap-1.5 text-xs text-gray-500 font-inter cursor-pointer select-none">
-                    <input type="checkbox" checked={pendingOnly} onChange={(e) => setPendingOnly(e.target.checked)} className="accent-brand-blue" />
-                    Show only pending
-                  </label>
                   <div className="flex items-center gap-1.5 rounded-lg border border-gray-200 px-2.5 py-1.5">
                     <Search size={12} className="text-gray-400" />
                     <input
@@ -337,14 +344,6 @@ export const DocumentUpload = () => {
                 <div className="overflow-x-auto">
                   <div className="min-w-[760px]">
                     <div className={`grid ${ROW_GRID} gap-x-2 bg-gray-50 px-4 py-2.5 text-[10px] font-semibold uppercase tracking-wide text-gray-400 font-inter border-b border-gray-100`}>
-                      <input
-                        type="checkbox"
-                        checked={allStagedSelected}
-                        disabled={stagedIds.length === 0}
-                        onChange={toggleSelectAll}
-                        title={stagedIds.length === 0 ? 'Attach a report to a record first' : 'Select all records with a report attached'}
-                        className="accent-brand-blue disabled:opacity-30"
-                      />
                       <span>Name</span>
                       <span>Upload Report</span>
                       <span>Uploaded File</span>
@@ -362,25 +361,24 @@ export const DocumentUpload = () => {
                         // openable directly; only ever show an http(s) proxy URL.
                         const canView = typeof reportUrl === 'string' && /^https?:\/\//i.test(reportUrl);
                         const staged = pendingFiles[id];
-                        const isDeciding = decidingId === id;
+                        const stagedDecision = pendingDecisions[id];
                         const decided = status === 'approved' || status === 'rejected';
 
                         return (
                           <div key={id}>
                             <div className={`grid ${ROW_GRID} items-center gap-x-2 px-4 py-3`}>
-                              <input
-                                type="checkbox"
-                                checked={selectedIds.has(id)}
-                                onChange={() => toggleSelected(id)}
-                                className="accent-brand-blue"
-                              />
                               <div className="min-w-0">
                                 <p className="truncate text-sm font-medium text-brand-dark font-inter">{row.full_name || 'Assigned record'}</p>
                               </div>
 
-                              {/* Upload Report — local staged file, pre-submit */}
+                              {/* Upload Report — local staged file, pre-submit.
+                                  Once a record is decided, or the upload
+                                  link itself has already been used, there is
+                                  no upload option left to offer here. */}
                               <div className="min-w-0">
-                                {staged ? (
+                                {decided || uploadLinkUsed ? (
+                                  <span className="text-xs text-gray-300 font-inter">—</span>
+                                ) : staged ? (
                                   <div className="flex items-center gap-1.5 rounded-lg border border-blue-100 bg-blue-50/60 px-2 py-1.5">
                                     <FileText size={12} className="shrink-0 text-brand-blue" />
                                     <span className="min-w-0 flex-1 truncate text-[11px] font-medium text-brand-dark font-inter">{staged.name}</span>
@@ -415,15 +413,7 @@ export const DocumentUpload = () => {
                               </div>
 
                               <div>
-                                {staged ? (
-                                  // Submission only ever happens through the one
-                                  // "Submit Selected Reports" action (the upload
-                                  // link is single-use) — this is a status
-                                  // indicator, not a separate submit trigger.
-                                  <span className="flex items-center gap-1 text-[11px] font-semibold text-brand-blue font-inter">
-                                    <Upload size={11} /> Ready to submit
-                                  </span>
-                                ) : decided ? (
+                                {decided ? (
                                   canView ? (
                                     <button
                                       type="button"
@@ -435,16 +425,42 @@ export const DocumentUpload = () => {
                                   ) : (
                                     <span className="text-xs text-gray-300 font-inter">—</span>
                                   )
+                                ) : stagedDecision ? (
+                                  // Staged locally, not yet sent — same
+                                  // "ready to submit" idea as a staged file,
+                                  // with an undo before it goes out for real.
+                                  <div className="flex items-center gap-1.5">
+                                    <span className={`flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold font-inter ${stagedDecision.status === 'approved' ? 'bg-green-50 text-green-700 border border-green-100' : 'bg-red-50 text-red-700 border border-red-100'}`}>
+                                      {stagedDecision.status === 'approved' ? <CheckCircle size={11} /> : <XCircle size={11} />}
+                                      {stagedDecision.status === 'approved' ? 'Approved' : 'Rejected'} (pending)
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={() => clearStagedDecision(id)}
+                                      className="shrink-0 text-gray-400 hover:text-red-500"
+                                      title="Undo"
+                                    >
+                                      <X size={12} />
+                                    </button>
+                                  </div>
                                 ) : (
-                                  <button
-                                    type="button"
-                                    onClick={() => setReviewingId(reviewingId === id ? null : id)}
-                                    className={`rounded-lg border px-3 py-1.5 text-xs font-semibold font-inter transition-colors ${
-                                      reviewingId === id ? 'border-brand-blue bg-brand-blue/5 text-brand-blue' : 'border-gray-200 text-gray-600 hover:bg-gray-50'
-                                    }`}
-                                  >
-                                    Review
-                                  </button>
+                                  <div className="flex items-center gap-1.5">
+                                    <button
+                                      type="button"
+                                      onClick={() => stageApprove(id)}
+                                      className="flex items-center gap-1 rounded-lg bg-green-500 px-2.5 py-1.5 text-[11px] font-semibold text-white font-inter hover:bg-green-600"
+                                    >
+                                      <CheckCircle size={11} />
+                                      Approve
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => { setRejectingId(id); setRejectReason(''); }}
+                                      className="flex items-center gap-1 rounded-lg border border-red-200 px-2.5 py-1.5 text-[11px] font-semibold text-red-500 font-inter hover:bg-red-50"
+                                    >
+                                      <XCircle size={11} /> Reject
+                                    </button>
+                                  </div>
                                 )}
                               </div>
                             </div>
@@ -457,59 +473,43 @@ export const DocumentUpload = () => {
                               </div>
                             )}
 
-                            {/* Inline review panel — approve/reject this one
-                                record, independent of every sibling row. */}
-                            {reviewingId === id && !decided && (
+                            {/* Inline reject-reason panel — only this one
+                                record, independent of every sibling row.
+                                Confirm stages the decision locally; nothing
+                                is sent until Submit Reports fires. */}
+                            {rejectingId === id && !decided && (
                               <div className="px-4 pb-3">
-                                {rejectingId === id ? (
-                                  <div className="space-y-2 rounded-xl border border-gray-100 bg-gray-50/70 p-3">
-                                    <input
-                                      value={rejectReason}
-                                      onChange={(e) => setRejectReason(e.target.value)}
-                                      placeholder="Reason for rejection (required)"
-                                      className="w-full rounded-lg border border-gray-200 px-3 py-2 text-xs font-inter focus:outline-none focus:ring-2 focus:ring-red-200"
-                                    />
-                                    <div className="flex gap-2">
-                                      <button
-                                        type="button"
-                                        disabled={isDeciding || !rejectReason.trim()}
-                                        onClick={() => handleReject(id, row.full_name)}
-                                        className="flex items-center gap-1.5 rounded-lg bg-red-500 px-3 py-1.5 text-xs font-semibold text-white font-inter hover:bg-red-600 disabled:opacity-50"
-                                      >
-                                        {isDeciding ? <RefreshCw size={12} className="animate-spin" /> : <XCircle size={12} />}
-                                        Confirm Reject
-                                      </button>
-                                      <button
-                                        type="button"
-                                        disabled={isDeciding}
-                                        onClick={() => { setRejectingId(null); setRejectReason(''); }}
-                                        className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-semibold text-gray-500 font-inter hover:bg-gray-50 disabled:opacity-50"
-                                      >
-                                        Cancel
-                                      </button>
-                                    </div>
-                                  </div>
-                                ) : (
-                                  <div className="flex gap-2 rounded-xl border border-gray-100 bg-gray-50/70 p-3">
+                                <div className="space-y-2 rounded-xl border border-gray-100 bg-gray-50/70 p-3">
+                                  <input
+                                    value={rejectReason}
+                                    onChange={(e) => setRejectReason(e.target.value)}
+                                    placeholder="Reason for rejection (required)"
+                                    autoFocus
+                                    className="w-full rounded-lg border border-gray-200 px-3 py-2 text-xs font-inter focus:outline-none focus:ring-2 focus:ring-red-200"
+                                  />
+                                  <div className="flex gap-2">
                                     <button
                                       type="button"
-                                      disabled={isDeciding}
-                                      onClick={() => handleApprove(id, row.full_name)}
-                                      className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-green-500 px-3 py-2 text-xs font-semibold text-white font-inter hover:bg-green-600 disabled:opacity-50"
+                                      disabled={!rejectReason.trim()}
+                                      onClick={() => {
+                                        stageReject(id, rejectReason.trim());
+                                        setRejectingId(null);
+                                        setRejectReason('');
+                                      }}
+                                      className="flex items-center gap-1.5 rounded-lg bg-red-500 px-3 py-1.5 text-xs font-semibold text-white font-inter hover:bg-red-600 disabled:opacity-50"
                                     >
-                                      {isDeciding ? <RefreshCw size={12} className="animate-spin" /> : <CheckCircle size={12} />}
-                                      Approve
+                                      <XCircle size={12} />
+                                      Confirm Reject
                                     </button>
                                     <button
                                       type="button"
-                                      disabled={isDeciding}
-                                      onClick={() => setRejectingId(id)}
-                                      className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-red-200 px-3 py-2 text-xs font-semibold text-red-500 font-inter hover:bg-red-50 disabled:opacity-50"
+                                      onClick={() => { setRejectingId(null); setRejectReason(''); }}
+                                      className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-semibold text-gray-500 font-inter hover:bg-gray-50"
                                     >
-                                      <XCircle size={12} /> Reject
+                                      Cancel
                                     </button>
                                   </div>
-                                )}
+                                </div>
                               </div>
                             )}
                           </div>
@@ -558,32 +558,21 @@ export const DocumentUpload = () => {
               </div>
             </div>
 
-            <div className="rounded-2xl bg-white border border-gray-100 shadow-sm p-5">
-              <div className="flex items-center justify-between mb-3">
-                <p className="text-sm font-semibold text-brand-dark font-inter">Token Status</p>
-                <span className="flex items-center gap-1 rounded-full bg-green-50 px-2.5 py-1 text-[11px] font-semibold text-green-700 font-inter">
-                  <CheckCircle size={11} /> Valid
-                </span>
-              </div>
-              <div className="rounded-xl bg-gray-50 border border-gray-100 px-3 py-2.5 space-y-1.5">
-                <div className="flex items-center justify-between text-xs font-inter">
-                  <span className="text-gray-400">Token</span>
-                  <span className="font-mono font-semibold text-brand-dark">{tokenMasked}</span>
-                </div>
-              </div>
-            </div>
-
             <button
               type="button"
-              onClick={handleSubmitSelected}
-              disabled={bulkSubmitting || selectedSubmittableCount === 0}
+              onClick={handleSubmitReports}
+              disabled={bulkSubmitting || (stagedIds.length === 0 && decisionIds.length === 0)}
               className="w-full flex items-center justify-center gap-2 rounded-xl bg-brand-blue py-3 text-sm font-semibold text-white font-inter hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed"
             >
               {bulkSubmitting ? <RefreshCw size={14} className="animate-spin" /> : <Upload size={14} />}
-              {bulkSubmitting ? 'Submitting…' : selectedSubmittableCount > 0 ? `Submit Selected Reports (${selectedSubmittableCount})` : 'Submit Selected Reports'}
+              {bulkSubmitting
+                ? 'Submitting…'
+                : stagedIds.length > 0 || decisionIds.length > 0
+                  ? `Submit Reports (${stagedIds.length + decisionIds.length})`
+                  : 'Submit Reports'}
             </button>
             <p className="text-[11px] text-gray-400 font-inter text-center -mt-2">
-              Attach a report with "Upload File" — it's auto-selected and ready to submit.
+              Upload a file and/or approve or reject each record — nothing is sent until you submit.
             </p>
 
             <div className="rounded-2xl bg-white border border-gray-100 shadow-sm p-5 flex items-start gap-3">

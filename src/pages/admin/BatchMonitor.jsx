@@ -212,12 +212,6 @@ export const formatVerifTypeLabel = (report) =>
   report.verification_type_label ||
   'Manual Verification';
 
-// "doc_uploaded" is the only status an admin can still act on (approved/
-// rejected are already decided, everything else hasn't been submitted yet)
-// — same condition handleApproveAllReports uses to pick which requests to
-// approve in bulk.
-export const countPendingReview = (reports) => (reports || []).filter((r) => r.status === 'doc_uploaded').length;
-
 const formatCreatedAt = (value) => {
   if (!value) return 'date unavailable';
   return new Date(value).toLocaleString([], { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });

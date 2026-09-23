@@ -742,26 +742,12 @@ export const verificationAPI = {
       responseType: 'blob',
     }),
 
-  // ── Approve/reject a submitted manual verification report ──────────────────
-  // status: "approved" | "rejected" — updates every batch user assigned to
-  // this request for that verification type. "Reject wins" precedence
-  // (backend, Sept 2026): if a user already carries "rejected" from another
-  // request/verifier for the same batch+type, a later "approved" decision
-  // here can never flip them back — the response's
-  // users_protected_from_downgrade count says how many users that guard
-  // applied to. A later "rejected" decision can still correct an earlier
-  // "approved" one.
-  updateManualVerificationStatus: (requestId, status, reason) =>
-    verificationApi.patch(`/verification/manual/requests/${requestId}/status`, cleanObject({ status, reason })),
-
-  // Additive per-user sibling of the whole-request call above — same
-  // endpoint, new decisions[] shape the backend now also accepts
-  // ({ batch_user_id, status, reason }), for approving/rejecting one
-  // assigned user/product independently of the rest of the request. Kept
-  // as a separate helper rather than overloading updateManualVerificationStatus's
-  // signature, so neither call site has to guess which shape it's sending.
-  updateManualVerificationDecisions: (requestId, decisions) =>
-    verificationApi.patch(`/verification/manual/requests/${requestId}/status`, { decisions }),
+  // REMOVED: updateManualVerificationStatus / updateManualVerificationDecisions
+  // (PATCH /verification/manual/requests/{request_id}/status). Backend change:
+  // the verifier is now the only actor who can approve/reject a manual
+  // verification report, via their own token upload/verify flow. This
+  // endpoint now returns 410 Gone for SuperAdmin/Organization callers, so the
+  // frontend no longer calls it at all — Submitted Reports is read-only.
 
   // ── Email Drafts ──────────────────────────────────────────────────────────
   // NOTE: the latest backend integration doc documents these five CRUD
