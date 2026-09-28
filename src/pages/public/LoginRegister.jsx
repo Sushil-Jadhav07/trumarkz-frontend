@@ -442,7 +442,7 @@ export const LoginRegister = () => {
               animate={{ opacity: 1 }}
               transition={{ ...spring.soft, delay: 0.75 }}
             >
-              <p className="text-gray-600 text-xs font-inter">© 2024 TruMarkZ. All rights reserved.</p>
+              <p className="text-gray-600 text-xs font-inter">© {new Date().getFullYear()} TruMarkZ. All rights reserved.</p>
             </motion.div>
           </div>
         </div>

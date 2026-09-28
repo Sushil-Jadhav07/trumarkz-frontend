@@ -23,8 +23,9 @@ const BASE_FIELDS = [
   { key: 'dob',           label: 'Date of Birth', hint: 'YYYY-MM-DD' },
   { key: 'aadhar_number', label: 'Aadhar Number' },
   { key: 'pan_number',    label: 'PAN Number' },
-  { key: 'license_number', label: 'License Number' },
+  { key: 'dl_number',     label: 'DL Number' },
   { key: 'gender',        label: 'Gender' },
+  { key: 'nationality',   label: 'Nationality' },
 ];
 
 // Editable fields offered in the OCR review popup — this is the exact set
@@ -435,7 +436,7 @@ export const DownloadTemplate = () => {
   const [baseToggles,    setBaseToggles]    = useState({
     full_name: true, email: true, phone_number: true,
     dob: true, aadhar_number: true, pan_number: true,
-    license_number: true, gender: true,
+    dl_number: true, gender: true, nationality: true,
   });
   const [batchNameValue, setBatchNameValue] = useState(() => {
     const d = new Date();

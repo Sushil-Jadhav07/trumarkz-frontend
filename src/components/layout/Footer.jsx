@@ -1,7 +1,8 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { Logo } from '@/components/ui/Logo';
-import { Mail, Phone, MapPin } from 'lucide-react';
+import { Mail } from 'lucide-react';
+import { LEGAL_CONTACT_EMAIL } from '@/data/legalConfig';
 
 export const Footer = () => {
   return (
@@ -24,8 +25,6 @@ export const Footer = () => {
           <div>
             <h4 className="font-sora font-semibold text-sm mb-4">Company</h4>
             <ul className="space-y-2 text-sm text-gray-400 font-inter">
-              <li><a href="#" className="hover:text-white transition-colors">About Us</a></li>
-              <li><a href="#" className="hover:text-white transition-colors">Careers</a></li>
               <li><a href="#/account/support" className="hover:text-white transition-colors">Support</a></li>
               <li><Link to="/privacy-policy" className="hover:text-white transition-colors">Privacy Policy</Link></li>
               <li><Link to="/terms-of-service" className="hover:text-white transition-colors">Terms of Service</Link></li>
@@ -34,9 +33,7 @@ export const Footer = () => {
           <div>
             <h4 className="font-sora font-semibold text-sm mb-4">Contact</h4>
             <ul className="space-y-2 text-sm text-gray-400 font-inter">
-              <li className="flex items-center gap-2"><Mail size={14} /> support@trumarkz.com</li>
-              <li className="flex items-center gap-2"><Phone size={14} /> +91 98765 43210</li>
-              <li className="flex items-center gap-2"><MapPin size={14} /> Bangalore, India</li>
+              <li className="flex items-center gap-2"><Mail size={14} /> {LEGAL_CONTACT_EMAIL}</li>
             </ul>
           </div>
         </div>

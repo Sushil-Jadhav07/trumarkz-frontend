@@ -7,8 +7,11 @@
  *  - Legal entity / registered company name operating TruMarkZ
  *  - Legal / privacy contact email (currently defaults to support@trumarkz.com
  *    via VITE_LEGAL_CONTACT_EMAIL — confirm this is the intended address)
- *  - Governing law / jurisdiction for disputes (left as an explicit
- *    placeholder below — do not assume India or any specific state)
+ *  - Governing law / jurisdiction for disputes — do not assume India or any
+ *    specific state. The "Governing Law and Dispute Resolution" clause has
+ *    been OMITTED from the user-visible page below (rather than shown as a
+ *    "[TBD]" placeholder) until this is confirmed; add it back as a proper
+ *    numbered section once the jurisdiction is known.
  *  - Policy for setting/reviewing the "Last updated" date (currently a single
  *    constant in src/data/legalConfig.js)
  *  - Any contractual liability cap (none is stated below — left to counsel)
@@ -157,8 +160,7 @@ export const TermsOfService = () => {
 
       <LegalSection id="limitation-of-liability" title="15. Limitation of Liability">
         <p>To the maximum extent permitted by applicable law, TruMarkZ's liability arising from your use of the
-        Service is limited as set out in any applicable agreement between you and TruMarkZ. <em>[Any
-        contractual liability cap is to be determined by legal counsel and inserted here.]</em></p>
+        Service is limited as set out in any applicable agreement between you and TruMarkZ.</p>
       </LegalSection>
 
       <LegalSection id="indemnity" title="16. Indemnity">
@@ -173,22 +175,12 @@ export const TermsOfService = () => {
         revised Terms.</p>
       </LegalSection>
 
-      <LegalSection id="governing-law" title="18. Governing Law and Dispute Resolution">
-        <p><em>[Governing law / jurisdiction to be confirmed by legal counsel.]</em> This section will be
-        updated once the operating legal entity and applicable jurisdiction have been confirmed.</p>
-      </LegalSection>
-
-      <LegalSection id="contact" title="19. Contact">
+      <LegalSection id="contact" title="18. Contact">
         <p>
           If you have questions about these Terms, contact us at{' '}
           <a href={`mailto:${LEGAL_CONTACT_EMAIL}`}>{LEGAL_CONTACT_EMAIL}</a>.
         </p>
       </LegalSection>
-
-      <p className="text-xs text-gray-400">
-        These Terms of Service are a product-specific draft and have not been reviewed or approved by legal
-        counsel. They should not be relied on as final, legally compliant terms until reviewed.
-      </p>
     </LegalPageLayout>
   );
 };

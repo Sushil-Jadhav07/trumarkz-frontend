@@ -14,6 +14,10 @@
  *  - Any verified certifications or compliance claims (none are made below —
  *    do not add ISO/GDPR/DPDP claims without documented proof)
  *  - Specific data retention periods, if the business/contract requires them
+ *  - Whether the backend hashes stored passwords (unverified in this repo —
+ *    the "Account authentication information" bullet below is deliberately
+ *    neutral instead of claiming a specific hashing/storage implementation;
+ *    only make that claim once the backend implementation is confirmed)
  *
  * This file must not be treated as legally reviewed or compliant until
  * product/legal ownership signs off on the above.
@@ -31,11 +35,6 @@ export const PrivacyPolicy = () => {
         issuance, verifier upload links, QR-based report viewing, and related organization, individual, and
         account functionality (together, the "Service").
       </p>
-      <p>
-        <em>The entity operating TruMarkZ will be identified here once confirmed by the product owner. Until
-        then, references to "TruMarkZ" describe the Service as offered to you.</em>
-      </p>
-
       <LegalSection id="information-we-collect" title="1. Information We Collect">
         <p>What we collect depends on how you use the Service — as an organization, an individual account
         holder, a person whose information is submitted for verification, or an assigned verifier.</p>
@@ -45,8 +44,7 @@ export const PrivacyPolicy = () => {
           <li>Name</li>
           <li>Email address</li>
           <li>Phone number</li>
-          <li>Account authentication information (your password is never stored in plain text — it is stored
-          in hashed form)</li>
+          <li>Account authentication information</li>
           <li>Account or user type (organization, individual, or administrator)</li>
         </ul>
 
@@ -233,11 +231,6 @@ export const PrivacyPolicy = () => {
           <a href={`mailto:${LEGAL_CONTACT_EMAIL}`}>{LEGAL_CONTACT_EMAIL}</a>.
         </p>
       </LegalSection>
-
-      <p className="text-xs text-gray-400">
-        This Privacy Policy is a product-specific draft and has not been reviewed or approved by legal
-        counsel. It should not be relied on as a final, legally compliant policy until reviewed.
-      </p>
     </LegalPageLayout>
   );
 };
