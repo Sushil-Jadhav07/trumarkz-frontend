@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
+import { Link } from 'react-router-dom';
 import { AuthLayout } from '@/components/layout/AuthLayout';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
@@ -716,6 +717,12 @@ export const Profile = () => {
             </Card>
           </div>
         </div>
+
+        <p className="mt-6 text-center text-xs text-gray-400 font-inter">
+          <Link to="/privacy-policy" className="hover:text-brand-blue hover:underline transition-colors">Privacy Policy</Link>
+          <span className="mx-2">·</span>
+          <Link to="/terms-of-service" className="hover:text-brand-blue hover:underline transition-colors">Terms of Service</Link>
+        </p>
       </motion.div>
     </AuthLayout>
   );

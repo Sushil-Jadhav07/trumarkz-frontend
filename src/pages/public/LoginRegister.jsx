@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
-import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import { Logo } from '@/components/ui/Logo';
 import { Button } from '@/components/ui/Button';
@@ -762,6 +762,12 @@ export const LoginRegister = () => {
               )}
             </AnimatePresence>
           </motion.div>
+
+          <p className="mt-5 text-xs text-gray-400 font-inter">
+            <Link to="/privacy-policy" className="hover:text-brand-blue hover:underline transition-colors">Privacy Policy</Link>
+            <span className="mx-2">·</span>
+            <Link to="/terms-of-service" className="hover:text-brand-blue hover:underline transition-colors">Terms of Service</Link>
+          </p>
         </div>
       </div>
     </>

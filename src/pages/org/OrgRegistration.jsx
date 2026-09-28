@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/Input';
 import { StepWizard } from '@/components/ui/StepWizard';
 import { Card } from '@/components/ui/Card';
 import { Building2, Mail, Phone, Lock, ArrowLeft, ArrowRight } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { SERVICE_TYPE_OPTIONS } from '@/data/serviceTypeOptions';
 import toast from 'react-hot-toast';
 
@@ -158,6 +159,12 @@ export const OrgRegistration = () => {
             <Button type="submit" variant="primary" size="lg" className="w-full" disabled={submitting}>
               {submitting ? 'Sending OTP...' : 'Create Account & Send OTP'} <ArrowRight size={18} />
             </Button>
+            <p className="text-center text-xs text-gray-400 font-inter">
+              By creating an account, you agree to the{' '}
+              <Link to="/terms-of-service" className="text-brand-blue hover:underline">Terms of Service</Link>{' '}
+              and acknowledge the{' '}
+              <Link to="/privacy-policy" className="text-brand-blue hover:underline">Privacy Policy</Link>.
+            </p>
           </form>
 
           <div className="mt-4 text-center">

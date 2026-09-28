@@ -8,7 +8,7 @@ import { Modal } from '@/components/ui/Modal';
 import { CustomSelect } from '@/components/ui/CustomSelect';
 import { verificationAPI, sdcAPI, getApiError } from '@/services/api';
 import { GenerateSDCModal, CertificateDetailModal } from '@/pages/admin/SDCVerification';
-import { VerificationDetailsModal } from '@/components/shared/VerificationDetailsModal';
+import { VerificationDetailsModal, VerificationCheckDetailsModal } from '@/components/shared/VerificationDetailsModal';
 import { TablePagination } from '@/components/shared/TablePagination';
 import {
   useBatchList, WORKFLOW_STEPS, isProductRecord, recordTitle, getCertificateProductId,
@@ -110,6 +110,8 @@ export const BatchControlCenter = () => {
 
   const [rejectedListTarget, setRejectedListTarget] = useState(null);
   const [verificationDetailsRecord, setVerificationDetailsRecord] = useState(null);
+  // Exact clicked pair — { record, typeName } — for the single-check modal.
+  const [selectedVerification, setSelectedVerification] = useState(null);
   const [smartSendOpen, setSmartSendOpen] = useState(false);
   const [smartSendBatch, setSmartSendBatch] = useState(null);
   const [sdcGenerateBatch, setSdcGenerateBatch] = useState(null);
@@ -1169,7 +1171,13 @@ export const BatchControlCenter = () => {
                                     <div key={name} className="flex min-w-0 items-start gap-1.5" title={name}>
                                       <span className={`mt-1 h-1.5 w-1.5 shrink-0 rounded-full ${dotTone}`} />
                                       <div className="min-w-0">
-                                        <p className="truncate text-[11px] text-gray-600 font-inter">{name}</p>
+                                        <button
+                                          type="button"
+                                          onClick={() => setSelectedVerification({ record, typeName: name })}
+                                          className="block max-w-full truncate text-left text-[11px] text-gray-600 font-inter hover:text-brand-blue hover:underline focus:outline-none focus-visible:underline"
+                                        >
+                                          {name}
+                                        </button>
                                         <p className={`text-[11px] font-semibold font-inter ${textTone}`}>{label}</p>
                                       </div>
                                     </div>
@@ -1400,6 +1408,20 @@ export const BatchControlCenter = () => {
             certificate={vdCertificate}
             onViewCertificate={() => vdCertMatch && openSdcCertificate(vdCertMatch.publicId, 'verify')}
             onDownloadCertificate={() => vdCertMatch && openSdcCertificate(vdCertMatch.publicId, 'pdf')}
+          />
+        );
+      })()}
+
+      {/* ── Single verification check modal (record + type pair) ─── */}
+      {selectedVerification && (() => {
+        const svRecord = selectedVerification.record;
+        const svRecordId = svRecord.id || svRecord.user_id || svRecord.entity_id;
+        return (
+          <VerificationCheckDetailsModal
+            selection={selectedVerification}
+            title={recordTitle(svRecord)}
+            verifierEmail={verifierByRecordAndType[svRecordId]?.[selectedVerification.typeName]}
+            onClose={() => setSelectedVerification(null)}
           />
         );
       })()}

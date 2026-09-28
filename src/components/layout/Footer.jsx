@@ -1,6 +1,7 @@
 import React from 'react';
+import { Link } from 'react-router-dom';
 import { Logo } from '@/components/ui/Logo';
-import { Shield, Mail, Phone, MapPin } from 'lucide-react';
+import { Mail, Phone, MapPin } from 'lucide-react';
 
 export const Footer = () => {
   return (
@@ -26,7 +27,8 @@ export const Footer = () => {
               <li><a href="#" className="hover:text-white transition-colors">About Us</a></li>
               <li><a href="#" className="hover:text-white transition-colors">Careers</a></li>
               <li><a href="#/account/support" className="hover:text-white transition-colors">Support</a></li>
-              <li><a href="#" className="hover:text-white transition-colors">Privacy Policy</a></li>
+              <li><Link to="/privacy-policy" className="hover:text-white transition-colors">Privacy Policy</Link></li>
+              <li><Link to="/terms-of-service" className="hover:text-white transition-colors">Terms of Service</Link></li>
             </ul>
           </div>
           <div>
@@ -39,11 +41,7 @@ export const Footer = () => {
           </div>
         </div>
         <div className="mt-10 pt-6 border-t border-white/10 flex flex-col md:flex-row items-center justify-between gap-4">
-          <p className="text-xs text-gray-500 font-inter">© 2024 TruMarkZ. All rights reserved.</p>
-          <div className="flex items-center gap-2 text-xs text-gray-500 font-inter">
-            <Shield size={14} className="text-brand-blue" />
-            ISO 27001 Certified · GDPR Ready
-          </div>
+          <p className="text-xs text-gray-500 font-inter">© {new Date().getFullYear()} TruMarkZ. All rights reserved.</p>
         </div>
       </div>
     </footer>

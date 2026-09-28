@@ -92,6 +92,8 @@ import ProductWarrantyAdmin from '@/pages/admin/ProductWarrantyAdmin';
 import ProductWarrantyUpload from '@/pages/org/ProductWarrantyUpload';
 import SkillsManagement from '@/pages/admin/SkillsManagement';
 import SkillVerifierUpload from '@/pages/public/SkillVerifierUpload';
+import PrivacyPolicy from '@/pages/public/PrivacyPolicy';
+import TermsOfService from '@/pages/public/TermsOfService';
 
 const ProtectedRoute = ({ children }) => {
   const { isAuthenticated, loading } = useAuth();
@@ -147,6 +149,8 @@ const AnimatedRoutes = () => {
           <Route path="/upload" element={<DocumentUpload />} />
           <Route path="/verification/manual/upload/:token" element={<DocumentUpload />} />
           <Route path="/skills/verify/upload/:token" element={<SkillVerifierUpload />} />
+          <Route path="/privacy-policy" element={<PrivacyPolicy />} />
+          <Route path="/terms-of-service" element={<TermsOfService />} />
 
           {/* ── Registration routes ── */}
           <Route path="/org-registration" element={<OrgRegistration />} />

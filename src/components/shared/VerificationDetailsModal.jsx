@@ -145,6 +145,108 @@ const CertificateSection = ({ certificate, onView, onDownload }) => {
   );
 };
 
+// One verification check for ONE record — driven entirely by the exact
+// { record, typeName } pair that was clicked. Reads only
+// record.verification_type_status[typeName]; never searches other records or
+// other types. verifierEmail is resolved by the caller for that same pair.
+export const VerificationCheckDetailsModal = ({ selection, title, verifierEmail, onClose }) => {
+  if (!selection) return null;
+  const { record, typeName } = selection;
+  const check = record?.verification_type_status?.[typeName];
+  const rawStatus = String(check?.status || 'pending').toLowerCase();
+  const isVerified = rawStatus === 'approved' || rawStatus === 'verified';
+  const isRejected = rawStatus === 'rejected';
+  const cardStatus = isVerified ? 'approved' : isRejected ? 'rejected' : 'pending';
+  const meta = CHECK_META[cardStatus];
+  const StatusIcon = meta.icon;
+  const isAutomatic = check?.label === 'automatic';
+  const typeLabel = check?.label ? String(check.label).toUpperCase() : null;
+  const reportUrl = check?.report_url;
+  const canViewReport = isVerified && typeof reportUrl === 'string' && /^https?:\/\//i.test(reportUrl);
+  const rejectionReason = check?.rejection_reason || check?.reason || check?.detail;
+  const verifierText = isAutomatic ? 'Automatic' : (verifierEmail || '—');
+
+  return (
+    <Modal
+      isOpen
+      onClose={onClose}
+      title="Verification Details"
+      description="Status and report for this verification check."
+      size="md"
+    >
+      <div className="space-y-4">
+        <div className="flex items-center gap-3 rounded-2xl border border-gray-100 bg-gray-50/60 px-4 py-3">
+          <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sm font-bold font-sora ${avatarTone(title || 'record')}`}>
+            {getInitials(title)}
+          </span>
+          <div className="min-w-0">
+            <p className="truncate text-sm font-semibold text-brand-dark font-inter">{title}</p>
+            {(record?.email || record?.product_name) && (
+              <p className="truncate text-xs text-gray-400 font-inter">{record.email || record.product_name}</p>
+            )}
+          </div>
+        </div>
+
+        <div className="overflow-hidden rounded-xl border border-gray-100">
+          <div className="flex items-center justify-between gap-3 px-4 py-3.5">
+            <div className="flex min-w-0 items-center gap-2.5">
+              <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${meta.ring}`}>
+                <StatusIcon size={15} />
+              </span>
+              <p className="min-w-0 text-sm font-semibold leading-snug text-brand-dark font-inter">{typeName}</p>
+            </div>
+            <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold font-inter ${meta.ring}`}>
+              {meta.label}
+            </span>
+          </div>
+
+          <dl className="divide-y divide-gray-100 border-t border-gray-100 text-sm font-inter">
+            {typeLabel && (
+              <div className="flex items-center justify-between gap-4 px-4 py-3">
+                <dt className="text-xs text-gray-400">Type</dt>
+                <dd>
+                  <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-gray-500">{typeLabel}</span>
+                </dd>
+              </div>
+            )}
+            <div className="flex items-center justify-between gap-4 px-4 py-3">
+              <dt className="text-xs text-gray-400">Verifier</dt>
+              <dd className="min-w-0 break-all text-right font-medium text-gray-700">{verifierText}</dd>
+            </div>
+            {!isRejected && (
+              <div className="flex items-center justify-between gap-4 px-4 py-3">
+                <dt className="text-xs text-gray-400">Report</dt>
+                <dd>
+                  {canViewReport ? (
+                    <button
+                      type="button"
+                      onClick={() => window.open(reportUrl, '_blank', 'noopener,noreferrer')}
+                      className="flex items-center gap-1.5 rounded-lg border border-blue-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-brand-blue hover:bg-blue-50 transition-colors"
+                    >
+                      <Eye size={12} /> View Report
+                    </button>
+                  ) : (
+                    <span className="text-xs text-gray-400">
+                      {isVerified ? 'No report available' : 'Awaiting verifier decision'}
+                    </span>
+                  )}
+                </dd>
+              </div>
+            )}
+          </dl>
+
+          {isRejected && rejectionReason && (
+            <div className="border-t border-red-100 bg-red-50 px-4 py-3">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-red-400 font-inter">Rejection Reason</p>
+              <p className="mt-1 text-sm text-red-600 font-inter">{rejectionReason}</p>
+            </div>
+          )}
+        </div>
+      </div>
+    </Modal>
+  );
+};
+
 export const VerificationDetailsModal = ({
   record, title, subtitle, onClose,
   verifierByType, certificate, onViewCertificate, onDownloadCertificate,

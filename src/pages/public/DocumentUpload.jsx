@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useParams, useSearchParams } from 'react-router-dom';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { verificationAPI, getApiError } from '@/services/api';
 import { Logo } from '@/components/ui/Logo';
@@ -586,6 +586,13 @@ export const DocumentUpload = () => {
                 </p>
               </div>
             </div>
+
+            <p className="text-center text-[11px] text-gray-400 font-inter">
+              By using this verification link, you agree to the{' '}
+              <Link to="/terms-of-service" className="text-brand-blue hover:underline">Terms of Service</Link>{' '}
+              and acknowledge the{' '}
+              <Link to="/privacy-policy" className="text-brand-blue hover:underline">Privacy Policy</Link>.
+            </p>
           </div>
         </div>
       </main>
