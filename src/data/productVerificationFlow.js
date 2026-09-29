@@ -105,20 +105,31 @@ export const PRODUCT_SECTOR_DEFS = [
 ];
 
 // Must match the backend's warranty Excel contract — pure record metadata
-// only. `warrenty_report` and `product_details` are NOT Excel columns at all
-// — both are document-URL destinations, populated exclusively via
+// the organization actually types in, only. `warrenty_report` and
+// `product_details` are NOT Excel columns at all — both are document-URL
+// destinations, populated exclusively via
 // POST /products/{batch_user_id}/warranty-document (document_label:
 // "Warranty Report" or "Product Details") after the batch exists. `serial_no`
 // and `created_time` are also absent — the backend assigns serial_no at
 // reservation (see reserveWarrantySerials) and created_time at SDC issuance.
+// `product_image` IS a real column here (unlike the two above) — same
+// embedded-Excel-image cell treatment as Product's product_image column
+// (Insert → Image → Place in Cell), never typed text; see the "image" rule
+// in downloadLocalFallback's buildExample.
 // This is only a fallback: the real, live column list is fetched from the
 // backend's own template file (see the warrantyHeaders effect) and takes
 // priority whenever it succeeds.
 export const WARRANTY_SERVICE_HEADERS = [
-  'customer_name',
+  'product_name',
   'model_no',
   'purchase_date',
   'expiration_date',
+  'brand',
+  'manufactured_by',
+  'manufactured_date',
+  'warrenty_period',
+  'coverage',
+  'product_image',
 ];
 
 // Canonical column set for the normal Product Verification flow, matching

@@ -151,11 +151,13 @@ export const ProductTemplate = () => {
   // Pre-batch serial reservation — the backend parses the uploaded Excel and
   // reserves a globally-unique TMZ-W-XXXXXXXX serial per valid row from a
   // central registry, before any Batch/BatchUser exists. Verified response
-  // shape: { total_reserved, total_skipped, rows: [{ row, customer_name,
-  // model_no, serial_no }], skipped }. Each row already carries its own
-  // customer_name + serial_no together — no separate client-side Excel
-  // parse or index-based guessing needed to know which record a serial
-  // belongs to. This is purely an internal workflow detail otherwise: the
+  // shape: { total_reserved, total_skipped, rows: [{ row, product_name,
+  // model_no, serial_no }], skipped } — `product_name` is read with a
+  // `customer_name` fallback below in case an older backend response still
+  // uses that name. Each row already carries its own name + serial_no
+  // together — no separate client-side Excel parse or index-based guessing
+  // needed to know which record a serial belongs to. This is purely an
+  // internal workflow detail otherwise: the
   // reservation call and its TMZ-W serials are NEVER shown to the org user
   // (see docSelections below, keyed by serial_no) — the user only ever sees
   // their own Excel's record names and a document-upload UI per record.
@@ -533,7 +535,7 @@ export const ProductTemplate = () => {
                           const sel = docSelections[row.serial_no] || {};
                           return (
                             <div key={row.serial_no || row.row} className="rounded-xl border border-gray-200 bg-white p-3">
-                              <p className="mb-2 truncate font-inter text-xs font-semibold text-brand-dark">{row.customer_name || `Record ${row.row}`}</p>
+                              <p className="mb-2 truncate font-inter text-xs font-semibold text-brand-dark">{row.product_name || row.customer_name || `Record ${row.row}`}</p>
                               <div className="space-y-2">
                                 <WarrantyDocSlot
                                   label="Warranty Report"
@@ -616,13 +618,13 @@ export const ProductTemplate = () => {
                     </p>
                     <p className="font-mono text-[11px] text-slate-400">{key}</p>
                   </div>
-                  {isWarranty ? (
-                    <span className="rounded-full bg-brand-blue/10 px-2.5 py-1 font-inter text-[10px] font-semibold uppercase text-brand-blue">
-                      Fixed
-                    </span>
-                  ) : key.includes('image') ? (
+                  {key.includes('image') ? (
                     <span className="inline-flex items-center gap-1 rounded-full bg-indigo-50 px-2.5 py-1 font-inter text-[10px] font-semibold uppercase text-indigo-600">
                       <ImageIcon size={10} /> Embedded Image
+                    </span>
+                  ) : isWarranty ? (
+                    <span className="rounded-full bg-brand-blue/10 px-2.5 py-1 font-inter text-[10px] font-semibold uppercase text-brand-blue">
+                      Fixed
                     </span>
                   ) : VERIFICATION_REQUIRED_HEADERS.includes(key) && (
                     <span className="rounded-full bg-red-50 px-2.5 py-1 font-inter text-[10px] font-semibold uppercase text-red-500">
@@ -632,7 +634,7 @@ export const ProductTemplate = () => {
                 </div>
               ))}
             </div>
-            {!isWarranty && serviceHeaders.some((key) => key.includes('image')) && (
+            {serviceHeaders.some((key) => key.includes('image')) && (
               <p className="mt-2.5 rounded-xl border border-indigo-100 bg-indigo-50/60 px-3 py-2 font-inter text-[11px] text-indigo-700">
                 Image columns aren't typed text — in Excel, use <span className="font-semibold">Insert → Picture → Place in Cell</span> on that
                 cell for each product's row. Leave the cell empty for a row with no image; the product still uploads normally.
