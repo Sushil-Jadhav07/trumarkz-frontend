@@ -557,6 +557,18 @@ export const BatchControlCenter = () => {
     try {
       await verificationAPI.shareWithOrganization(batch.id);
       toast.success(`${batch.name} shared with the organization`);
+      // The POST above just confirmed the share succeeded, so patch this
+      // batch's own flag immediately rather than waiting on the list
+      // refetch below — GET /verification/batches (the list endpoint) can
+      // lag behind the write that request just made, which left the "Send
+      // to Organization" button visibly still showing right after a
+      // successful share. Same fix already proven for the Warranty control
+      // center's own send-to-org action (see WarrantyDetailModal in
+      // BatchMonitor.jsx). The refetch still runs right after, for every
+      // other field this batch might need refreshed.
+      setData((prev) => (prev || []).map((b) => (
+        b.id === batch.id ? { ...b, sharedWithOrg: true, sharedAt: new Date().toISOString() } : b
+      )));
       await fetchData(true);
     } catch (err) {
       toast.error(getApiError(err, 'Failed to share batch with organization'));
@@ -781,6 +793,7 @@ export const BatchControlCenter = () => {
             <div className="flex items-center gap-2.5 flex-wrap min-w-0">
               <h1 className="font-sora text-2xl font-bold text-brand-dark truncate">{selectedBatch.name}</h1>
               <Badge status={selectedBatch.statusMeta.badge}>{selectedBatch.statusMeta.label}</Badge>
+              {selectedBatch.sharedWithOrganization && <Badge status="success">Shared with Organization</Badge>}
             </div>
             <div className="flex items-center gap-2 shrink-0">
               <Button

@@ -46,7 +46,7 @@ import DownloadTemplate from '@/pages/org/DownloadTemplate';
 import CostBreakdown from '@/pages/org/CostBreakdown';
 // import CertificatePreview from '@/pages/org/CertificatePreview';
 import CreateBatch from '@/pages/org/CreateBatch';
-import BatchStatus, { BatchStatusDetail } from '@/pages/org/BatchStatus';
+import BatchStatus, { BatchStatusDetail, WarrantyStatusDetail } from '@/pages/org/BatchStatus';
 import RecordDetail from '@/pages/org/RecordDetail';
 import PermissionSettings from '@/pages/org/PermissionSettings';
 import SelectProductSector from '@/pages/org/SelectProductSector';
@@ -174,6 +174,7 @@ const AnimatedRoutes = () => {
           {/* <Route path="/org/certificate-preview" element={<CertificatePreview />} /> */}
           <Route path="/org/create-batch" element={<CreateBatch />} />
           <Route path="/org/batch-status" element={<ProtectedRoute><BatchStatus /></ProtectedRoute>} />
+          <Route path="/org/batch-status/warranty/:batchId" element={<ProtectedRoute><WarrantyStatusDetail /></ProtectedRoute>} />
           <Route path="/org/batch-status/:batchId" element={<ProtectedRoute><BatchStatusDetail /></ProtectedRoute>} />
           <Route path="/org/record/:id" element={<RecordDetail />} />
 

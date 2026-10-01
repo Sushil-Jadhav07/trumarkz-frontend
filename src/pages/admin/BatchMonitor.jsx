@@ -1753,7 +1753,11 @@ const WarrantyDetailModal = ({ batchId, batchName, orgId, spaceId, onClose, asPa
                       const productId = product.product_id || product.id;
                       const sdcMatch = productId ? sdcByProductId[productId] : null;
                       return (
-                        <tr key={productId || i} className="border-b border-blue-50 last:border-0 hover:bg-blue-50/30 transition-colors">
+                        <tr
+                          key={productId || i}
+                          onClick={() => setDetailRecord(product)}
+                          className="cursor-pointer border-b border-blue-50 last:border-0 transition-colors hover:bg-blue-50/30"
+                        >
                           <td className="px-5 py-3.5">
                             <div className="flex items-center gap-2.5">
                               <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-brand-blue/10">
@@ -1777,25 +1781,18 @@ const WarrantyDetailModal = ({ batchId, batchName, orgId, spaceId, onClose, asPa
                             {sdcMatch ? (
                               <div className="flex items-center gap-2">
                                 <Badge status={sdcMatch.issued ? 'info' : 'pending'}>{sdcMatch.issued ? 'Ready' : 'Draft'}</Badge>
-                                <div className="flex items-center gap-0.5 rounded-lg border border-gray-100 bg-gray-50 p-0.5">
-                                  {sdcMatch.issued && (
+                                {sdcMatch.issued && (
+                                  <div className="flex items-center gap-0.5 rounded-lg border border-gray-100 bg-gray-50 p-0.5">
                                     <button
                                       type="button"
                                       disabled={downloadingSdcId === sdcMatch.publicId}
-                                      onClick={() => openSdcCertificate(sdcMatch.publicId)}
+                                      onClick={(e) => { e.stopPropagation(); openSdcCertificate(sdcMatch.publicId); }}
                                       className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold font-inter text-brand-blue transition-colors hover:bg-white hover:shadow-sm disabled:opacity-50"
                                     >
                                       <Download size={12} className={downloadingSdcId === sdcMatch.publicId ? 'animate-spin' : ''} /> Download
                                     </button>
-                                  )}
-                                  <button
-                                    type="button"
-                                    onClick={() => setDetailRecord(product)}
-                                    className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold font-inter text-gray-500 transition-colors hover:bg-white hover:text-brand-blue hover:shadow-sm"
-                                  >
-                                    <Info size={12} /> Detail
-                                  </button>
-                                </div>
+                                  </div>
+                                )}
                               </div>
                             ) : (
                               <span className="text-xs text-gray-300 font-inter">—</span>
@@ -1811,7 +1808,7 @@ const WarrantyDetailModal = ({ batchId, batchName, orgId, spaceId, onClose, asPa
                                 <button
                                   type="button"
                                   disabled={deletingId === productId}
-                                  onClick={() => handleDeleteProduct(productId)}
+                                  onClick={(e) => { e.stopPropagation(); handleDeleteProduct(productId); }}
                                   className="rounded-md px-2 py-1 text-xs font-semibold font-inter text-white bg-red-500 hover:bg-red-600 disabled:opacity-50 transition-colors"
                                 >
                                   {deletingId === productId ? '…' : 'Yes'}
@@ -1819,7 +1816,7 @@ const WarrantyDetailModal = ({ batchId, batchName, orgId, spaceId, onClose, asPa
                                 <button
                                   type="button"
                                   disabled={deletingId === productId}
-                                  onClick={() => setConfirmDeleteId(null)}
+                                  onClick={(e) => { e.stopPropagation(); setConfirmDeleteId(null); }}
                                   className="rounded-md px-2 py-1 text-xs font-semibold font-inter text-gray-500 hover:bg-gray-100 disabled:opacity-50 transition-colors"
                                 >
                                   No
@@ -1829,7 +1826,7 @@ const WarrantyDetailModal = ({ batchId, batchName, orgId, spaceId, onClose, asPa
                               <button
                                 type="button"
                                 title="Permanently remove this product from the batch"
-                                onClick={() => setConfirmDeleteId(productId)}
+                                onClick={(e) => { e.stopPropagation(); setConfirmDeleteId(productId); }}
                                 className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold font-inter text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors"
                               >
                                 <Trash2 size={12} /> Delete

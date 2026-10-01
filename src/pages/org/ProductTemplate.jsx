@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as XLSX from 'xlsx';
 import { useNavigate } from 'react-router-dom';
 import { AuthLayout } from '@/components/layout/AuthLayout';
@@ -8,7 +8,7 @@ import { Card } from '@/components/ui/Card';
 import { Modal } from '@/components/ui/Modal';
 import { StepWizard } from '@/components/ui/StepWizard';
 import { FileUpload } from '@/components/ui/FileUpload';
-import { ArrowRight, CheckCircle, Download, FileText, Image as ImageIcon, RefreshCw, Upload, X } from 'lucide-react';
+import { ArrowRight, CheckCircle, Download, FileText, Image as ImageIcon, Plus, RefreshCw, Upload, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useApp } from '@/context/AppContext';
 import {
@@ -148,6 +148,14 @@ export const ProductTemplate = () => {
 
   const isWarranty = selectedProductService?.id === 'warranty';
 
+  // Extra columns the org can add on top of the fixed Product fields — Product
+  // only, same restriction as before this was ever touched: Warranty's Excel
+  // contract is strictly backend-defined (see serviceHeaders/warrantyHeaders
+  // above), so it never accepts arbitrary extra columns.
+  const [customFields, setCustomFields] = useState([]);
+  const [fieldInput, setFieldInput] = useState('');
+  const inputRef = useRef(null);
+
   // Pre-batch serial reservation — the backend parses the uploaded Excel and
   // reserves a globally-unique TMZ-W-XXXXXXXX serial per valid row from a
   // central registry, before any Batch/BatchUser exists. Verified response
@@ -263,10 +271,27 @@ export const ProductTemplate = () => {
     }
   }, [selectedProductSector, selectedProductService, navigate]);
 
-  // No custom-field UI — the template's columns are fixed, sourced entirely
-  // from serviceHeaders (backend-verified for Product, see productHeaders
-  // above; hardcoded fixed list for Warranty).
-  const templateHeaders = serviceHeaders;
+  // Warranty's columns are fixed, sourced entirely from serviceHeaders
+  // (backend-verified — see warrantyHeaders above). Product adds any
+  // org-defined extra columns on top of its own backend-verified defaults.
+  const templateHeaders = useMemo(
+    () => (isWarranty
+      ? serviceHeaders
+      : [...serviceHeaders, ...customFields.filter((f) => !serviceHeaders.includes(f))]),
+    [isWarranty, serviceHeaders, customFields]
+  );
+
+  const handleAddField = () => {
+    const key = sanitizeKey(fieldInput);
+    if (!key) { toast.error('Enter a valid field name'); return; }
+    if (templateHeaders.includes(key)) { toast.error('Field already exists'); return; }
+    setCustomFields((prev) => [...prev, key]);
+    setFieldInput('');
+    inputRef.current?.focus();
+  };
+
+  const handleKeyDown = (e) => { if (e.key === 'Enter') { e.preventDefault(); handleAddField(); } };
+  const handleRemoveField = (key) => setCustomFields((prev) => prev.filter((f) => f !== key));
 
   const handleDownload = async () => {
     setDownloading(true);
@@ -454,12 +479,20 @@ export const ProductTemplate = () => {
                 {/* Stats */}
                 <div className="flex-1 space-y-3 p-6">
 
-                  {/* Columns tile — fields are fixed for both flows, no custom fields */}
-                  <div className="grid grid-cols-1 gap-3">
+                  {/* Columns tile — Warranty's fields are fixed (no custom
+                      fields); Product gets a second tile for its extra
+                      org-defined columns. */}
+                  <div className={`grid gap-3 ${isWarranty ? 'grid-cols-1' : 'grid-cols-2'}`}>
                     <div className="rounded-xl border border-gray-200 bg-white p-4 text-center">
                       <p className="font-sora text-2xl font-bold text-brand-dark">{templateHeaders.length}</p>
                       <p className="mt-0.5 font-inter text-[11px] text-gray-400">Columns</p>
                     </div>
+                    {!isWarranty && (
+                      <div className="rounded-xl border border-gray-200 bg-white p-4 text-center">
+                        <p className="font-sora text-2xl font-bold text-brand-dark">{customFields.length}</p>
+                        <p className="mt-0.5 font-inter text-[11px] text-gray-400">Custom Fields</p>
+                      </div>
+                    )}
                   </div>
 
                   {/* Checklist */}
@@ -642,7 +675,51 @@ export const ProductTemplate = () => {
             )}
           </div>
 
-          {/* Final columns preview — fields are fixed for both flows, no
+          {/* Add custom field — not applicable to warranty (fields are
+              fixed by the backend's own template contract). */}
+          {!isWarranty && (
+            <div>
+              <p className="font-inter text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
+                Custom Fields
+              </p>
+              <div className="flex gap-2">
+                <input
+                  ref={inputRef}
+                  value={fieldInput}
+                  onChange={(e) => setFieldInput(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  placeholder="e.g. purchase_date"
+                  className="flex-1 rounded-xl border-2 border-slate-200 px-4 py-2.5 font-inter text-sm outline-none focus:border-brand-blue focus:ring-4 focus:ring-brand-blue/10 transition-all"
+                />
+                <Button variant="primary" size="sm" icon={Plus} onClick={handleAddField}>
+                  Add
+                </Button>
+              </div>
+              <p className="font-inter text-[11px] text-slate-400 mt-1.5">Use snake_case — press Enter or click Add.</p>
+
+              {customFields.length > 0 && (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {customFields.map((field) => (
+                    <span
+                      key={field}
+                      className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 font-inter text-sm text-slate-700"
+                    >
+                      {field}
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveField(field)}
+                        className="text-slate-400 hover:text-red-500 transition-colors ml-0.5"
+                      >
+                        <X size={13} />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Final columns preview — Warranty's fields are fixed, no
               custom-field UI at all. */}
           {!isWarranty && (
             <div className="rounded-xl bg-slate-50 border border-slate-100 p-3">

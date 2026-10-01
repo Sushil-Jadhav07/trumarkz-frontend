@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { AuthLayout } from '@/components/layout/AuthLayout';
 import { PageHeader } from '@/components/shared/PageHeader';
 import { Button } from '@/components/ui/Button';
@@ -10,7 +10,7 @@ import { Modal } from '@/components/ui/Modal';
 import { verificationAPI, sdcAPI, getApiError, triggerBlobDownload } from '@/services/api';
 import { useAuth } from '@/context/AuthContext';
 import { CertificateDetailModal } from '@/pages/admin/SDCVerification';
-import { VerificationDetailsModal } from '@/components/shared/VerificationDetailsModal';
+import { VerificationDetailsModal, VerificationCheckDetailsModal } from '@/components/shared/VerificationDetailsModal';
 import { WarrantyDocumentCell } from '@/components/shared/WarrantyDocumentCell';
 import { TablePagination } from '@/components/shared/TablePagination';
 import { loadWarrantyCertificates } from '@/utils/warrantyCertificates';
@@ -352,6 +352,12 @@ const BatchDetailModal = ({ batchId, batchName, onClose, asPage = false, onLoade
     }
   };
   const [verificationDetailsRecord, setVerificationDetailsRecord] = useState(null); // record shown in the per-user Verification Details modal
+  // Exact clicked pair — { record, typeName } — for the single-check modal,
+  // same click-through as the admin Batch Control Center's Verification
+  // Records table. No manual-assignments fetch on the org side, so the
+  // modal's Verifier line falls back to "—" for a manual check (never
+  // fabricated) and shows "Automatic" only when the check's own label says so.
+  const [selectedVerification, setSelectedVerification] = useState(null);
   // The real, authoritative SDC/sharing state — from GET /sdc/batches/
   // {batch_id}/status itself (sdc_status, shared_with_org, ready/total),
   // never from GET /verification/batches/{batch_id}'s verification_progress.sdc,
@@ -973,7 +979,13 @@ const BatchDetailModal = ({ batchId, batchName, onClose, asPage = false, onLoade
                                   return (
                                     <div key={name} className="flex items-center gap-1.5" title={tooltip}>
                                       <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${dotTone}`} />
-                                      <span className="truncate text-[11px] text-gray-600 font-inter">{name}</span>
+                                      <button
+                                        type="button"
+                                        onClick={() => setSelectedVerification({ record, typeName: name })}
+                                        className="truncate text-left text-[11px] text-gray-600 font-inter hover:text-brand-blue hover:underline focus:outline-none focus-visible:underline"
+                                      >
+                                        {name}
+                                      </button>
                                     </div>
                                   );
                                 })}
@@ -1058,6 +1070,14 @@ const BatchDetailModal = ({ batchId, batchName, onClose, asPage = false, onLoade
       subtitle={verificationDetailsRecord ? getRecordSubtitle(verificationDetailsRecord, detail?.batchType) : ''}
       onClose={() => setVerificationDetailsRecord(null)}
     />
+
+    {selectedVerification && (
+      <VerificationCheckDetailsModal
+        selection={selectedVerification}
+        title={getRecordTitle(selectedVerification.record)}
+        onClose={() => setSelectedVerification(null)}
+      />
+    )}
     </>
   );
 };
@@ -1109,7 +1129,7 @@ const WARRANTY_PRODUCT_STATUS_META = {
 // ── Warranty Detail Modal — same popup pattern as BatchDetailModal above,
 // but fetches from the dedicated warranty endpoint (warranty batches carry
 // product/serial/warranty-date records, not the generic verification shape). ─
-const WarrantyDetailModal = ({ batchId, batchName, onClose }) => {
+const WarrantyDetailModal = ({ batchId, batchName, onClose, asPage = false }) => {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -1204,7 +1224,7 @@ const WarrantyDetailModal = ({ batchId, batchName, onClose }) => {
   ];
 
   return (
-    <Modal isOpen={!!batchId} onClose={onClose} title={`${batchName} — Warranty Status`} size="4xl">
+    <BatchDetailShell asPage={asPage} isOpen={!!batchId} onClose={onClose} title={`${batchName} — Warranty Status`}>
       {loading ? (
         <div className="flex flex-col items-center justify-center gap-3 py-16">
           <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-brand-blue/10 bg-brand-blue/5">
@@ -1338,7 +1358,45 @@ const WarrantyDetailModal = ({ batchId, batchName, onClose }) => {
 
         </div>
       )}
-    </Modal>
+    </BatchDetailShell>
+  );
+};
+
+// ── Warranty Status — dedicated full page (was previously an in-page Modal
+// on the batch list, same "own routed page per batch type" pattern already
+// used for Human/Product via BatchStatusDetail above, and for admin via
+// /admin/batch-monitor/warranty/:batchId). Reached at
+// /org/batch-status/warranty/:batchId.
+export const WarrantyStatusDetail = () => {
+  const { batchId } = useParams();
+  const navigate = useNavigate();
+  const location = useLocation();
+  // The batches list passes the name via navigation state (the warranty
+  // status endpoint itself returns no batch name) — a direct/refreshed visit
+  // falls back to a generic title rather than showing nothing.
+  const batchName = location.state?.batchName || 'Warranty Batch';
+
+  return (
+    <AuthLayout title="Batch Status">
+      <div className="space-y-4">
+        <div>
+          <button
+            type="button"
+            onClick={() => navigate('/org/batch-status')}
+            className="mb-3 flex items-center gap-1.5 font-inter text-sm font-semibold text-brand-blue hover:underline"
+          >
+            <ChevronLeft size={14} /> Back to Batch Status
+          </button>
+          <h1 className="font-sora text-2xl font-bold text-brand-dark">{batchName}</h1>
+        </div>
+        <WarrantyDetailModal
+          asPage
+          batchId={batchId}
+          batchName={batchName}
+          onClose={() => navigate('/org/batch-status')}
+        />
+      </div>
+    </AuthLayout>
   );
 };
 
@@ -1351,8 +1409,6 @@ export const BatchStatus = () => {
   const [refreshing,   setRefreshing]   = useState(false);
   const [statusFilter, setStatusFilter] = useState('');
   const [page,         setPage]         = useState(0);
-  const [selectedWarrantyId,   setSelectedWarrantyId]   = useState(null);
-  const [selectedWarrantyName, setSelectedWarrantyName] = useState('');
   const [showGstGate,  setShowGstGate]  = useState(false);
 
   // Orgs must have a verified GSTIN before creating batches. (Superadmin
@@ -1679,7 +1735,7 @@ export const BatchStatus = () => {
                           transition={{ delay: index * 0.04, duration: 0.22, ease: 'easeOut' }}
                           onClick={() => {
                             if (batch.batchType === 'warranty') {
-                              setSelectedWarrantyId(batch.id); setSelectedWarrantyName(batch.name);
+                              navigate(`/org/batch-status/warranty/${batch.id}`, { state: { batchName: batch.name } });
                             } else {
                               navigate(`/org/batch-status/${batch.id}`);
                             }
@@ -1723,7 +1779,7 @@ export const BatchStatus = () => {
                               onClick={(e) => {
                                 e.stopPropagation();
                                 if (batch.batchType === 'warranty') {
-                                  setSelectedWarrantyId(batch.id); setSelectedWarrantyName(batch.name);
+                                  navigate(`/org/batch-status/warranty/${batch.id}`, { state: { batchName: batch.name } });
                                 } else {
                                   navigate(`/org/batch-status/${batch.id}`);
                                 }
@@ -1794,12 +1850,6 @@ export const BatchStatus = () => {
           </motion.div>
         )}
       </div>
-
-      <WarrantyDetailModal
-        batchId={selectedWarrantyId}
-        batchName={selectedWarrantyName}
-        onClose={() => { setSelectedWarrantyId(null); setSelectedWarrantyName(''); }}
-      />
 
       <Modal isOpen={showGstGate} onClose={() => setShowGstGate(false)} title="GST Verification Required" size="sm">
         <div className="space-y-4">
