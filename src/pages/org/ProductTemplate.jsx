@@ -148,10 +148,44 @@ export const ProductTemplate = () => {
 
   const isWarranty = selectedProductService?.id === 'warranty';
 
-  // Extra columns the org can add on top of the fixed Product fields — Product
-  // only, same restriction as before this was ever touched: Warranty's Excel
-  // contract is strictly backend-defined (see serviceHeaders/warrantyHeaders
-  // above), so it never accepts arbitrary extra columns.
+  // Product's own fixed fields CAN be toggled off (unlike Warranty's, which
+  // stay forced-on — see below): generateProductTemplate actually accepts
+  // whatever header list is sent, and only product_name/sku_no
+  // (VERIFICATION_REQUIRED_HEADERS) are enforced by the upload validation
+  // afterward, so any other default field is genuinely safe to drop. Keyed
+  // by header key; a key defaults to "on" the first time it's seen (new keys
+  // arriving from the live productHeaders fetch below).
+  const [baseToggles, setBaseToggles] = useState({});
+  useEffect(() => {
+    setBaseToggles((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      serviceHeaders.forEach((h) => {
+        if (!(h in next)) { next[h] = true; changed = true; }
+      });
+      return changed ? next : prev;
+    });
+  }, [serviceHeaders]);
+  const toggleBaseField = (key) => {
+    if (isWarranty || VERIFICATION_REQUIRED_HEADERS.includes(key)) return;
+    setBaseToggles((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
+  // Warranty ignores toggles entirely (always all-on); Product drops any
+  // field explicitly toggled off.
+  const activeServiceHeaders = isWarranty
+    ? serviceHeaders
+    : serviceHeaders.filter((h) => VERIFICATION_REQUIRED_HEADERS.includes(h) || baseToggles[h] !== false);
+
+  // Extra columns the org can add on top of the fixed fields, for both
+  // Product and Warranty. The fixed fields themselves stay non-removable —
+  // the backend's own upload validation still expects them regardless of
+  // what template was downloaded, so letting an org toggle one off would
+  // silently break their next batch upload. Custom fields are safe because
+  // they're purely additive. Product sends these straight to the backend's
+  // own template generator (generateProductTemplate); Warranty's template
+  // endpoint takes no header argument at all (always returns the same fixed
+  // file), so when custom fields are present the Warranty download is
+  // generated client-side instead — see handleDownload.
   const [customFields, setCustomFields] = useState([]);
   const [fieldInput, setFieldInput] = useState('');
   const inputRef = useRef(null);
@@ -271,14 +305,12 @@ export const ProductTemplate = () => {
     }
   }, [selectedProductSector, selectedProductService, navigate]);
 
-  // Warranty's columns are fixed, sourced entirely from serviceHeaders
-  // (backend-verified — see warrantyHeaders above). Product adds any
-  // org-defined extra columns on top of its own backend-verified defaults.
+  // Both flows' fixed columns come from activeServiceHeaders (serviceHeaders
+  // minus anything Product toggled off — see above; Warranty ignores
+  // toggles); both can add extra org-defined columns on top of that set.
   const templateHeaders = useMemo(
-    () => (isWarranty
-      ? serviceHeaders
-      : [...serviceHeaders, ...customFields.filter((f) => !serviceHeaders.includes(f))]),
-    [isWarranty, serviceHeaders, customFields]
+    () => [...activeServiceHeaders, ...customFields.filter((f) => !activeServiceHeaders.includes(f))],
+    [activeServiceHeaders, customFields]
   );
 
   const handleAddField = () => {
@@ -297,9 +329,19 @@ export const ProductTemplate = () => {
     setDownloading(true);
     try {
       if (isWarranty) {
-        const { data } = await verificationAPI.downloadWarrantyTemplate();
-        triggerBlobDownload(data, `${batchNameValue || 'warranty-template'}.xlsx`);
-        toast.success('Template downloaded');
+        if (customFields.length > 0) {
+          // The backend's warranty-template endpoint takes no header
+          // argument at all — it always returns the same fixed file, so
+          // there's no way to ask it for extra columns. Generate the sheet
+          // client-side instead whenever custom fields are present; this is
+          // the only way those columns can actually show up in the file.
+          downloadLocalFallback(templateHeaders, batchNameValue || 'warranty-template');
+          toast.success('Template downloaded');
+        } else {
+          const { data } = await verificationAPI.downloadWarrantyTemplate();
+          triggerBlobDownload(data, `${batchNameValue || 'warranty-template'}.xlsx`);
+          toast.success('Template downloaded');
+        }
       } else {
         const normalised = templateHeaders.map((h) =>
           h.trim().toLowerCase().replace(/\s+/g, '_')
@@ -479,20 +521,17 @@ export const ProductTemplate = () => {
                 {/* Stats */}
                 <div className="flex-1 space-y-3 p-6">
 
-                  {/* Columns tile — Warranty's fields are fixed (no custom
-                      fields); Product gets a second tile for its extra
-                      org-defined columns. */}
-                  <div className={`grid gap-3 ${isWarranty ? 'grid-cols-1' : 'grid-cols-2'}`}>
+                  {/* Columns tile — both flows get a second tile for their
+                      extra org-defined columns now. */}
+                  <div className="grid grid-cols-2 gap-3">
                     <div className="rounded-xl border border-gray-200 bg-white p-4 text-center">
                       <p className="font-sora text-2xl font-bold text-brand-dark">{templateHeaders.length}</p>
                       <p className="mt-0.5 font-inter text-[11px] text-gray-400">Columns</p>
                     </div>
-                    {!isWarranty && (
-                      <div className="rounded-xl border border-gray-200 bg-white p-4 text-center">
-                        <p className="font-sora text-2xl font-bold text-brand-dark">{customFields.length}</p>
-                        <p className="mt-0.5 font-inter text-[11px] text-gray-400">Custom Fields</p>
-                      </div>
-                    )}
+                    <div className="rounded-xl border border-gray-200 bg-white p-4 text-center">
+                      <p className="font-sora text-2xl font-bold text-brand-dark">{customFields.length}</p>
+                      <p className="mt-0.5 font-inter text-[11px] text-gray-400">Custom Fields</p>
+                    </div>
                   </div>
 
                   {/* Checklist */}
@@ -620,52 +659,66 @@ export const ProductTemplate = () => {
       </div>
 
       {/* Download Template Modal */}
-      <Modal isOpen={modalOpen} onClose={() => setModalOpen(false)} title="Setup Product Template" size="2xl">
+      <Modal isOpen={modalOpen} onClose={() => setModalOpen(false)} title="Setup Product Template" size="4xl">
         <div className="space-y-5">
           <p className="font-inter text-sm text-slate-500">
             {isWarranty ? (
-              <>Warranty columns for{' '}
+              <>Warranty's base columns for{' '}
                 <span className="font-semibold text-brand-dark">{selectedProductService?.title}</span>{' '}
-                are fixed — download the template as-is.</>
+                are fixed and can't be removed. Add any extra columns you need below, then download.</>
             ) : (
-              <>Columns for{' '}
+              <>Default columns for{' '}
                 <span className="font-semibold text-brand-dark">{selectedProductService?.title}</span>{' '}
-                are fixed — download the template as-is.</>
+                are pre-filled. Add any extra columns you need, then download.</>
             )}
           </p>
 
-          {/* Service default fields */}
+          {/* Service default fields — Warranty's stay forced-on (the
+              download endpoint can't honor a trimmed list anyway); Product's
+              non-required fields get a real toggle, since
+              generateProductTemplate actually respects whatever list is sent. */}
           <div>
             <p className="font-inter text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
-              Fixed Fields ({selectedProductService?.title})
+              {isWarranty ? 'Fixed Fields' : 'Base Fields'} ({selectedProductService?.title})
             </p>
-            <div className="space-y-2">
-              {serviceHeaders.map((key) => (
-                <div
-                  key={key}
-                  className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5"
-                >
-                  <div>
-                    <p className="font-inter text-sm font-medium text-slate-800 capitalize">
-                      {key.replace(/_/g, ' ')}
-                    </p>
-                    <p className="font-mono text-[11px] text-slate-400">{key}</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {serviceHeaders.map((key) => {
+                const required = VERIFICATION_REQUIRED_HEADERS.includes(key);
+                const on = isWarranty || required || baseToggles[key] !== false;
+                return (
+                  <div
+                    key={key}
+                    className={`flex items-center justify-between rounded-xl border px-4 py-2.5 transition-opacity ${on ? 'border-slate-200 bg-slate-50' : 'border-slate-100 bg-slate-50/40 opacity-60'}`}
+                  >
+                    <div className="min-w-0">
+                      <p className="font-inter text-sm font-medium text-slate-800 capitalize truncate">
+                        {key.replace(/_/g, ' ')}
+                      </p>
+                      <p className="font-mono text-[11px] text-slate-400 truncate">{key}</p>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2">
+                      {key.includes('image') && (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-indigo-50 px-2.5 py-1 font-inter text-[10px] font-semibold uppercase text-indigo-600">
+                          <ImageIcon size={10} /> Image
+                        </span>
+                      )}
+                      {isWarranty || required ? (
+                        <span className="rounded-full bg-red-50 px-2.5 py-1 font-inter text-[10px] font-semibold uppercase text-red-500">
+                          Required
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => toggleBaseField(key)}
+                          className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${on ? 'bg-brand-blue' : 'bg-slate-200'}`}
+                        >
+                          <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${on ? 'translate-x-[18px]' : 'translate-x-1'}`} />
+                        </button>
+                      )}
+                    </div>
                   </div>
-                  {key.includes('image') ? (
-                    <span className="inline-flex items-center gap-1 rounded-full bg-indigo-50 px-2.5 py-1 font-inter text-[10px] font-semibold uppercase text-indigo-600">
-                      <ImageIcon size={10} /> Embedded Image
-                    </span>
-                  ) : isWarranty ? (
-                    <span className="rounded-full bg-brand-blue/10 px-2.5 py-1 font-inter text-[10px] font-semibold uppercase text-brand-blue">
-                      Fixed
-                    </span>
-                  ) : VERIFICATION_REQUIRED_HEADERS.includes(key) && (
-                    <span className="rounded-full bg-red-50 px-2.5 py-1 font-inter text-[10px] font-semibold uppercase text-red-500">
-                      Required
-                    </span>
-                  )}
-                </div>
-              ))}
+                );
+              })}
             </div>
             {serviceHeaders.some((key) => key.includes('image')) && (
               <p className="mt-2.5 rounded-xl border border-indigo-100 bg-indigo-50/60 px-3 py-2 font-inter text-[11px] text-indigo-700">
@@ -675,69 +728,65 @@ export const ProductTemplate = () => {
             )}
           </div>
 
-          {/* Add custom field — not applicable to warranty (fields are
-              fixed by the backend's own template contract). */}
-          {!isWarranty && (
-            <div>
-              <p className="font-inter text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
-                Custom Fields
-              </p>
-              <div className="flex gap-2">
-                <input
-                  ref={inputRef}
-                  value={fieldInput}
-                  onChange={(e) => setFieldInput(e.target.value)}
-                  onKeyDown={handleKeyDown}
-                  placeholder="e.g. purchase_date"
-                  className="flex-1 rounded-xl border-2 border-slate-200 px-4 py-2.5 font-inter text-sm outline-none focus:border-brand-blue focus:ring-4 focus:ring-brand-blue/10 transition-all"
-                />
-                <Button variant="primary" size="sm" icon={Plus} onClick={handleAddField}>
-                  Add
-                </Button>
-              </div>
-              <p className="font-inter text-[11px] text-slate-400 mt-1.5">Use snake_case — press Enter or click Add.</p>
-
-              {customFields.length > 0 && (
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {customFields.map((field) => (
-                    <span
-                      key={field}
-                      className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 font-inter text-sm text-slate-700"
-                    >
-                      {field}
-                      <button
-                        type="button"
-                        onClick={() => handleRemoveField(field)}
-                        className="text-slate-400 hover:text-red-500 transition-colors ml-0.5"
-                      >
-                        <X size={13} />
-                      </button>
-                    </span>
-                  ))}
-                </div>
-              )}
+          {/* Add custom field — available for both flows. The fixed fields
+              above stay non-removable either way (backend-required), but
+              extra columns are purely additive and safe for both. */}
+          <div>
+            <p className="font-inter text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
+              Custom Fields
+            </p>
+            <div className="flex gap-2">
+              <input
+                ref={inputRef}
+                value={fieldInput}
+                onChange={(e) => setFieldInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder="e.g. purchase_date"
+                className="flex-1 rounded-xl border-2 border-slate-200 px-4 py-2.5 font-inter text-sm outline-none focus:border-brand-blue focus:ring-4 focus:ring-brand-blue/10 transition-all"
+              />
+              <Button variant="primary" size="sm" icon={Plus} onClick={handleAddField}>
+                Add
+              </Button>
             </div>
-          )}
+            <p className="font-inter text-[11px] text-slate-400 mt-1.5">Use snake_case — press Enter or click Add.</p>
 
-          {/* Final columns preview — Warranty's fields are fixed, no
-              custom-field UI at all. */}
-          {!isWarranty && (
-            <div className="rounded-xl bg-slate-50 border border-slate-100 p-3">
-              <p className="font-inter text-[11px] font-semibold text-slate-500 uppercase tracking-wide mb-2">
-                Final columns ({templateHeaders.length})
-              </p>
-              <div className="flex flex-wrap gap-1.5">
-                {templateHeaders.map((col) => (
+            {customFields.length > 0 && (
+              <div className="mt-3 flex flex-wrap gap-2">
+                {customFields.map((field) => (
                   <span
-                    key={col}
-                    className="rounded-full border border-slate-200 bg-white px-2.5 py-1 font-inter text-[11px] font-medium text-slate-600"
+                    key={field}
+                    className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 font-inter text-sm text-slate-700"
                   >
-                    {col}
+                    {field}
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveField(field)}
+                      className="text-slate-400 hover:text-red-500 transition-colors ml-0.5"
+                    >
+                      <X size={13} />
+                    </button>
                   </span>
                 ))}
               </div>
+            )}
+          </div>
+
+          {/* Final columns preview — both flows now. */}
+          <div className="rounded-xl bg-slate-50 border border-slate-100 p-3">
+            <p className="font-inter text-[11px] font-semibold text-slate-500 uppercase tracking-wide mb-2">
+              Final columns ({templateHeaders.length})
+            </p>
+            <div className="flex flex-wrap gap-1.5">
+              {templateHeaders.map((col) => (
+                <span
+                  key={col}
+                  className="rounded-full border border-slate-200 bg-white px-2.5 py-1 font-inter text-[11px] font-medium text-slate-600"
+                >
+                  {col}
+                </span>
+              ))}
             </div>
-          )}
+          </div>
 
           <div className="flex gap-2 pt-1">
             <Button variant="ghost" className="flex-1" onClick={() => setModalOpen(false)}>
