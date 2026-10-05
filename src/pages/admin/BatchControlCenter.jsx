@@ -1413,6 +1413,7 @@ export const BatchControlCenter = () => {
           : null;
         return (
           <VerificationDetailsModal
+            showDocuments
             record={verificationDetailsRecord}
             title={verificationDetailsRecord ? recordTitle(verificationDetailsRecord) : ''}
             subtitle={verificationDetailsRecord?.email || verificationDetailsRecord?.product_name || ''}

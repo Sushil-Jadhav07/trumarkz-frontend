@@ -8,12 +8,13 @@ import { Card } from '@/components/ui/Card';
 import { Modal } from '@/components/ui/Modal';
 import { StepWizard } from '@/components/ui/StepWizard';
 import { FileUpload } from '@/components/ui/FileUpload';
-import { ArrowRight, CheckCircle, Download, FileImage, Plus, RefreshCw, Upload, X, AlertTriangle } from 'lucide-react';
+import { ArrowRight, CheckCircle, Download, Eye, FileImage, Plus, RefreshCw, Upload, X, AlertTriangle, Camera, Layers, Images } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useApp } from '@/context/AppContext';
 import { HUMAN_VERIFICATION_STEPS, HUMAN_VERIFICATION_STEP_META, HUMAN_VERIFICATION_STEP_ROUTES } from '@/data/humanVerificationFlow';
 import { verificationAPI, triggerBlobDownload, getApiError } from '@/services/api';
 import { getVerificationApiTypes, getIndustryTypeList } from '@/utils/verificationFlow';
+import { extractOcrDraft } from '@/utils/ocrSubmission';
 
 // photo is appended automatically by the API — never pass it in headers
 const BASE_FIELDS = [
@@ -177,12 +178,22 @@ const buildInitialForms = (result) => {
   return map;
 };
 
-// ── OCR review modal — shown right after bulk-upload/documents returns ───────
-const ReviewOcrModal = ({ isOpen, ocrResult, onClose, onDone }) => {
+// OCR draft review: extraction and confirmation do not create a batch.
+const ReviewOcrModal = ({ isOpen, ocrResult, sourceEntries = {}, onClose, onDone }) => {
   const [forms, setForms] = useState({});
   const [confirmingId, setConfirmingId] = useState(null);
   const [confirmedIds, setConfirmedIds] = useState(new Set());
   const [finishing, setFinishing] = useState(false);
+  const [finalPreview, setFinalPreview] = useState(false);
+  const [attachments, setAttachments] = useState({});
+  const attachmentsRef = useRef({});
+
+  const clearAttachments = () => {
+    Object.values(attachmentsRef.current).forEach((attachment) => URL.revokeObjectURL(attachment.previewUrl));
+    attachmentsRef.current = {};
+  };
+
+  useEffect(() => () => clearAttachments(), []);
 
   // ReviewOcrModal stays mounted the whole time (visibility is just the
   // `isOpen` prop passed to <Modal>), so a lazy useState initializer would
@@ -191,6 +202,9 @@ const ReviewOcrModal = ({ isOpen, ocrResult, onClose, onDone }) => {
   useEffect(() => {
     setForms(buildInitialForms(ocrResult));
     setConfirmedIds(new Set());
+    setFinalPreview(false);
+    clearAttachments();
+    setAttachments({});
   }, [ocrResult]);
 
   const users = ocrResult?.successful_users || [];
@@ -199,6 +213,30 @@ const ReviewOcrModal = ({ isOpen, ocrResult, onClose, onDone }) => {
 
   const updateField = (userId, key, value) =>
     setForms((prev) => ({ ...prev, [userId]: { ...prev[userId], [key]: value } }));
+
+  const setAttachment = (userId, attachment) => {
+    const previous = attachmentsRef.current[userId];
+    if (previous && previous.previewUrl !== attachment?.previewUrl) URL.revokeObjectURL(previous.previewUrl);
+    const next = { ...attachmentsRef.current };
+    if (attachment) next[userId] = attachment;
+    else delete next[userId];
+    attachmentsRef.current = next;
+    setAttachments(next);
+    setConfirmedIds((prev) => {
+      const nextIds = new Set(prev);
+      nextIds.delete(userId);
+      return nextIds;
+    });
+  };
+
+  const selectAttachment = (userId, file) => {
+    if (!file) return;
+    if (!file.type.startsWith('image/') && file.type !== 'application/pdf') {
+      toast.error('Choose a document image or PDF');
+      return;
+    }
+    setAttachment(userId, { file, previewUrl: URL.createObjectURL(file), label: 'supporting_document', uploaded: false });
+  };
 
   // Split the form back into top-level batch-user fields and custom_fields:
   // fields flagged `custom` in DOC_TYPE_FIELDS (issue_date, valid_till,
@@ -230,61 +268,100 @@ const ReviewOcrModal = ({ isOpen, ocrResult, onClose, onDone }) => {
   const confirmUser = async (userId) => {
     setConfirmingId(userId);
     try {
-      await verificationAPI.updateBatchUser(userId, buildPayload(userId));
+      await saveRecord(userId);
       setConfirmedIds((prev) => new Set(prev).add(userId));
     } catch (err) {
-      toast.error(getApiError(err, 'Failed to save corrections'));
+      toast.error(getApiError(err, err?.message || 'Failed to confirm this record'));
     } finally {
+      setAttachments({ ...attachmentsRef.current });
       setConfirmingId(null);
     }
+  };
+
+  const saveRecord = async (userId) => {
+    const attachment = attachmentsRef.current[userId];
+    if (attachment && !attachment.label.trim()) throw new Error('Enter a label for the additional document');
+    // Confirmation is local. No batch, photo, or attachment write happens
+    // until the organization approves costing.
   };
 
   const handleFinish = async () => {
     setFinishing(true);
     const remaining = users.filter((u) => !confirmedIds.has(u.id));
     const results = await Promise.allSettled(
-      remaining.map((u) => verificationAPI.updateBatchUser(u.id, buildPayload(u.id)))
+      remaining.map((u) => saveRecord(u.id))
     );
     const failed = results.filter((r) => r.status === 'rejected').length;
-    if (failed > 0) {
-      toast.error(`${failed} record${failed === 1 ? '' : 's'} failed to save — you can fix them later from Batch Status.`);
-    }
+    setConfirmedIds((prev) => {
+      const next = new Set(prev);
+      results.forEach((result, index) => {
+        if (result.status === 'fulfilled') next.add(remaining[index].id);
+      });
+      return next;
+    });
     setFinishing(false);
-    onDone();
+    setAttachments({ ...attachmentsRef.current });
+    if (failed > 0) {
+      toast.error(`${failed} record${failed === 1 ? '' : 's'} could not be confirmed. Check the document labels and retry.`);
+      return;
+    }
+    setFinalPreview(true);
   };
 
+  const continueFromPreview = () => onDone({
+    records: users.map((user) => ({
+      localId: user.id,
+      file: sourceEntries[user.id].file,
+      photo: sourceEntries[user.id].photo,
+      document_type: user.document_type,
+      payload: buildPayload(user.id),
+      attachment: attachmentsRef.current[user.id] ? {
+        file: attachmentsRef.current[user.id].file,
+        label: attachmentsRef.current[user.id].label.trim(),
+      } : null,
+    })),
+  });
+
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Review Extracted Documents" size="2xl">
+    <Modal isOpen={isOpen} onClose={finishing || confirmingId !== null ? () => {} : onClose} title={finalPreview ? 'Final Preview' : 'Review Extracted Documents'} size="7xl" containerClassName="w-full max-w-7xl">
       <div className="space-y-4">
         <p className="font-inter text-sm text-slate-500">
-          Check the OCR-extracted details below, fix anything that's wrong, then confirm. The batch is already
-          created — this just corrects each record before verification starts.
+          {finalPreview
+            ? `${users.length} confirmed record${users.length === 1 ? '' : 's'}. Check the details and attachments before costing. Your batch will be created only after you approve the total cost.`
+            : 'Review the extracted details and attach any additional documents. Confirmation saves your local draft; the batch and attachments are submitted after costing approval.'}
         </p>
 
-        <div className="max-h-[52vh] space-y-3 overflow-y-auto pr-1">
+        <div className="flex items-center justify-between gap-3 border-b border-slate-100 pb-3 font-inter text-xs text-slate-500">
+          <span>{users.length} record{users.length === 1 ? '' : 's'}</span>
+          <span className="flex items-center gap-1.5 text-emerald-700"><CheckCircle size={13} /> {confirmedIds.size} confirmed</span>
+        </div>
+        <div className="max-h-[min(58vh,calc(92dvh-20rem))] space-y-4 overflow-y-auto pr-1">
           {users.map((u) => {
             const isConfirmed = confirmedIds.has(u.id);
             const values = forms[u.id] || {};
             const docTypeLabel = DOC_TYPE_LABELS[normalizeDocType(u.document_type)] || null;
             const userFields = getReviewFields(u.document_type);
+            const sourceEntry = sourceEntries[u.id];
+            const attachment = attachments[u.id];
             return (
-              <div key={u.id} className={`rounded-2xl border p-4 ${isConfirmed ? 'border-emerald-200 bg-emerald-50/40' : 'border-slate-200 bg-white'}`}>
-                <div className="mb-3 flex items-center justify-between gap-3">
+              <article key={u.id} className={`overflow-hidden rounded-xl border ${isConfirmed ? 'border-emerald-200 bg-white' : 'border-slate-200 bg-white'}`}>
+                <div className={`flex items-center justify-between gap-3 border-b px-4 py-3 ${isConfirmed ? 'border-emerald-100 bg-emerald-50/50' : 'border-slate-100 bg-slate-50/70'}`}>
                   <div className="min-w-0">
-                    <p className="truncate font-sora text-sm font-semibold text-slate-950">{u.full_name || 'Unnamed record'}</p>
+                    <p className="truncate font-sora text-sm font-semibold text-slate-950">{values.full_name || u.full_name || 'Unnamed record'}</p>
                     <p className="truncate font-inter text-xs text-slate-400">
                       {docTypeLabel || u.email || 'No email extracted'}
                     </p>
                   </div>
                   {isConfirmed ? (
                     <span className="flex shrink-0 items-center gap-1 rounded-full bg-emerald-100 px-2.5 py-1 text-[11px] font-semibold text-emerald-700">
-                      <CheckCircle size={12} /> Reviewed
+                      <CheckCircle size={12} /> Confirmed
                     </span>
                   ) : (
                     <Button
                       size="sm"
                       variant="outline"
                       loading={confirmingId === u.id}
+                      disabled={finishing || confirmingId !== null}
                       onClick={() => confirmUser(u.id)}
                     >
                       Confirm
@@ -292,22 +369,96 @@ const ReviewOcrModal = ({ isOpen, ocrResult, onClose, onDone }) => {
                   )}
                 </div>
 
-                <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
-                  {userFields.map((f) => (
-                    <div key={f.key}>
-                      <label className="block font-inter text-[11px] font-medium text-slate-500 mb-1">{f.label}</label>
-                      <input
-                        value={values[f.key] || ''}
-                        disabled={isConfirmed}
-                        onChange={(e) => updateField(u.id, f.key, e.target.value)}
-                        className="w-full rounded-lg border border-slate-200 px-2.5 py-1.5 font-inter text-xs text-slate-900 outline-none focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/10 disabled:bg-slate-50 disabled:text-slate-400"
-                      />
+                <div className="grid items-start gap-5 p-4 lg:grid-cols-[12rem_7rem_12rem_minmax(0,1fr)]">
+                  <div className="grid min-w-0 gap-4 sm:grid-cols-[minmax(0,1fr)_7rem_minmax(0,1fr)] lg:contents">
+                    <div className="min-w-0">
+                      <p className="mb-1.5 font-inter text-xs font-medium text-slate-500">Uploaded document</p>
+                      {sourceEntry ? (
+                        <a href={sourceEntry.previewUrl} target="_blank" rel="noopener noreferrer" className="block rounded-lg border border-slate-200 bg-slate-50 p-2" title="Open full-size document">
+                          <img src={sourceEntry.previewUrl} alt={`Source document for ${u.full_name || 'this record'}`} className="h-36 w-full object-contain" />
+                          <span title={sourceEntry.file.name} className="mt-2 block truncate font-inter text-[11px] text-slate-500">{sourceEntry.file.name}</span>
+                          <span className="mt-1 flex items-center gap-1 font-inter text-xs text-brand-blue"><Eye size={12} /> Open full size</span>
+                        </a>
+                      ) : (
+                        <p className="rounded-lg bg-slate-50 p-3 font-inter text-xs text-slate-500">The upload response could not identify the source image for this record.</p>
+                      )}
                     </div>
-                  ))}
+                      <div className="min-w-0">
+                        <p className="mb-1.5 font-inter text-xs font-medium text-slate-500">Attached photo</p>
+                        {sourceEntry?.photoPreviewUrl ? (
+                          <a href={sourceEntry.photoPreviewUrl} target="_blank" rel="noopener noreferrer" className="block rounded-lg border border-slate-200 bg-slate-50 p-2" title="Open full-size photo">
+                            <img src={sourceEntry.photoPreviewUrl} alt={`Attached photo for ${u.full_name || 'this record'}`} className="h-36 w-full object-contain" />
+                            <span className="mt-2 flex items-center justify-center gap-1 font-inter text-[11px] text-brand-blue"><Eye size={12} /> View photo</span>
+                          </a>
+                        ) : (
+                          <div className="flex h-40 flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-slate-200 bg-slate-50/60 p-2 text-center font-inter text-[11px] text-slate-400"><Camera size={20} /> No photo attached</div>
+                        )}
+                      </div>
+                    <div className="min-w-0 space-y-2">
+                      <p className="font-inter text-xs font-medium text-slate-500">Additional document</p>
+                      {attachment ? (
+                        <>
+                          <a href={attachment.previewUrl} target="_blank" rel="noopener noreferrer" className="block rounded-lg border border-slate-200 bg-slate-50 p-2" title="Open additional document">
+                            {attachment.file.type.startsWith('image/') ? (
+                              <img src={attachment.previewUrl} alt={`Additional document for ${values.full_name || 'this record'}`} className="h-36 w-full object-contain" />
+                            ) : (
+                              <span className="flex h-36 flex-col items-center justify-center gap-2 font-inter text-xs text-slate-500"><FileImage size={26} /> PDF document</span>
+                            )}
+                            <span title={attachment.file.name} className="mt-2 block truncate font-inter text-[11px] text-slate-500">{attachment.file.name}</span>
+                            <span className="mt-1 flex items-center gap-1 font-inter text-xs text-brand-blue"><Eye size={12} /> Open full size</span>
+                          </a>
+                          {finalPreview || attachment.uploaded ? (
+                            <p className="flex items-center gap-1 font-inter text-xs text-emerald-700"><CheckCircle size={12} /> Ready for submission · {attachment.label}</p>
+                          ) : (
+                            <>
+                              <label className="block font-inter text-[11px] text-slate-500">
+                                Document label
+                                <input value={attachment.label} disabled={finishing || confirmingId !== null} onChange={(e) => setAttachment(u.id, { ...attachment, label: e.target.value })} className="mt-1 w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs text-slate-900" />
+                              </label>
+                              <p className="font-inter text-[11px] text-slate-500">Uploads after costing approval</p>
+                              <button type="button" disabled={finishing || confirmingId !== null} onClick={() => setAttachment(u.id, null)} className="font-inter text-xs text-red-500 disabled:opacity-50">Remove document</button>
+                            </>
+                          )}
+                        </>
+                      ) : finalPreview ? (
+                        <div className="flex h-40 items-center justify-center rounded-lg border border-dashed border-slate-200 bg-slate-50/60 p-3 text-center font-inter text-xs text-slate-400">No additional document</div>
+                      ) : null}
+                      {!finalPreview && !attachment?.uploaded && (
+                        <label className={`relative flex items-center justify-center gap-1.5 rounded-lg border border-dashed border-blue-200 bg-blue-50/30 px-3 py-2 text-center font-inter text-xs font-semibold text-brand-blue transition-colors focus-within:ring-2 focus-within:ring-brand-blue/30 ${attachment ? '' : 'h-40 flex-col gap-2'} ${finishing || confirmingId !== null ? 'opacity-50' : 'cursor-pointer hover:border-brand-blue hover:bg-blue-50'}`}>
+                          <Upload size={attachment ? 13 : 22} /> {attachment ? 'Replace document' : 'Upload another document'}
+                          {!attachment && <span className="font-normal text-slate-400">Image or PDF</span>}
+                          <input type="file" accept="image/*,application/pdf" className="absolute inset-0 h-full w-full cursor-pointer opacity-0" aria-label={`Upload additional document for ${values.full_name || 'this record'}`} disabled={finishing || confirmingId !== null} onChange={(e) => { selectAttachment(u.id, e.target.files?.[0]); e.target.value = ''; }} />
+                        </label>
+                      )}
+                    </div>
+                  </div>
+                  <div className="min-w-0 lg:border-l lg:border-slate-100 lg:pl-5">
+                    <p className="mb-2 font-inter text-xs font-medium text-slate-500">{finalPreview ? 'Confirmed details' : 'Extracted details'}</p>
+                  <div className="grid content-start grid-cols-2 gap-3 xl:grid-cols-3">
+                    {userFields.map((f) => finalPreview ? (
+                      <div key={f.key} className={f.key.startsWith('address_line') ? 'col-span-2 xl:col-span-3' : 'min-w-0'}>
+                        <p className="mb-1 font-inter text-[11px] font-medium text-slate-500">{f.label}</p>
+                        <p className="min-h-8 whitespace-pre-wrap break-words rounded-lg bg-slate-50 px-2.5 py-1.5 font-inter text-xs text-slate-900">{String(values[f.key] ?? '').trim() || '—'}</p>
+                      </div>
+                    ) : (
+                      <div key={f.key} className={f.key.startsWith('address_line') ? 'col-span-2 xl:col-span-3' : 'min-w-0'}>
+                        <label className="block font-inter text-[11px] font-medium text-slate-500 mb-1">{f.label}</label>
+                        {f.key.startsWith('address_line') ? (
+                          <textarea rows={2} value={values[f.key] || ''} disabled={isConfirmed || finishing || confirmingId !== null} onChange={(e) => updateField(u.id, f.key, e.target.value)} className="w-full resize-y rounded-lg border border-slate-200 px-2.5 py-2 font-inter text-xs leading-relaxed text-slate-900 outline-none focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/10 disabled:bg-slate-50 disabled:text-slate-500" />
+                        ) : <input
+                          value={values[f.key] || ''}
+                          disabled={isConfirmed || finishing || confirmingId !== null}
+                          onChange={(e) => updateField(u.id, f.key, e.target.value)}
+                          className="w-full rounded-lg border border-slate-200 px-2.5 py-1.5 font-inter text-xs text-slate-900 outline-none focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/10 disabled:bg-slate-50 disabled:text-slate-400"
+                        />}
+                      </div>
+                    ))}
+                  </div>
+                  </div>
                 </div>
 
                 {values._customFields && Object.keys(values._customFields).length > 0 && (
-                  <div className="mt-2.5 flex flex-wrap gap-1.5">
+                  <div className="flex flex-wrap gap-1.5 border-t border-slate-100 bg-slate-50/50 px-4 py-3">
                     <span className="font-inter text-[10px] font-semibold uppercase tracking-wide text-slate-400">Also extracted (saved as extra info):</span>
                     {Object.entries(values._customFields).map(([k, v]) => (
                       <span key={k} className="rounded-full border border-slate-100 bg-slate-50 px-2 py-0.5 font-mono text-[10px] text-slate-500">
@@ -316,7 +467,7 @@ const ReviewOcrModal = ({ isOpen, ocrResult, onClose, onDone }) => {
                     ))}
                   </div>
                 )}
-              </div>
+              </article>
             );
           })}
         </div>
@@ -347,10 +498,17 @@ const ReviewOcrModal = ({ isOpen, ocrResult, onClose, onDone }) => {
           </div>
         )}
 
-        <div className="flex justify-end pt-1">
-          <Button variant="primary" size="lg" loading={finishing} icon={ArrowRight} onClick={handleFinish}>
-            Confirm All &amp; Continue
+        <div className="flex flex-wrap justify-end gap-3 border-t border-slate-100 pt-4">
+          {finalPreview ? (
+            <>
+              <Button variant="outline" onClick={() => { setFinalPreview(false); setConfirmedIds(new Set()); }}>Back to Review</Button>
+              <Button variant="primary" size="lg" icon={ArrowRight} onClick={continueFromPreview}>Continue to Costing</Button>
+            </>
+          ) : (
+          <Button variant="primary" size="lg" loading={finishing} disabled={confirmingId !== null || users.length === 0} icon={ArrowRight} onClick={handleFinish}>
+            Confirm All &amp; Preview
           </Button>
+          )}
         </div>
       </div>
     </Modal>
@@ -358,42 +516,106 @@ const ReviewOcrModal = ({ isOpen, ocrResult, onClose, onDone }) => {
 };
 
 // ── Multi-image dropzone for the OCR document-upload path ───────────────────
-// Matches the existing mobile client's flow for this same endpoint: users are
-// added one at a time ("+ Add User"), each with its own document attached —
-// not a flat multi-select drop. Still collapses to the same flat `files[]`
-// array bulk-upload/documents expects (1 image = 1 user) when submitted.
-const UserDocumentEntries = ({ entries, onEntriesChange }) => {
-  const inputRef = useRef(null);
+// Two modes, same underlying entries array ({ id, file, previewUrl, photo,
+// photoPreviewUrl }) either way — mode only changes how entries get added:
+//  - 'single': the original flow — one document at a time ("+ Add User"),
+//    with its own optional photo attached right there, per row.
+//  - 'bulk': a true multi-select for documents (adds every picked file at
+//    once, in selection order) and a second multi-select for photos, which
+//    fills the entries' empty photo slots in order — the Nth photo picked
+//    goes to the Nth entry that doesn't have one yet. Both still collapse to
+//    the same flat `files[]` array bulk-upload/documents expects (1 image =
+//    1 user) when submitted — see handleUploadDocuments for how photos are
+//    then matched back to the real batch_user_ids once upload confirms
+//    which documents actually succeeded.
+const UserDocumentEntries = ({ mode, entries, onEntriesChange }) => {
+  const singleDocInputRef = useRef(null);
+  const bulkDocInputRef = useRef(null);
+  const bulkPhotoInputRef = useRef(null);
+  const photoInputRefs = useRef({});
+  const viewDocInputRef = useRef(null);
+  const viewPhotoInputRef = useRef(null);
+  const [viewEntryId, setViewEntryId] = useState(null);
+  const viewEntry = entries.find((e) => e.id === viewEntryId) || null;
 
-  useEffect(() => () => {
-    entries.forEach((entry) => URL.revokeObjectURL(entry.previewUrl));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  const makeEntry = (file) => ({
+    id: `${Date.now()}-${Math.random()}`, file, previewUrl: URL.createObjectURL(file), photo: null, photoPreviewUrl: null,
+  });
 
   const handleFileChange = (e) => {
     const file = e.target.files?.[0];
-    if (file) {
-      onEntriesChange((prev) => [...prev, { id: `${Date.now()}-${Math.random()}`, file, previewUrl: URL.createObjectURL(file) }]);
-    }
+    if (file) onEntriesChange((prev) => [...prev, makeEntry(file)]);
     e.target.value = '';
+  };
+
+  const handleBulkFilesChange = (e) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length > 0) onEntriesChange((prev) => [...prev, ...files.map(makeEntry)]);
+    e.target.value = '';
+  };
+
+  // Fills each entry without a photo yet, in order, one selected file per slot.
+  const handleBulkPhotosChange = (e) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) { e.target.value = ''; return; }
+    onEntriesChange((prev) => {
+      const next = [...prev];
+      let fileIdx = 0;
+      for (let i = 0; i < next.length && fileIdx < files.length; i += 1) {
+        if (!next[i].photo) {
+          next[i] = { ...next[i], photo: files[fileIdx], photoPreviewUrl: URL.createObjectURL(files[fileIdx]) };
+          fileIdx += 1;
+        }
+      }
+      return next;
+    });
+    e.target.value = '';
+  };
+
+  const setEntryPhoto = (id, file) => {
+    onEntriesChange((prev) => prev.map((entry) => {
+      if (entry.id !== id) return entry;
+      if (entry.photoPreviewUrl) URL.revokeObjectURL(entry.photoPreviewUrl);
+      return { ...entry, photo: file, photoPreviewUrl: file ? URL.createObjectURL(file) : null };
+    }));
+  };
+
+  // Replaces the document itself (not the photo) — used by the View Detail
+  // popup's "Replace Document" control.
+  const setEntryFile = (id, file) => {
+    if (!file) return;
+    onEntriesChange((prev) => prev.map((entry) => {
+      if (entry.id !== id) return entry;
+      URL.revokeObjectURL(entry.previewUrl);
+      return { ...entry, file, previewUrl: URL.createObjectURL(file) };
+    }));
   };
 
   const removeEntry = (id) => {
     onEntriesChange((prev) => {
       const target = prev.find((entry) => entry.id === id);
-      if (target) URL.revokeObjectURL(target.previewUrl);
+      if (target) {
+        URL.revokeObjectURL(target.previewUrl);
+        if (target.photoPreviewUrl) URL.revokeObjectURL(target.photoPreviewUrl);
+      }
       return prev.filter((entry) => entry.id !== id);
     });
   };
 
   return (
     <div>
-      <input ref={inputRef} type="file" accept="image/*" className="hidden" onChange={handleFileChange} />
+      <input ref={singleDocInputRef} type="file" accept="image/*" className="hidden" onChange={handleFileChange} />
+      <input ref={bulkDocInputRef} type="file" accept="image/*" multiple className="hidden" onChange={handleBulkFilesChange} />
+      <input ref={bulkPhotoInputRef} type="file" accept="image/*" multiple className="hidden" onChange={handleBulkPhotosChange} />
 
       {entries.length === 0 ? (
         <div className="flex flex-col items-center gap-2 rounded-xl border-2 border-dashed border-gray-300 py-8 text-center">
           <FileImage size={20} className="text-gray-300" />
-          <p className="max-w-[220px] font-inter text-xs text-gray-400">Add each person's document one at a time — 1 document = 1 user.</p>
+          <p className="max-w-[220px] font-inter text-xs text-gray-400">
+            {mode === 'bulk'
+              ? 'Select every document at once below — photo attachment is optional.'
+              : "Add each person's document one at a time — 1 document = 1 user."}
+          </p>
         </div>
       ) : (
         <div className="space-y-2">
@@ -404,7 +626,46 @@ const UserDocumentEntries = ({ entries, onEntriesChange }) => {
                 <p className="font-inter text-xs font-semibold text-brand-dark">User {i + 1}</p>
                 <p className="truncate font-inter text-[11px] text-gray-400">{entry.file.name}</p>
               </div>
-              <button type="button" onClick={() => removeEntry(entry.id)} className="shrink-0 text-gray-300 transition-colors hover:text-red-500">
+
+              <button
+                type="button"
+                onClick={() => setViewEntryId(entry.id)}
+                title="View document and photo"
+                className="flex shrink-0 items-center gap-1 rounded-lg border border-gray-200 px-2 py-1.5 font-inter text-[10px] font-semibold text-gray-500 transition-colors hover:border-brand-blue hover:text-brand-blue"
+              >
+                <Eye size={11} /> View Detail
+              </button>
+
+              {/* Photo slot — optional, per entry. Bulk mode's "Select
+                  Photos" picker auto-fills these; single mode fills them
+                  one at a time right here. */}
+              {entry.photo ? (
+                <div className="flex shrink-0 items-center gap-1.5">
+                  <img src={entry.photoPreviewUrl} alt="" className="h-8 w-8 rounded-full border border-gray-100 object-cover" title={entry.photo.name} />
+                  <button type="button" onClick={() => setEntryPhoto(entry.id, null)} title="Remove photo" className="text-gray-300 transition-colors hover:text-red-500">
+                    <X size={12} />
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => photoInputRefs.current[entry.id]?.click()}
+                    className="flex shrink-0 items-center gap-1 rounded-lg border border-dashed border-gray-300 px-2 py-1.5 font-inter text-[10px] font-semibold text-gray-500 transition-colors hover:border-brand-blue hover:text-brand-blue"
+                  >
+                    <Camera size={11} /> Photo
+                  </button>
+                  <input
+                    ref={(el) => { photoInputRefs.current[entry.id] = el; }}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) setEntryPhoto(entry.id, f); }}
+                  />
+                </>
+              )}
+
+              <button type="button" onClick={() => removeEntry(entry.id)} title="Remove document" className="shrink-0 text-gray-300 transition-colors hover:text-red-500">
                 <X size={13} />
               </button>
             </div>
@@ -412,13 +673,113 @@ const UserDocumentEntries = ({ entries, onEntriesChange }) => {
         </div>
       )}
 
-      <button
-        type="button"
-        onClick={() => inputRef.current?.click()}
-        className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-xl border-2 border-dashed border-gray-300 py-3 font-inter text-sm font-semibold text-brand-blue transition-colors hover:border-brand-blue hover:bg-blue-50/40"
-      >
-        <Plus size={14} /> Add User
-      </button>
+      {mode === 'bulk' ? (
+        <>
+          <div className="mt-2 grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => bulkDocInputRef.current?.click()}
+              className="flex items-center justify-center gap-1.5 rounded-xl border-2 border-dashed border-gray-300 py-3 font-inter text-sm font-semibold text-brand-blue transition-colors hover:border-brand-blue hover:bg-blue-50/40"
+            >
+              <Plus size={14} /> Select Documents
+            </button>
+            <button
+              type="button"
+              disabled={entries.length === 0}
+              onClick={() => bulkPhotoInputRef.current?.click()}
+              className="flex items-center justify-center gap-1.5 rounded-xl border-2 border-dashed border-gray-300 py-3 font-inter text-sm font-semibold text-brand-blue transition-colors hover:border-brand-blue hover:bg-blue-50/40 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <Camera size={14} /> Select Photos
+            </button>
+          </div>
+          <p className="mt-1.5 font-inter text-[11px] text-gray-400">
+            Photos are matched to documents in the order each was selected — pick photos in the same order as the documents above.
+          </p>
+        </>
+      ) : (
+        <button
+          type="button"
+          onClick={() => singleDocInputRef.current?.click()}
+          className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-xl border-2 border-dashed border-gray-300 py-3 font-inter text-sm font-semibold text-brand-blue transition-colors hover:border-brand-blue hover:bg-blue-50/40"
+        >
+          <Plus size={14} /> Add User
+        </button>
+      )}
+
+      {/* Document + photo side by side, each with its own edit control right
+          there — replace the document, or add/replace/remove the photo —
+          without closing the popup and hunting for the row again. */}
+      <input
+        ref={viewDocInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f && viewEntryId) setEntryFile(viewEntryId, f); }}
+      />
+      <input
+        ref={viewPhotoInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f && viewEntryId) setEntryPhoto(viewEntryId, f); }}
+      />
+      <Modal isOpen={!!viewEntry} onClose={() => setViewEntryId(null)} title="Document & Photo" size="lg">
+        {viewEntry && (
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div>
+              <p className="mb-2 font-inter text-[11px] font-semibold uppercase tracking-wide text-gray-400">Document</p>
+              <img src={viewEntry.previewUrl} alt="" className="w-full rounded-xl border border-gray-100 object-contain max-h-[50vh]" />
+              <p className="mt-1.5 truncate font-inter text-xs text-gray-500">{viewEntry.file.name}</p>
+              <button
+                type="button"
+                onClick={() => viewDocInputRef.current?.click()}
+                className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-lg border border-gray-200 py-1.5 font-inter text-xs font-semibold text-gray-600 transition-colors hover:border-brand-blue hover:text-brand-blue"
+              >
+                <RefreshCw size={11} /> Replace Document
+              </button>
+            </div>
+            <div>
+              <p className="mb-2 font-inter text-[11px] font-semibold uppercase tracking-wide text-gray-400">Photo</p>
+              {viewEntry.photo ? (
+                <>
+                  <img src={viewEntry.photoPreviewUrl} alt="" className="w-full rounded-xl border border-gray-100 object-contain max-h-[50vh]" />
+                  <p className="mt-1.5 truncate font-inter text-xs text-gray-500">{viewEntry.photo.name}</p>
+                  <div className="mt-2 flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => viewPhotoInputRef.current?.click()}
+                      className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-gray-200 py-1.5 font-inter text-xs font-semibold text-gray-600 transition-colors hover:border-brand-blue hover:text-brand-blue"
+                    >
+                      <RefreshCw size={11} /> Replace
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEntryPhoto(viewEntry.id, null)}
+                      className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-red-200 py-1.5 font-inter text-xs font-semibold text-red-500 transition-colors hover:bg-red-50"
+                    >
+                      <X size={11} /> Remove
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="flex h-full min-h-[160px] flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-gray-200 text-center">
+                    <Camera size={20} className="text-gray-300" />
+                    <p className="max-w-[180px] font-inter text-xs text-gray-400">No photo attached yet</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => viewPhotoInputRef.current?.click()}
+                    className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-gray-300 py-1.5 font-inter text-xs font-semibold text-brand-blue transition-colors hover:border-brand-blue hover:bg-blue-50/40"
+                  >
+                    <Camera size={11} /> Add Photo
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 };
@@ -443,10 +804,39 @@ export const DownloadTemplate = () => {
     return `Human Verification Batch ${String(d.getDate()).padStart(2,'0')}-${String(d.getMonth()+1).padStart(2,'0')}-${d.getFullYear()}`;
   });
 
+  // 'single' | 'bulk' — only controls how entries get added in
+  // UserDocumentEntries; submission always goes through the same bulk
+  // documents call either way (see handleUploadDocuments).
+  const [uploadMode, setUploadMode] = useState('single');
   const [docEntries, setDocEntries] = useState([]);
   const [uploading,  setUploading]  = useState(false);
   const [ocrResult,  setOcrResult]  = useState(null);
   const [reviewOpen, setReviewOpen] = useState(false);
+  const [reviewEntries, setReviewEntries] = useState({});
+  const entriesRef = useRef(docEntries);
+  entriesRef.current = docEntries;
+
+  useEffect(() => () => {
+    entriesRef.current.forEach((entry) => {
+      URL.revokeObjectURL(entry.previewUrl);
+      if (entry.photoPreviewUrl) URL.revokeObjectURL(entry.photoPreviewUrl);
+    });
+  }, []);
+
+  // Switching tabs is a fresh start — the two modes build their entries
+  // differently enough (one-at-a-time vs multi-select) that carrying partial
+  // state across would be confusing, not helpful. Revoke every blob URL
+  // before clearing so nothing leaks (UserDocumentEntries only revokes on
+  // its own unmount, not when the parent swaps its entries array out).
+  const switchUploadMode = (nextMode) => {
+    if (nextMode === uploadMode) return;
+    docEntries.forEach((entry) => {
+      URL.revokeObjectURL(entry.previewUrl);
+      if (entry.photoPreviewUrl) URL.revokeObjectURL(entry.photoPreviewUrl);
+    });
+    setDocEntries([]);
+    setUploadMode(nextMode);
+  };
 
   const toggleBase = (key) => setBaseToggles((prev) => ({ ...prev, [key]: !prev[key] }));
 
@@ -525,38 +915,29 @@ export const DownloadTemplate = () => {
     }
   };
 
-  // Documents path: bulk-upload/documents creates the batch + users right
-  // away (OCR happens inside this one call) — unlike Excel, there's nothing
-  // to defer to Preview. Review/confirm happens here, then Costing/Preview
-  // run against the batch that already exists.
+  // Extraction reads each document independently; it creates no batch.
   const handleUploadDocuments = async () => {
-    if (docEntries.length === 0) { toast.error('Add at least one user document'); return; }
+    if (!docEntries.length) { toast.error('Add at least one user document'); return; }
     if (!batchNameValue.trim()) { toast.error('Enter a batch name'); return; }
     setUploading(true);
     try {
-      const { data } = await verificationAPI.bulkUploadDocuments(docEntries.map((e) => e.file), batchNameValue.trim(), {
-        industryType: getIndustryTypeList(selectedIndustry),
-        verificationTypes: selectedVerifications.join(','),
-        credentialVisibility: selectedPermission || 'private',
-      });
-      setOcrResult(data);
+      const records = await extractOcrDraft(docEntries, verificationAPI);
+      setReviewEntries(Object.fromEntries(docEntries.map((entry) => [entry.id, entry])));
+      setOcrResult({ successful_users: records, errors: [], skipped_users: [] });
       setReviewOpen(true);
-      toast.success(data?.message || 'Documents processed');
     } catch (err) {
-      toast.error(getApiError(err, 'Failed to upload documents'));
+      toast.error(getApiError(err, err?.message || 'Failed to extract document details'));
     } finally {
       setUploading(false);
     }
   };
 
-  const handleReviewDone = () => {
+  const handleReviewDone = (draft) => {
     setReviewOpen(false);
     setBatchData({
-      batchName: batchNameValue,
-      description: '',
-      recordCount: ocrResult?.total_uploaded || 0,
-      costConfirmed: false,
-      uploadResponse: ocrResult,
+      batchName: batchNameValue.trim(), description: '', recordCount: draft.records.length,
+      costConfirmed: false, uploadResponse: null, ocrDraft: draft,
+      ocrSubmission: { response: null, completedIds: [], photoSavedIds: [], savedAttachments: {} },
     });
     setSelectedHumanTemplate('classic-blue');
     navigate('/org/costing');
@@ -685,8 +1066,28 @@ export const DownloadTemplate = () => {
                   )}
                 </div>
 
+                {/* Single: add one document (+ optional photo) at a time.
+                    Bulk: multi-select every document at once, then multi-
+                    select every photo at once — matched in selection order. */}
+                <div className="flex items-center gap-1.5 border-b border-gray-100 bg-white px-6 pt-3">
+                  <button
+                    type="button"
+                    onClick={() => switchUploadMode('single')}
+                    className={`flex items-center gap-1.5 rounded-t-lg border-b-2 px-3 py-2 font-inter text-xs font-semibold transition-colors ${uploadMode === 'single' ? 'border-brand-blue text-brand-blue' : 'border-transparent text-gray-400 hover:text-gray-600'}`}
+                  >
+                    <Layers size={13} /> Single
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => switchUploadMode('bulk')}
+                    className={`flex items-center gap-1.5 rounded-t-lg border-b-2 px-3 py-2 font-inter text-xs font-semibold transition-colors ${uploadMode === 'bulk' ? 'border-brand-blue text-brand-blue' : 'border-transparent text-gray-400 hover:text-gray-600'}`}
+                  >
+                    <Images size={13} /> Bulk
+                  </button>
+                </div>
+
                 <div className="border-b border-gray-100 p-6">
-                  <UserDocumentEntries entries={docEntries} onEntriesChange={setDocEntries} />
+                  <UserDocumentEntries mode={uploadMode} entries={docEntries} onEntriesChange={setDocEntries} />
                 </div>
 
                 <div className="space-y-3 p-6">
@@ -862,6 +1263,7 @@ export const DownloadTemplate = () => {
       <ReviewOcrModal
         isOpen={reviewOpen}
         ocrResult={ocrResult}
+        sourceEntries={reviewEntries}
         onClose={() => setReviewOpen(false)}
         onDone={handleReviewDone}
       />

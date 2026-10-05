@@ -2,6 +2,7 @@ import React from 'react';
 import { CheckCircle, Clock, Download, Eye, RefreshCw, XCircle } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
 import { Badge } from '@/components/ui/Badge';
+import { RecordDocuments } from '@/components/shared/RecordDocuments';
 
 const getInitials = (name) => {
   const parts = String(name || '').trim().split(/\s+/).filter(Boolean);
@@ -250,6 +251,7 @@ export const VerificationCheckDetailsModal = ({ selection, title, verifierEmail,
 export const VerificationDetailsModal = ({
   record, title, subtitle, onClose,
   verifierByType, certificate, onViewCertificate, onDownloadCertificate,
+  showDocuments = false,
 }) => {
   if (!record) return null;
   const checkEntries = Object.entries(record.verification_type_status || {});
@@ -261,7 +263,8 @@ export const VerificationDetailsModal = ({
       onClose={onClose}
       title="Verification Details"
       description="View verification information for this record."
-      size="2xl"
+      size={showDocuments ? '6xl' : '2xl'}
+      containerClassName={showDocuments ? 'w-full max-w-6xl' : ''}
     >
       <div className="space-y-4">
         <div className="flex items-center justify-between gap-3 rounded-2xl border border-gray-100 bg-gray-50/60 px-4 py-3">
@@ -292,6 +295,7 @@ export const VerificationDetailsModal = ({
           </div>
         </div>
 
+        {showDocuments && <RecordDocuments key={record.id || record.user_id || record.entity_id} record={record} />}
         <CertificateSection certificate={certificate} onView={onViewCertificate} onDownload={onDownloadCertificate} />
       </div>
     </Modal>

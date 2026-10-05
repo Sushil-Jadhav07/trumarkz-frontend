@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { getDocumentViewCandidates } from '@/utils/recordDocuments';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
 const VERIFICATION_BASE_URL = import.meta.env.VITE_VERIFICATION_API_URL || API_BASE_URL;
@@ -383,6 +384,12 @@ export const verificationAPI = {
   // call per batch. 1 image = 1 user. `fields`/`docType` are extraction hints,
   // not required. Same optional industry/verification/visibility params as the
   // Excel bulkUpload above.
+  extractOcrDocument: (file) => {
+    const formData = new FormData();
+    formData.append('files', file);
+    return verificationApi.post('/ocr/extract', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
+  },
+
   bulkUploadDocuments: (files, batchName, maybeOptions, maybeProgress) => {
     const formData = new FormData();
     const { options, onProgress } = normalizeUploadArgs(maybeOptions, maybeProgress);
@@ -404,6 +411,33 @@ export const verificationAPI = {
     appendFormValue(formData, 'doc_type', options.docType || options.doc_type);
 
     return verificationApi.post('/verification/bulk-upload/documents', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      onUploadProgress: onProgress
+        ? (event) => onProgress(Math.round((event.loaded * 100) / (event.total || 1)))
+        : undefined,
+    });
+  },
+
+  // Single OCR photo — attaches/replaces the photo for one BatchUser created
+  // by bulkUploadDocuments above. Backend normalizes to a 350x350 PNG.
+  uploadOcrPhoto: (batchUserId, photo) => {
+    const formData = new FormData();
+    formData.append('batch_user_id', batchUserId);
+    formData.append('photo', photo);
+    return verificationApi.post('/verification/upload/ocr-photo', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
+
+  // Bulk OCR photos — batch_user_ids[i] <-> photos[i], strictly positional
+  // (never filename/name/email/order heuristics). One bad pair (invalid
+  // photo, wrong-org id) never blocks the rest — see failed_users[] on the
+  // response, alongside successful_users[].
+  bulkUploadOcrPhotos: (batchUserIds, photos, onProgress) => {
+    const formData = new FormData();
+    batchUserIds.forEach((id) => formData.append('batch_user_ids', id));
+    photos.forEach((photo) => formData.append('photos', photo));
+    return verificationApi.post('/verification/bulk-upload/ocr-photos', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
       onUploadProgress: onProgress
         ? (event) => onProgress(Math.round((event.loaded * 100) / (event.total || 1)))
@@ -548,6 +582,7 @@ export const verificationAPI = {
   },
 
   getUserVerification: (userId) => verificationApi.get(`/verification/user/${userId}`),
+  getDocumentViewCandidates: (document) => getDocumentViewCandidates(document, VERIFICATION_BASE_URL),
 
   generateQRAndCertificate: (userId) =>
     verificationApi.post(`/verification/user/${userId}/generate-qr`),

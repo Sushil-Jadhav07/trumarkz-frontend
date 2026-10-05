@@ -11,6 +11,7 @@ import { useApp } from '@/context/AppContext';
 import { HUMAN_VERIFICATION_STEPS, HUMAN_VERIFICATION_STEP_META, HUMAN_VERIFICATION_STEP_ROUTES } from '@/data/humanVerificationFlow';
 import { verificationAPI, getApiError } from '@/services/api';
 import { getIndustryTypeList } from '@/utils/verificationFlow';
+import { submitOcrDraft } from '@/utils/ocrSubmission';
 
 const formatCurrency = (value) => `₹${Number(value).toLocaleString('en-IN')}`;
 
@@ -34,14 +35,12 @@ export const CostBreakdown = () => {
   const [submitting,  setSubmitting]  = useState(false);
 
   useEffect(() => {
-    // Excel path defers batch creation to Preview (batchData.file is enough
-    // to proceed); the OCR document path already created the batch at the
-    // Template step, so batchData.uploadResponse stands in for it instead.
-    if (!(batchData?.file || batchData?.uploadResponse) || !batchData?.recordCount) {
+    // Both Excel and OCR remain drafts until the total cost is approved.
+    if (!(batchData?.file || batchData?.ocrDraft || batchData?.uploadResponse) || !batchData?.recordCount) {
       toast.error('Upload the template file first');
       navigate('/org/template', { replace: true });
     }
-  }, [batchData?.file, batchData?.uploadResponse, batchData?.recordCount, navigate]);
+  }, [batchData?.file, batchData?.ocrDraft, batchData?.uploadResponse, batchData?.recordCount, navigate]);
 
   // Stable string key to avoid infinite refetch from object reference changes
   const industryKey = (() => {
@@ -79,7 +78,7 @@ export const CostBreakdown = () => {
   const totalCost   = selectedChecks.reduce((sum, item) => sum + ((item.price || 0) * recordCount), 0);
 
   const handleContinue = async () => {
-    if (!agreed) {
+    if (!agreed || typesLoading || selectedChecks.length === 0 || submitting) {
       toast.error('Confirm the total cost before continuing');
       return;
     }
@@ -89,13 +88,13 @@ export const CostBreakdown = () => {
       costConfirmed: true,
     }));
 
-    // OCR document path already created the batch at the Template step.
+    // A fully submitted batch is reused if the user returns to costing.
     if (batchData?.uploadResponse) {
       navigate('/org/batch-status');
       return;
     }
 
-    if (!batchData?.file) {
+    if (!(batchData?.file || batchData?.ocrDraft)) {
       toast.error('Upload the completed Excel file again');
       navigate('/org/template');
       return;
@@ -103,6 +102,37 @@ export const CostBreakdown = () => {
 
     setSubmitting(true);
     try {
+      if (batchData.ocrDraft) {
+        const saved = batchData.ocrSubmission || {};
+        const progress = {
+          response: saved.response || null,
+          completedIds: [...(saved.completedIds || [])],
+          photoSavedIds: [...(saved.photoSavedIds || [])],
+          savedAttachments: { ...(saved.savedAttachments || {}) },
+        };
+        const data = await submitOcrDraft({
+          draft: batchData.ocrDraft, batchName: batchData.batchName.trim(),
+          options: {
+            batchType: 'human', industryType: getIndustryTypeList(selectedIndustry),
+            verificationTypes: selectedVerifications.join(','),
+            credentialVisibility: selectedPermission || 'private',
+          },
+          api: verificationAPI, progress,
+          checkpoint: (state) => setBatchData((current) => ({
+            ...current,
+            ocrSubmission: { ...state, completedIds: [...state.completedIds],
+              photoSavedIds: [...state.photoSavedIds], savedAttachments: { ...state.savedAttachments } },
+          })),
+        });
+        const savedCount = data.successful_users.length;
+        const skippedCount = batchData.ocrDraft.records.length - savedCount;
+        setBatchData((current) => ({ ...current, uploadResponse: data, recordCount: savedCount, selectedHumanTemplate: DEFAULT_HUMAN_TEMPLATE }));
+        toast.success(skippedCount > 0
+          ? `${savedCount} records saved, ${skippedCount} documents skipped. See Batch Status for details.`
+          : 'Batch created and reviewed documents saved');
+        navigate('/org/batch-status');
+        return;
+      }
       const { data } = await verificationAPI.bulkUpload(
         batchData.file,
         batchData.batchName.trim(),
@@ -149,7 +179,7 @@ export const CostBreakdown = () => {
       }
       navigate('/org/batch-status');
     } catch (error) {
-      toast.error(getApiError(error, 'Failed to create batch'));
+      toast.error(getApiError(error, error?.message || 'Failed to create batch'));
     } finally {
       setSubmitting(false);
     }
@@ -254,9 +284,9 @@ export const CostBreakdown = () => {
                 className="w-full"
                 onClick={handleContinue}
                 icon={ArrowRight}
-                disabled={!agreed || recordCount <= 0 || submitting}
+                disabled={!agreed || typesLoading || selectedChecks.length === 0 || recordCount <= 0 || submitting}
               >
-                {submitting ? 'Creating Batch...' : 'Continue'}
+                {submitting ? 'Saving Batch...' : batchData?.ocrSubmission?.response ? 'Retry Submission' : 'Create Batch'}
               </Button>
             </div>
           </Card>

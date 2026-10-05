@@ -6,7 +6,7 @@ import { X } from 'lucide-react';
 // second card docked to the right of the main dialog, inside the same
 // overlay, sliding in/out independently. Existing callers that don't pass
 // it are completely unaffected.
-export const Modal = ({ isOpen, onClose, title, description = null, children, size = 'md', sidePanel = null, sidePanelWidth = 'max-w-sm' }) => {
+export const Modal = ({ isOpen, onClose, title, description = null, children, size = 'md', sidePanel = null, sidePanelWidth = 'max-w-sm', containerClassName = '' }) => {
   const sizes = {
     sm: 'max-w-sm',
     md: 'max-w-md',
@@ -33,7 +33,7 @@ export const Modal = ({ isOpen, onClose, title, description = null, children, si
             className="absolute inset-0 bg-black/50 backdrop-blur-sm"
             onClick={onClose}
           />
-          <div className="relative flex max-h-[92vh] items-stretch gap-4">
+          <div className={`relative flex max-h-[92vh] items-stretch gap-4 ${containerClassName}`}>
             <motion.div
               initial={{ scale: 0.95, opacity: 0, y: 20 }}
               animate={{ scale: 1, opacity: 1, y: 0 }}

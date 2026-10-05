@@ -1011,11 +1011,16 @@ const BatchDetailModal = ({ batchId, batchName, onClose, asPage = false, onLoade
                               </span>
                             ) : sdcMatch ? (
                               <Badge status="pending">Draft</Badge>
-                            ) : (
-                              <span className="text-xs text-gray-300 font-inter">-</span>
-                            )}
+                            ) : null}
                           </td>
                           <td className="px-5 py-3.5">
+                            <button
+                              type="button"
+                              onClick={() => setVerificationDetailsRecord(record)}
+                              className="mb-2 flex items-center gap-1.5 rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs font-semibold font-inter text-brand-blue transition-colors hover:bg-blue-50"
+                            >
+                              <FileText size={12} /> Documents{Array.isArray(record.documents) ? ` (${record.documents.length})` : ''}
+                            </button>
                             {sdcMatch?.issued ? (
                               <div className="flex items-center gap-1.5">
                                 <button
@@ -1034,9 +1039,7 @@ const BatchDetailModal = ({ batchId, batchName, onClose, asPage = false, onLoade
                                   <Info size={12} /> Detail
                                 </button>
                               </div>
-                            ) : (
-                              <span className="text-xs text-gray-300 font-inter">-</span>
-                            )}
+                            ) : null}
                           </td>
                         </motion.tr>
                       );
@@ -1065,6 +1068,7 @@ const BatchDetailModal = ({ batchId, batchName, onClose, asPage = false, onLoade
     />
 
     <VerificationDetailsModal
+      showDocuments
       record={verificationDetailsRecord}
       title={verificationDetailsRecord ? getRecordTitle(verificationDetailsRecord) : ''}
       subtitle={verificationDetailsRecord ? getRecordSubtitle(verificationDetailsRecord, detail?.batchType) : ''}
