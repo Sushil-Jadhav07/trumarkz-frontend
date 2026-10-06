@@ -6,7 +6,7 @@ import { X } from 'lucide-react';
 // second card docked to the right of the main dialog, inside the same
 // overlay, sliding in/out independently. Existing callers that don't pass
 // it are completely unaffected.
-export const Modal = ({ isOpen, onClose, title, description = null, children, size = 'md', sidePanel = null, sidePanelWidth = 'max-w-sm', containerClassName = '' }) => {
+export const Modal = ({ isOpen, onClose, title, description = null, headerActions = null, children, size = 'md', sidePanel = null, sidePanelWidth = 'max-w-sm', containerClassName = '' }) => {
   const sizes = {
     sm: 'max-w-sm',
     md: 'max-w-md',
@@ -27,35 +27,38 @@ export const Modal = ({ isOpen, onClose, title, description = null, children, si
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 z-50 !m-0 flex items-center justify-center p-4"
+          className="fixed inset-0 z-50 !m-0 flex items-center justify-center p-2"
         >
           <div
             className="absolute inset-0 bg-black/50 backdrop-blur-sm"
             onClick={onClose}
           />
-          <div className={`relative flex max-h-[92vh] items-stretch gap-4 ${containerClassName}`}>
+          <div className={`relative flex max-h-[96vh] items-stretch gap-4 ${containerClassName}`}>
             <motion.div
               initial={{ scale: 0.95, opacity: 0, y: 20 }}
               animate={{ scale: 1, opacity: 1, y: 0 }}
               exit={{ scale: 0.95, opacity: 0, y: 20 }}
               transition={{ duration: 0.2 }}
-              className={`w-full ${sizes[size]} bg-white rounded-2xl shadow-xl overflow-hidden max-h-[92vh] flex flex-col`}
+              className={`w-full ${sizes[size]} bg-white rounded-2xl shadow-xl overflow-hidden max-h-[96vh] flex flex-col`}
             >
               {title && (
-                <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+                <div className="flex items-center justify-between gap-3 px-6 py-4 border-b border-gray-100">
                   <div className="min-w-0">
                     <h3 className="font-sora font-semibold text-lg text-brand-dark">{title}</h3>
                     {description && <p className="mt-0.5 text-xs text-gray-400 font-inter">{description}</p>}
                   </div>
-                  <button
-                    onClick={onClose}
-                    className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors"
-                  >
-                    <X size={20} />
-                  </button>
+                  <div className="flex shrink-0 items-center gap-2">
+                    {headerActions}
+                    <button
+                      onClick={onClose}
+                      className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors"
+                    >
+                      <X size={20} />
+                    </button>
+                  </div>
                 </div>
               )}
-              <div className="p-6 overflow-y-auto scrollbar-hidden">{children}</div>
+              <div className="p-6 overflow-y-auto thin-scrollbar">{children}</div>
             </motion.div>
             <AnimatePresence>
               {sidePanel && (
@@ -64,7 +67,7 @@ export const Modal = ({ isOpen, onClose, title, description = null, children, si
                   animate={{ opacity: 1, x: 0 }}
                   exit={{ opacity: 0, x: 24 }}
                   transition={{ duration: 0.18 }}
-                  className={`hidden w-full ${sidePanelWidth} bg-white rounded-2xl shadow-xl overflow-hidden max-h-[92vh] flex-col sm:flex`}
+                  className={`hidden w-full ${sidePanelWidth} bg-white rounded-2xl shadow-xl overflow-hidden max-h-[96vh] flex-col sm:flex`}
                 >
                   {sidePanel}
                 </motion.div>

@@ -658,8 +658,26 @@ export const ProductTemplate = () => {
         </div>
       </div>
 
-      {/* Download Template Modal */}
-      <Modal isOpen={modalOpen} onClose={() => setModalOpen(false)} title="Setup Product Template" size="4xl">
+      {/* Download Template Modal — the action lives in the header next to
+          Close now; a separate "Close" footer button was redundant with the
+          X already up there, so it's gone. */}
+      <Modal
+        isOpen={modalOpen}
+        onClose={() => setModalOpen(false)}
+        title="Setup Product Template"
+        size="4xl"
+        headerActions={
+          <button
+            type="button"
+            disabled={downloading}
+            onClick={handleDownload}
+            className="flex items-center gap-1.5 rounded-lg bg-brand-blue px-3 py-1.5 font-inter text-xs font-semibold text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
+          >
+            {downloading ? <RefreshCw size={13} className="animate-spin" /> : <Download size={13} />}
+            {downloading ? 'Downloading…' : 'Download Template'}
+          </button>
+        }
+      >
         <div className="space-y-5">
           <p className="font-inter text-sm text-slate-500">
             {isWarranty ? (
@@ -786,21 +804,6 @@ export const ProductTemplate = () => {
                 </span>
               ))}
             </div>
-          </div>
-
-          <div className="flex gap-2 pt-1">
-            <Button variant="ghost" className="flex-1" onClick={() => setModalOpen(false)}>
-              Close
-            </Button>
-            <Button
-              variant="primary"
-              className="flex-1"
-              icon={downloading ? RefreshCw : Download}
-              disabled={downloading}
-              onClick={handleDownload}
-            >
-              {downloading ? 'Downloading…' : 'Download Template'}
-            </Button>
           </div>
         </div>
       </Modal>

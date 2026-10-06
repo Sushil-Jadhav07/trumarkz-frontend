@@ -104,47 +104,13 @@ const TypeRow = ({ name, info, verifierEmail }) => {
 };
 
 // certificate (optional, admin-only today): { status: 'ready'|'draft'|'not_generated', label, canView, canDownload, downloading }
-const CertificateSection = ({ certificate, onView, onDownload }) => {
-  if (!certificate) return null;
-  const meta = certificate.status === 'ready'
+const getCertificateMeta = (certificate) => (
+  certificate?.status === 'ready'
     ? { badge: 'info', label: certificate.label || 'Ready' }
-    : certificate.status === 'draft'
+    : certificate?.status === 'draft'
       ? { badge: 'pending', label: certificate.label || 'Draft' }
-      : { badge: 'default', label: certificate.label || 'Not Generated' };
-
-  return (
-    <div>
-      <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-gray-400 font-inter">Certificate</p>
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-gray-100 px-4 py-3">
-        <Badge status={meta.badge}>{meta.label}</Badge>
-        {(certificate.canView || certificate.canDownload) && (
-          <div className="flex items-center gap-2">
-            {certificate.canView && (
-              <button
-                type="button"
-                onClick={onView}
-                className="flex items-center gap-1.5 rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs font-semibold font-inter text-gray-600 hover:bg-gray-50 transition-colors"
-              >
-                <Eye size={12} /> View Certificate
-              </button>
-            )}
-            {certificate.canDownload && (
-              <button
-                type="button"
-                disabled={certificate.downloading}
-                onClick={onDownload}
-                className="flex items-center gap-1.5 rounded-lg border border-blue-200 bg-white px-2.5 py-1.5 text-xs font-semibold font-inter text-brand-blue hover:bg-blue-50 disabled:opacity-50 transition-colors"
-              >
-                {certificate.downloading ? <RefreshCw size={12} className="animate-spin" /> : <Download size={12} />}
-                Download Certificate
-              </button>
-            )}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-};
+      : { badge: 'default', label: certificate?.label || 'Not Generated' }
+);
 
 // One verification check for ONE record — driven entirely by the exact
 // { record, typeName } pair that was clicked. Reads only
@@ -257,12 +223,44 @@ export const VerificationDetailsModal = ({
   const checkEntries = Object.entries(record.verification_type_status || {});
   const overallMeta = OVERALL_STATUS_META[record.overall_status_label] || null;
 
+  // Certificate badge + View + Download live in the header, next to Close —
+  // this is the only place they show now (the old bottom Certificate
+  // section was a scroll away and fully redundant with this).
+  const certMeta = certificate ? getCertificateMeta(certificate) : null;
+  const headerActions = certificate ? (
+    <>
+      <Badge status={certMeta.badge}>{certMeta.label}</Badge>
+      {certificate.canView && (
+        <button
+          type="button"
+          onClick={onViewCertificate}
+          title="View Certificate"
+          className="flex items-center gap-1.5 rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs font-semibold font-inter text-gray-600 hover:bg-gray-50 transition-colors"
+        >
+          <Eye size={13} /> View
+        </button>
+      )}
+      {certificate.canDownload && (
+        <button
+          type="button"
+          disabled={certificate.downloading}
+          onClick={onDownloadCertificate}
+          title="Download Certificate"
+          className="flex items-center gap-1.5 rounded-lg border border-blue-200 bg-white px-2.5 py-1.5 text-xs font-semibold font-inter text-brand-blue hover:bg-blue-50 disabled:opacity-50 transition-colors"
+        >
+          {certificate.downloading ? <RefreshCw size={13} className="animate-spin" /> : <Download size={13} />}
+          Download
+        </button>
+      )}
+    </>
+  ) : null;
+
   return (
     <Modal
       isOpen={!!record}
       onClose={onClose}
       title="Verification Details"
-      description="View verification information for this record."
+      headerActions={headerActions}
       size={showDocuments ? '6xl' : '2xl'}
       containerClassName={showDocuments ? 'w-full max-w-6xl' : ''}
     >
@@ -296,7 +294,6 @@ export const VerificationDetailsModal = ({
         </div>
 
         {showDocuments && <RecordDocuments key={record.id || record.user_id || record.entity_id} record={record} />}
-        <CertificateSection certificate={certificate} onView={onViewCertificate} onDownload={onDownloadCertificate} />
       </div>
     </Modal>
   );

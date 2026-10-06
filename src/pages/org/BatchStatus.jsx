@@ -1067,13 +1067,34 @@ const BatchDetailModal = ({ batchId, batchName, onClose, asPage = false, onLoade
       onClose={() => setDetailRecord(null)}
     />
 
-    <VerificationDetailsModal
-      showDocuments
-      record={verificationDetailsRecord}
-      title={verificationDetailsRecord ? getRecordTitle(verificationDetailsRecord) : ''}
-      subtitle={verificationDetailsRecord ? getRecordSubtitle(verificationDetailsRecord, detail?.batchType) : ''}
-      onClose={() => setVerificationDetailsRecord(null)}
-    />
+    {(() => {
+      // Same certificate-header treatment as the admin side's Verification
+      // Details modal — badge + Download next to Close. Org only has one
+      // combined open-and-download action (handleDownloadCertificate), not
+      // a separate View, so canView stays false here.
+      const vdRecordKey = verificationDetailsRecord ? getRecordKey(verificationDetailsRecord) : null;
+      const vdSdcMatch = vdRecordKey ? sdcByRecordId[vdRecordKey] || null : null;
+      const vdCertificate = verificationDetailsRecord
+        ? {
+            status: vdSdcMatch ? (vdSdcMatch.issued ? 'ready' : 'draft') : 'not_generated',
+            label: vdSdcMatch ? (vdSdcMatch.issued ? 'Ready' : 'Draft') : 'Not Generated',
+            canView: false,
+            canDownload: !!vdSdcMatch,
+            downloading: vdSdcMatch ? downloadingId === vdSdcMatch.publicId : false,
+          }
+        : null;
+      return (
+        <VerificationDetailsModal
+          showDocuments
+          record={verificationDetailsRecord}
+          title={verificationDetailsRecord ? getRecordTitle(verificationDetailsRecord) : ''}
+          subtitle={verificationDetailsRecord ? getRecordSubtitle(verificationDetailsRecord, detail?.batchType) : ''}
+          onClose={() => setVerificationDetailsRecord(null)}
+          certificate={vdCertificate}
+          onDownloadCertificate={() => vdSdcMatch && handleDownloadCertificate(vdSdcMatch.publicId)}
+        />
+      );
+    })()}
 
     {selectedVerification && (
       <VerificationCheckDetailsModal

@@ -11,6 +11,32 @@
   display: none;
 }
 
+/* Subtle, visible scrollbar — used where hiding it entirely would leave no
+   cue that there's more content below (e.g. the Modal body). Thin, light
+   gray, rounded; invisible track so it doesn't add visual weight when not
+   needed. */
+.thin-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: #d1d5db transparent;
+}
+
+.thin-scrollbar::-webkit-scrollbar {
+  width: 8px;
+}
+
+.thin-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.thin-scrollbar::-webkit-scrollbar-thumb {
+  background-color: #d1d5db;
+  border-radius: 9999px;
+}
+
+.thin-scrollbar::-webkit-scrollbar-thumb:hover {
+  background-color: #9ca3af;
+}
+
 @layer base {
   html {
     font-family: 'Inter', sans-serif;

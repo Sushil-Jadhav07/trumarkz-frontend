@@ -13,11 +13,11 @@ import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
 import { CustomSelect } from '@/components/ui/CustomSelect';
 import { verificationAPI, verifiersAPI, sdcAPI, adminAPI, getApiError, triggerBlobDownload } from '@/services/api';
-import { GenerateSDCModal, CertificateDetailModal } from '@/pages/admin/SDCVerification';
+import { GenerateSDCModal } from '@/pages/admin/SDCVerification';
 import { TablePagination } from '@/components/shared/TablePagination';
 import { normalizeDhiwayDetails, resolveDhiwaySpaceId } from '@/utils/dhiway';
 import {
-  AlertCircle, AlertTriangle, ArrowRight, Building2, Calendar, CheckCircle, ChevronDown, ChevronLeft, ChevronRight, Clock, Download, Eye, Info,
+  AlertCircle, AlertTriangle, ArrowRight, Building2, Calendar, CheckCircle, ChevronDown, ChevronLeft, ChevronRight, Clock, Download, Eye, FileText, Info,
   Layers, Mail, MoreVertical, Package, Plus, RefreshCw, Save, Search, Send, ShieldCheck, Sparkles, Trash2, User, Users, X, XCircle, Zap,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -1865,12 +1865,126 @@ const WarrantyDetailModal = ({ batchId, batchName, orgId, spaceId, onClose, asPa
       />
     )}
 
-    <CertificateDetailModal
-      record={detailRecord}
-      sdcMatch={detailRecord ? sdcByProductId[detailRecord.product_id || detailRecord.id] || null : null}
-      instanceKey="de"
-      onClose={() => setDetailRecord(null)}
-    />
+    {/* Warranty Record Detail — always opens regardless of certificate
+        status, same pattern as the generic VerificationDetailsModal used
+        for Human/Product records (see the screenshot that prompted this):
+        record status, uploaded Warranty Report/Product Details documents,
+        and the certificate section last. "Not Generated" there is just a
+        status line, never a reason to block the rest of the popup. Same
+        6xl width and document-card styling as that other modal's
+        showDocuments view, for visual consistency across both. The
+        certificate badge + Download also sit in the header next to Close —
+        see Modal's headerActions — as a shortcut so an already-issued
+        certificate never needs a scroll first; the header sits outside the
+        scrollable content area, so this never crops anything below it. */}
+    {(() => {
+      const dProductId = detailRecord ? (detailRecord.product_id || detailRecord.id) : null;
+      const dSdcMatch = dProductId ? sdcByProductId[dProductId] || null : null;
+      const headerActions = detailRecord ? (
+        <>
+          <Badge status={dSdcMatch ? (dSdcMatch.issued ? 'info' : 'pending') : 'default'}>
+            {dSdcMatch ? (dSdcMatch.issued ? 'Ready' : 'Draft') : 'Not Generated'}
+          </Badge>
+          {dSdcMatch?.issued && (
+            <button
+              type="button"
+              disabled={downloadingSdcId === dSdcMatch.publicId}
+              onClick={() => openSdcCertificate(dSdcMatch.publicId)}
+              title="Download Certificate"
+              className="flex items-center gap-1.5 rounded-lg border border-blue-200 bg-white px-2.5 py-1.5 font-inter text-xs font-semibold text-brand-blue hover:bg-blue-50 disabled:opacity-50"
+            >
+              {downloadingSdcId === dSdcMatch.publicId ? <RefreshCw size={13} className="animate-spin" /> : <Download size={13} />}
+              Download
+            </button>
+          )}
+        </>
+      ) : null;
+      return (
+    <Modal isOpen={!!detailRecord} onClose={() => setDetailRecord(null)} title="Warranty Record Detail" headerActions={headerActions} size="6xl">
+      {detailRecord && (() => {
+        const dStatusMeta = WARRANTY_PRODUCT_STATUS_META[detailRecord.warranty_status] || WARRANTY_PRODUCT_STATUS_META.approved;
+        const DStatusIcon = dStatusMeta.icon;
+        const docs = [
+          { label: 'Warranty Report', url: detailRecord.custom_fields?.warrenty_report || detailRecord.custom_fields?.warranty_report || null },
+          { label: 'Product Details', url: detailRecord.custom_fields?.product_details || null },
+        ];
+        return (
+          <div className="space-y-5">
+            <div className="flex items-center justify-between gap-3 rounded-2xl border border-gray-100 bg-gray-50/60 px-4 py-3">
+              <div className="flex min-w-0 items-center gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-blue/10">
+                  <Package size={16} className="text-brand-blue" />
+                </div>
+                <div className="min-w-0">
+                  <p className="truncate font-sora text-sm font-semibold text-brand-dark">{detailRecord.product_name || '—'}</p>
+                  {detailRecord.serial_number && (
+                    <p className="truncate font-mono font-inter text-xs text-gray-400">{detailRecord.serial_number}</p>
+                  )}
+                </div>
+              </div>
+              <span className={`flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 font-inter text-xs font-semibold ${dStatusMeta.tone}`}>
+                <DStatusIcon size={12} /> {dStatusMeta.label}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 font-inter text-xs">
+              <div>
+                <p className="text-gray-400">Warranty Start</p>
+                <p className="mt-0.5 font-medium text-brand-dark">{warrantyDetailFormatDate(detailRecord.warranty_start_date)}</p>
+              </div>
+              <div>
+                <p className="text-gray-400">Warranty End</p>
+                <p className="mt-0.5 font-medium text-brand-dark">{warrantyDetailFormatDate(detailRecord.warranty_end_date)}</p>
+              </div>
+            </div>
+
+            {detailRecord.warranty_status === 'rejected' && detailRecord.warranty_reason && (
+              <div className="rounded-xl bg-red-50 px-3 py-2.5">
+                <p className="font-inter text-[11px] font-semibold uppercase tracking-wide text-red-400">Reason</p>
+                <p className="mt-1 font-inter text-sm text-red-600">{detailRecord.warranty_reason}</p>
+              </div>
+            )}
+
+            <div>
+              <p className="mb-2 font-inter text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+                Uploaded Documents ({docs.filter((d) => d.url).length})
+              </p>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {docs.map((doc) => {
+                  const canView = typeof doc.url === 'string' && /^https?:\/\//i.test(doc.url);
+                  return (
+                    <article key={doc.label} className="min-w-0 overflow-hidden rounded-xl border border-gray-200 bg-white">
+                      <div className="flex h-28 flex-col items-center justify-center gap-1.5 border-b border-gray-100 bg-gray-50/60 text-gray-400 sm:h-36">
+                        <FileText size={20} />
+                        <span className="font-inter text-xs">{canView ? 'Document preview' : 'Not uploaded'}</span>
+                      </div>
+                      <div className="min-w-0 p-2.5">
+                        <p className="break-words font-inter text-sm font-semibold text-brand-dark">{doc.label}</p>
+                        <p className="mt-1 font-inter text-xs text-gray-500">{canView ? 'Uploaded' : 'Document link unavailable'}</p>
+                      </div>
+                      {canView && (
+                        <div className="flex items-center gap-1.5 border-t border-gray-100 p-2.5">
+                          <a
+                            href={doc.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2.5 py-1 font-inter text-xs font-semibold text-brand-blue hover:bg-blue-50"
+                          >
+                            <Eye size={13} /> View
+                          </a>
+                        </div>
+                      )}
+                    </article>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+    </Modal>
+      );
+    })()}
     </>
   );
 };

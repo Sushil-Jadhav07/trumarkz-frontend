@@ -1136,8 +1136,25 @@ export const DownloadTemplate = () => {
         </div>
       </div>
 
-      {/* ── Download Template Modal ─────────────────────────────────────────── */}
-      <Modal isOpen={modalOpen} onClose={() => setModalOpen(false)} title="Setup Template" size="2xl">
+      {/* ── Download Template Modal — action lives in the header next to
+          Close now; the separate footer "Close" was redundant with the X. ── */}
+      <Modal
+        isOpen={modalOpen}
+        onClose={() => setModalOpen(false)}
+        title="Setup Template"
+        size="2xl"
+        headerActions={
+          <button
+            type="button"
+            disabled={downloading}
+            onClick={handleDownload}
+            className="flex items-center gap-1.5 rounded-lg bg-brand-blue px-3 py-1.5 font-inter text-xs font-semibold text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
+          >
+            {downloading ? <RefreshCw size={13} className="animate-spin" /> : <Download size={13} />}
+            {downloading ? 'Downloading…' : 'Download Template'}
+          </button>
+        }
+      >
         <div className="space-y-5">
 
           {/* Intro */}
@@ -1241,21 +1258,6 @@ export const DownloadTemplate = () => {
             </div>
           </div>
 
-          {/* Actions */}
-          <div className="flex gap-2 pt-1">
-            <Button variant="ghost" className="flex-1" onClick={() => setModalOpen(false)}>
-              Close
-            </Button>
-            <Button
-              variant="primary"
-              className="flex-1"
-              icon={downloading ? RefreshCw : Download}
-              disabled={downloading}
-              onClick={handleDownload}
-            >
-              {downloading ? 'Downloading…' : 'Download Template'}
-            </Button>
-          </div>
         </div>
       </Modal>
 

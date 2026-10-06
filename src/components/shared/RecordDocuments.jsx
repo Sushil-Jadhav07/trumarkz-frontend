@@ -58,21 +58,21 @@ const DocumentRow = ({ document, index }) => {
 
   return (
     <article className="min-w-0 overflow-hidden rounded-xl border border-gray-200 bg-white">
-      <div className="border-b border-gray-100 bg-gray-50/60 p-3">
+      <div className="border-b border-gray-100 bg-gray-50/60 p-2.5">
         {url && isImage ? (
           <a href={viewUrl} target="_blank" rel="noopener noreferrer" className="shrink-0" title="View full-size document">
-            <img src={preview.url} alt={label} className="h-44 w-full object-contain" />
+            <img src={preview.url} alt={label} className="h-28 w-full object-contain sm:h-36" />
           </a>
         ) : isPdf ? (
-          <iframe src={preview.url} title={`${label} PDF preview`} className="h-44 w-full rounded-lg border-0" />
+          <iframe src={preview.url} title={`${label} PDF preview`} className="h-28 w-full rounded-lg border-0 sm:h-36" />
         ) : (
-          <div className="flex h-44 flex-col items-center justify-center gap-2 text-gray-400">
-            {previewLoading ? <RefreshCw size={22} className="animate-spin" /> : <FileText size={26} />}
+          <div className="flex h-28 flex-col items-center justify-center gap-1.5 text-gray-400 sm:h-36">
+            {previewLoading ? <RefreshCw size={18} className="animate-spin" /> : <FileText size={20} />}
             <span className="text-xs font-inter">{previewLoading ? 'Loading preview…' : previewError ? 'Preview unavailable — try View' : 'Document preview'}</span>
           </div>
         )}
       </div>
-        <div className="min-w-0 p-3">
+        <div className="min-w-0 p-2.5">
           <p className="break-words text-sm font-semibold capitalize text-brand-dark font-inter">{label}</p>
           {filename && <p className="mt-0.5 break-all text-xs text-gray-500 font-inter">{filename}</p>}
           {document.version && <p className="mt-1 text-[11px] text-gray-400 font-inter">Version {document.version}</p>}
@@ -81,9 +81,9 @@ const DocumentRow = ({ document, index }) => {
           {!url && <p className="mt-1 text-xs text-amber-600 font-inter">Document link unavailable</p>}
         </div>
       {url && (
-        <div className="flex flex-wrap items-center gap-2 border-t border-gray-100 p-3">
-          <a href={viewUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-brand-blue font-inter hover:bg-blue-50"><Eye size={13} /> View</a>
-          <button type="button" onClick={download} disabled={downloading} className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-brand-blue font-inter hover:bg-blue-50 disabled:opacity-50">
+        <div className="flex flex-wrap items-center gap-1.5 border-t border-gray-100 p-2.5">
+          <a href={viewUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2.5 py-1 text-xs font-semibold text-brand-blue font-inter hover:bg-blue-50"><Eye size={13} /> View</a>
+          <button type="button" onClick={download} disabled={downloading} className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2.5 py-1 text-xs font-semibold text-brand-blue font-inter hover:bg-blue-50 disabled:opacity-50">
             {downloading ? <RefreshCw size={13} className="animate-spin" /> : <Download size={13} />} Download
           </button>
         </div>
@@ -137,7 +137,6 @@ export const RecordDocuments = ({ record }) => {
         <h4 className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 font-inter">Additional &amp; Uploaded Documents{!loading && ` (${documents.length})`}</h4>
         <button type="button" onClick={() => setRevision((prev) => prev + 1)} disabled={loading} className="flex items-center gap-1 text-xs text-brand-blue font-inter disabled:opacity-50"><RefreshCw size={12} className={loading ? 'animate-spin' : ''} /> Refresh</button>
       </div>
-      <p className="text-xs text-gray-500 font-inter">Saved source documents, photos, and additional attachments for this person.</p>
       {loading && <p className="py-4 text-center text-xs text-gray-400 font-inter">Loading documents…</p>}
           {error && <p role="alert" className="rounded-lg bg-amber-50 p-3 text-xs text-amber-700 font-inter">{error}</p>}
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
