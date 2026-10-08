@@ -16,26 +16,38 @@ import { verificationAPI, triggerBlobDownload, getApiError } from '@/services/ap
 import { getVerificationApiTypes, getIndustryTypeList } from '@/utils/verificationFlow';
 import { extractOcrDraft } from '@/utils/ocrSubmission';
 
-// photo is appended automatically by the API — never pass it in headers
+// photo is appended automatically by the API — never pass it in headers.
+// required: true matches PATCH /verification/batch-users/{user_id}'s own
+// mandatory set (full_name, gender, dob, nationality — confirmed 2026-10) —
+// those stay locked on in the template (no toggle, can't be removed), since
+// a record can't be confirmed without them anyway (see REVIEW_FIELDS /
+// DOC_TYPE_FIELDS below, which enforce the same set at review time). Listed
+// required-first so the Base Fields grid groups them together, ahead of the
+// toggleable ones.
 const BASE_FIELDS = [
-  { key: 'full_name',     label: 'Full Name' },
+  { key: 'full_name',     label: 'Full Name', required: true },
+  { key: 'dob',           label: 'Date of Birth', hint: 'YYYY-MM-DD', required: true },
+  { key: 'gender',        label: 'Gender', required: true },
+  { key: 'nationality',   label: 'Nationality', required: true },
   { key: 'email',         label: 'Email' },
   { key: 'phone_number',  label: 'Phone Number' },
-  { key: 'dob',           label: 'Date of Birth', hint: 'YYYY-MM-DD' },
   { key: 'aadhar_number', label: 'Aadhar Number' },
   { key: 'pan_number',    label: 'PAN Number' },
-  { key: 'dl_number',     label: 'DL Number' },
-  { key: 'gender',        label: 'Gender' },
-  { key: 'nationality',   label: 'Nationality' },
+  { key: 'license_no',    label: 'DL Number' },
 ];
 
 // Editable fields offered in the OCR review popup — this is the exact set
-// PATCH /verification/batch-users/{user_id} accepts.
+// PATCH /verification/batch-users/{user_id} accepts. `required: true` marks
+// the backend's own mandatory set for this endpoint (full_name, gender, dob,
+// nationality — confirmed 2026-10, everything else is optional); shown with
+// an asterisk and enforced before Confirm/Continue (see getMissingRequired).
 const REVIEW_FIELDS = [
-  { key: 'full_name',      label: 'Full Name' },
+  { key: 'full_name',      label: 'Full Name', required: true },
   { key: 'email',          label: 'Email' },
   { key: 'phone_number',   label: 'Phone Number' },
-  { key: 'dob',            label: 'Date of Birth', hint: 'YYYY-MM-DD' },
+  { key: 'dob',            label: 'Date of Birth', hint: 'YYYY-MM-DD', required: true },
+  { key: 'gender',         label: 'Gender', required: true },
+  { key: 'nationality',    label: 'Nationality', required: true },
   { key: 'aadhar_number',  label: 'Aadhar Number' },
   { key: 'pan_number',     label: 'PAN Number' },
   { key: 'address_line1',  label: 'Address Line 1' },
@@ -67,31 +79,41 @@ const FIELD_ALIASES = {
 // or filenames. `custom: true` marks a field whose value lives in
 // custom_fields (both when reading it back and when PATCHing) rather than as
 // a top-level batch-user column. `aliases` are the OCR `extracted`-blob key
-// variants to prefill from.
+// variants to prefill from. `required: true` marks PATCH
+// /verification/batch-users/{user_id}'s own mandatory set (full_name,
+// gender, dob, nationality — confirmed 2026-10); gender and nationality are
+// top-level fields here (not custom), matching that contract, and are
+// offered on every document type since the backend requires them regardless
+// of which document produced the record.
 const DOC_TYPE_FIELDS = {
   driving_license: [
-    { key: 'full_name',      label: 'Full Name',      aliases: ['full_name', 'name'] },
-    { key: 'dob',            label: 'Date of Birth', hint: 'YYYY-MM-DD', aliases: ['dob', 'date_of_birth'] },
-    { key: 'license_number', label: 'License Number', aliases: ['license_number', 'dl_number', 'dl_no', 'licence_number', 'dl'] },
+    { key: 'full_name',      label: 'Full Name', required: true, aliases: ['full_name', 'name'] },
+    { key: 'dob',            label: 'Date of Birth', hint: 'YYYY-MM-DD', required: true, aliases: ['dob', 'date_of_birth'] },
+    { key: 'gender',         label: 'Gender', required: true, aliases: ['gender', 'sex'] },
+    { key: 'nationality',    label: 'Nationality', required: true, aliases: ['nationality'] },
+    { key: 'license_number', label: 'License Number', aliases: ['license_number', 'license_no', 'dl_number', 'dl_no', 'licence_number', 'dl'] },
     { key: 'issue_date',     label: 'Issue Date',     custom: true, aliases: ['issue_date', 'doi', 'date_of_issue'] },
     { key: 'valid_till',     label: 'Valid Till',     custom: true, aliases: ['valid_till', 'valid_upto', 'doe', 'date_of_expiry', 'expiry_date'] },
     { key: 'address_line1',  label: 'Address',        aliases: ['address_line1', 'address', 'full_address'] },
     { key: 'pincode',        label: 'Pincode',        aliases: ['pincode', 'pin_code', 'pin'] },
   ],
   aadhaar: [
-    { key: 'full_name',     label: 'Full Name',      aliases: ['full_name', 'name'] },
-    { key: 'dob',           label: 'Date of Birth', hint: 'YYYY-MM-DD', aliases: ['dob', 'date_of_birth'] },
+    { key: 'full_name',     label: 'Full Name', required: true, aliases: ['full_name', 'name'] },
+    { key: 'dob',           label: 'Date of Birth', hint: 'YYYY-MM-DD', required: true, aliases: ['dob', 'date_of_birth'] },
+    { key: 'gender',        label: 'Gender', required: true, aliases: ['gender', 'sex'] },
+    { key: 'nationality',   label: 'Nationality', required: true, aliases: ['nationality'] },
     { key: 'birth_year',    label: 'Birth Year',     custom: true, aliases: ['birth_year', 'year_of_birth', 'yob'] },
-    { key: 'gender',        label: 'Gender',         custom: true, aliases: ['gender', 'sex'] },
     { key: 'aadhar_number', label: 'Aadhaar Number', aliases: ['aadhar_number', 'aadhaar_number', 'aadhaar_no', 'aadhar_no', 'uid'] },
     { key: 'address_line1', label: 'Address',        aliases: ['address_line1', 'address', 'full_address'] },
     { key: 'pincode',       label: 'Pincode',        aliases: ['pincode', 'pin_code', 'pin'] },
   ],
   pan: [
-    { key: 'full_name',   label: 'Full Name',     aliases: ['full_name', 'name'] },
+    { key: 'full_name',   label: 'Full Name', required: true, aliases: ['full_name', 'name'] },
+    { key: 'dob',         label: 'Date of Birth', hint: 'YYYY-MM-DD', required: true, aliases: ['dob', 'date_of_birth'] },
+    { key: 'gender',      label: 'Gender', required: true, aliases: ['gender', 'sex'] },
+    { key: 'nationality', label: 'Nationality', required: true, aliases: ['nationality'] },
     { key: 'father_name', label: "Father's Name", custom: true, aliases: ['father_name', 'fathers_name', 'father_s_name', 'father'] },
     { key: 'pan_number',  label: 'PAN Number',    aliases: ['pan_number', 'pan', 'pan_no'] },
-    { key: 'dob',         label: 'Date of Birth', hint: 'YYYY-MM-DD', aliases: ['dob', 'date_of_birth'] },
   ],
 };
 
@@ -240,7 +262,7 @@ const ReviewOcrModal = ({ isOpen, ocrResult, sourceEntries = {}, onClose, onDone
 
   // Split the form back into top-level batch-user fields and custom_fields:
   // fields flagged `custom` in DOC_TYPE_FIELDS (issue_date, valid_till,
-  // gender, father_name) are merged into custom_fields alongside the
+  // father_name, birth_year) are merged into custom_fields alongside the
   // untouched leftover OCR data, never sent as top-level PATCH keys.
   // `_docType` / `_customKeys` are internal-only and never sent.
   const buildPayload = (userId) => {
@@ -265,7 +287,22 @@ const ReviewOcrModal = ({ isOpen, ocrResult, sourceEntries = {}, onClose, onDone
     };
   };
 
-  const confirmUser = async (userId) => {
+  // PATCH /verification/batch-users/{user_id}'s own mandatory set
+  // (full_name, gender, dob, nationality) — checked against this record's
+  // own document-type field list (not a hardcoded list) so the user always
+  // sees labels that match what's actually on screen for them.
+  const getMissingRequiredFields = (userId, documentType) => {
+    const fields = getReviewFields(documentType);
+    const values = forms[userId] || {};
+    return fields.filter((f) => f.required && !String(values[f.key] ?? '').trim()).map((f) => f.label);
+  };
+
+  const confirmUser = async (userId, documentType) => {
+    const missing = getMissingRequiredFields(userId, documentType);
+    if (missing.length > 0) {
+      toast.error(`Fill in required field${missing.length === 1 ? '' : 's'}: ${missing.join(', ')}`);
+      return;
+    }
     setConfirmingId(userId);
     try {
       await saveRecord(userId);
@@ -286,8 +323,13 @@ const ReviewOcrModal = ({ isOpen, ocrResult, sourceEntries = {}, onClose, onDone
   };
 
   const handleFinish = async () => {
-    setFinishing(true);
     const remaining = users.filter((u) => !confirmedIds.has(u.id));
+    const incomplete = remaining.filter((u) => getMissingRequiredFields(u.id, u.document_type).length > 0);
+    if (incomplete.length > 0) {
+      toast.error(`${incomplete.length} record${incomplete.length === 1 ? '' : 's'} missing required fields: ${incomplete.map((u) => u.full_name || 'Unnamed record').join(', ')}`);
+      return;
+    }
+    setFinishing(true);
     const results = await Promise.allSettled(
       remaining.map((u) => saveRecord(u.id))
     );
@@ -362,7 +404,7 @@ const ReviewOcrModal = ({ isOpen, ocrResult, sourceEntries = {}, onClose, onDone
                       variant="outline"
                       loading={confirmingId === u.id}
                       disabled={finishing || confirmingId !== null}
-                      onClick={() => confirmUser(u.id)}
+                      onClick={() => confirmUser(u.id, u.document_type)}
                     >
                       Confirm
                     </Button>
@@ -437,12 +479,12 @@ const ReviewOcrModal = ({ isOpen, ocrResult, sourceEntries = {}, onClose, onDone
                   <div className="grid content-start grid-cols-2 gap-3 xl:grid-cols-3">
                     {userFields.map((f) => finalPreview ? (
                       <div key={f.key} className={f.key.startsWith('address_line') ? 'col-span-2 xl:col-span-3' : 'min-w-0'}>
-                        <p className="mb-1 font-inter text-[11px] font-medium text-slate-500">{f.label}</p>
+                        <p className="mb-1 font-inter text-[11px] font-medium text-slate-500">{f.label}{f.required && <span className="text-red-500"> *</span>}</p>
                         <p className="min-h-8 whitespace-pre-wrap break-words rounded-lg bg-slate-50 px-2.5 py-1.5 font-inter text-xs text-slate-900">{String(values[f.key] ?? '').trim() || '—'}</p>
                       </div>
                     ) : (
                       <div key={f.key} className={f.key.startsWith('address_line') ? 'col-span-2 xl:col-span-3' : 'min-w-0'}>
-                        <label className="block font-inter text-[11px] font-medium text-slate-500 mb-1">{f.label}</label>
+                        <label className="block font-inter text-[11px] font-medium text-slate-500 mb-1">{f.label}{f.required && <span className="text-red-500"> *</span>}</label>
                         {f.key.startsWith('address_line') ? (
                           <textarea rows={2} value={values[f.key] || ''} disabled={isConfirmed || finishing || confirmingId !== null} onChange={(e) => updateField(u.id, f.key, e.target.value)} className="w-full resize-y rounded-lg border border-slate-200 px-2.5 py-2 font-inter text-xs leading-relaxed text-slate-900 outline-none focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/10 disabled:bg-slate-50 disabled:text-slate-500" />
                         ) : <input
@@ -797,7 +839,7 @@ export const DownloadTemplate = () => {
   const [baseToggles,    setBaseToggles]    = useState({
     full_name: true, email: true, phone_number: true,
     dob: true, aadhar_number: true, pan_number: true,
-    dl_number: true, gender: true, nationality: true,
+    license_no: true, gender: true, nationality: true,
   });
   const [batchNameValue, setBatchNameValue] = useState(() => {
     const d = new Date();
@@ -838,12 +880,18 @@ export const DownloadTemplate = () => {
     setUploadMode(nextMode);
   };
 
-  const toggleBase = (key) => setBaseToggles((prev) => ({ ...prev, [key]: !prev[key] }));
+  // Required fields (full_name, dob, gender, nationality) can't be toggled
+  // off — see BASE_FIELDS.
+  const toggleBase = (key) => {
+    const field = BASE_FIELDS.find((f) => f.key === key);
+    if (field?.required) return;
+    setBaseToggles((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
 
   const selectedVerificationTypes = getVerificationApiTypes(selectedVerifications);
   const templateHeaders = useMemo(
     () => [
-      ...BASE_FIELDS.filter((f) => baseToggles[f.key]).map((f) => f.key),
+      ...BASE_FIELDS.filter((f) => f.required || baseToggles[f.key]).map((f) => f.key),
       ...customFields,
     ],
     [baseToggles, customFields]
@@ -1162,7 +1210,9 @@ export const DownloadTemplate = () => {
             Add any custom columns you need. Base fields are always included. Click Download when ready.
           </p>
 
-          {/* Base fields — all toggleable */}
+          {/* Base fields — Required ones (full_name, dob, gender,
+              nationality — PATCH's own mandatory set) stay locked on with a
+              "Required" badge; everything else keeps its toggle. */}
           <div>
             <p className="font-inter text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
               Base Fields
@@ -1179,19 +1229,25 @@ export const DownloadTemplate = () => {
                       {field.key}{field.hint ? ` · ${field.hint}` : ''}
                     </p>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => toggleBase(field.key)}
-                    className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${
-                      baseToggles[field.key] ? 'bg-brand-blue' : 'bg-slate-200'
-                    }`}
-                  >
-                    <span
-                      className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${
-                        baseToggles[field.key] ? 'translate-x-[18px]' : 'translate-x-1'
+                  {field.required ? (
+                    <span className="shrink-0 rounded-full bg-red-50 px-2.5 py-1 font-inter text-[10px] font-semibold uppercase text-red-500">
+                      Required
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => toggleBase(field.key)}
+                      className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${
+                        baseToggles[field.key] ? 'bg-brand-blue' : 'bg-slate-200'
                       }`}
-                    />
-                  </button>
+                    >
+                      <span
+                        className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${
+                          baseToggles[field.key] ? 'translate-x-[18px]' : 'translate-x-1'
+                        }`}
+                      />
+                    </button>
+                  )}
                 </div>
               ))}
             </div>
