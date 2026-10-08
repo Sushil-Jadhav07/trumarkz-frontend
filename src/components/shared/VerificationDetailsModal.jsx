@@ -245,11 +245,11 @@ export const VerificationDetailsModal = ({
           type="button"
           disabled={certificate.downloading}
           onClick={onDownloadCertificate}
-          title="Download Certificate"
-          className="flex items-center gap-1.5 rounded-lg border border-blue-200 bg-white px-2.5 py-1.5 text-xs font-semibold font-inter text-brand-blue hover:bg-blue-50 disabled:opacity-50 transition-colors"
+          title="Download SDC Certificate"
+          className="flex items-center gap-1.5 rounded-lg bg-brand-blue px-2.5 py-1.5 text-xs font-semibold font-inter text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
         >
           {certificate.downloading ? <RefreshCw size={13} className="animate-spin" /> : <Download size={13} />}
-          Download
+          Download SDC Certificate
         </button>
       )}
     </>

@@ -1890,11 +1890,11 @@ const WarrantyDetailModal = ({ batchId, batchName, orgId, spaceId, onClose, asPa
               type="button"
               disabled={downloadingSdcId === dSdcMatch.publicId}
               onClick={() => openSdcCertificate(dSdcMatch.publicId)}
-              title="Download Certificate"
-              className="flex items-center gap-1.5 rounded-lg border border-blue-200 bg-white px-2.5 py-1.5 font-inter text-xs font-semibold text-brand-blue hover:bg-blue-50 disabled:opacity-50"
+              title="Download SDC Certificate"
+              className="flex items-center gap-1.5 rounded-lg bg-brand-blue px-2.5 py-1.5 font-inter text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
             >
               {downloadingSdcId === dSdcMatch.publicId ? <RefreshCw size={13} className="animate-spin" /> : <Download size={13} />}
-              Download
+              Download SDC Certificate
             </button>
           )}
         </>
