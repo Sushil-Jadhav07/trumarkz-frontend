@@ -92,19 +92,19 @@ export const SelectProductVerifications = () => {
           subtitle={`${selectedProductVerifications.length} selected`}
         />
 
-        <Card className="overflow-hidden border border-blue-100 p-4 shadow-[0_18px_48px_-40px_rgba(37,99,235,0.35)] sm:p-5">
-          <div className="mb-4 flex items-center justify-between gap-3">
+        <Card className="overflow-hidden border border-blue-100 p-3 shadow-[0_18px_48px_-40px_rgba(37,99,235,0.35)] sm:p-4">
+          <div className="mb-3 flex items-center justify-between gap-3">
             <div>
-              <p className="font-inter text-xs font-medium uppercase tracking-[0.14em] text-brand-blue/70">
+              <p className="font-inter text-[11px] font-medium uppercase tracking-[0.14em] text-brand-blue/70">
                 Verification Catalog
               </p>
-              <h3 className="mt-1 font-sora text-lg font-semibold text-brand-dark">
+              <h3 className="mt-0.5 font-sora text-base font-semibold text-brand-dark">
                 Choose checks for this batch
               </h3>
             </div>
-            <div className="rounded-xl bg-blue-50 px-3 py-2 text-right">
-              <p className="font-inter text-[11px] uppercase tracking-[0.14em] text-brand-blue/65">Available</p>
-              <p className="font-sora text-lg font-semibold text-brand-dark">
+            <div className="rounded-lg bg-blue-50 px-2.5 py-1.5 text-right">
+              <p className="font-inter text-[10px] uppercase tracking-[0.14em] text-brand-blue/65">Available</p>
+              <p className="font-sora text-base font-semibold text-brand-dark">
                 {loading ? '…' : allTypes.length}
               </p>
             </div>
@@ -126,7 +126,7 @@ export const SelectProductVerifications = () => {
               </Button>
             </div>
           ) : (
-            <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
+            <div className="grid grid-cols-2 gap-2.5 md:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
               {allTypes.map((item, index) => {
                 const isSelected = selectedProductVerifications.includes(item.id);
                 const isAuto = item.label === 'automatic';
@@ -140,54 +140,54 @@ export const SelectProductVerifications = () => {
                     transition={{ delay: index * 0.03 }}
                     onClick={() => toggle(item.id)}
                     className={clsx(
-                      'relative flex min-h-[160px] flex-col rounded-2xl border p-4 text-left transition-all',
+                      'relative flex min-h-[122px] flex-col rounded-xl border p-3 text-left transition-all',
                       isSelected
                         ? 'border-brand-blue bg-brand-blue/[0.06] shadow-[0_16px_34px_-26px_rgba(37,99,235,0.75)]'
                         : 'border-slate-200 bg-white hover:border-blue-200 hover:bg-blue-50/30'
                     )}
                   >
-                    <div className="mb-3 flex items-start justify-between gap-3">
+                    <div className="mb-2 flex items-start justify-between gap-2">
                       <div className={clsx(
-                        'flex h-10 w-10 items-center justify-center rounded-xl shrink-0',
+                        'flex h-8 w-8 items-center justify-center rounded-lg shrink-0',
                         isSelected ? 'bg-brand-blue text-white' : 'bg-slate-100 text-slate-600'
                       )}>
-                        {isAuto ? <Zap size={18} /> : <Mail size={18} />}
+                        {isAuto ? <Zap size={14} /> : <Mail size={14} />}
                       </div>
                       <div className={clsx(
-                        'flex h-6 w-6 items-center justify-center rounded-full border transition-colors shrink-0',
+                        'flex h-5 w-5 items-center justify-center rounded-full border transition-colors shrink-0',
                         isSelected
                           ? 'border-brand-blue bg-brand-blue text-white'
                           : 'border-slate-300 bg-white text-transparent'
                       )}>
-                        <Check size={13} />
+                        <Check size={11} />
                       </div>
                     </div>
 
-                    <h4 className="font-inter text-sm font-semibold text-brand-dark leading-5 flex-1">
+                    <h4 className="font-inter text-xs font-semibold text-brand-dark leading-4 flex-1">
                       {item.name}
                     </h4>
 
-                    <div className="mt-3 space-y-2">
+                    <div className="mt-2 space-y-1.5">
                       <span className={clsx(
-                        'inline-flex items-center gap-1 rounded-full px-2.5 py-1 font-inter text-[11px] font-medium',
+                        'inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-inter text-[10px] font-medium',
                         isAuto ? 'bg-green-50 text-green-700' : 'bg-orange-50 text-orange-700'
                       )}>
-                        {isAuto ? <Zap size={10} /> : <Mail size={10} />}
+                        {isAuto ? <Zap size={9} /> : <Mail size={9} />}
                         {isAuto ? 'Automatic' : 'Manual'}
                       </span>
 
                       {item.timeline && (
-                        <p className="flex items-center gap-1 font-inter text-[11px] text-slate-400">
-                          <Clock size={11} />
+                        <p className="flex items-center gap-1 font-inter text-[10px] text-slate-400">
+                          <Clock size={10} />
                           {item.timeline}
                         </p>
                       )}
 
                       <div className="flex items-center justify-between gap-2">
-                        <span className="font-inter text-[11px] uppercase tracking-[0.12em] text-slate-400">
+                        <span className="font-inter text-[10px] uppercase tracking-[0.1em] text-slate-400">
                           Per record
                         </span>
-                        <span className="font-sora text-base font-semibold text-brand-dark">
+                        <span className="font-sora text-sm font-semibold text-brand-dark">
                           ₹{item.price ?? 0}
                         </span>
                       </div>
@@ -199,10 +199,13 @@ export const SelectProductVerifications = () => {
           )}
         </Card>
 
-        <div className="mt-6 flex justify-end">
+        {/* Floating/sticky — same treatment as the Human Select Verifications
+            page, so selecting a card up top never forces a scroll down just
+            to hit Continue. */}
+        <div className="sticky bottom-0 z-10 -mx-4 mt-5 flex justify-end border-t border-gray-100 bg-white/95 px-4 py-2.5 backdrop-blur-sm lg:-mx-8 lg:px-8">
           <Button
             variant="primary"
-            size="lg"
+            size="sm"
             onClick={handleContinue}
             icon={ArrowRight}
             disabled={selectedProductVerifications.length === 0}

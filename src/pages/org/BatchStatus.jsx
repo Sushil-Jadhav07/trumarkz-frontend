@@ -948,9 +948,16 @@ const BatchDetailModal = ({ batchId, batchName, onClose, asPage = false, onLoade
                                 <Icon size={14} className="text-brand-blue" />
                               </div>
                               <div className="min-w-0">
-                                <p className="truncate font-inter text-sm font-semibold text-brand-dark">
-                                  {getRecordTitle(record)}
-                                </p>
+                                <div className="flex items-center gap-1.5 min-w-0">
+                                  <p className="truncate font-inter text-sm font-semibold text-brand-dark">
+                                    {getRecordTitle(record)}
+                                  </p>
+                                  {record.batch_serial && (
+                                    <span className="shrink-0 rounded-full bg-blue-50 px-1.5 py-0.5 text-[10px] font-semibold text-brand-blue font-inter" title="Batch serial — share this with your verifier for report-file naming">
+                                      {record.batch_serial}
+                                    </span>
+                                  )}
+                                </div>
                                 <p className="truncate font-inter text-xs text-gray-400">
                                   {getRecordSubtitle(record, detail.batchType)}
                                 </p>
@@ -1087,7 +1094,9 @@ const BatchDetailModal = ({ batchId, batchName, onClose, asPage = false, onLoade
         <VerificationDetailsModal
           showDocuments
           record={verificationDetailsRecord}
-          title={verificationDetailsRecord ? getRecordTitle(verificationDetailsRecord) : ''}
+          title={verificationDetailsRecord
+            ? `${getRecordTitle(verificationDetailsRecord)}${verificationDetailsRecord.batch_serial ? ` (${verificationDetailsRecord.batch_serial})` : ''}`
+            : ''}
           subtitle={verificationDetailsRecord ? getRecordSubtitle(verificationDetailsRecord, detail?.batchType) : ''}
           onClose={() => setVerificationDetailsRecord(null)}
           certificate={vdCertificate}

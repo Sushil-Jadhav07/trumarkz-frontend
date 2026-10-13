@@ -1,7 +1,7 @@
 import React from 'react';
 import { Navigate, Routes, Route, useLocation } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Toaster } from 'react-hot-toast';
+import toast, { Toaster } from 'react-hot-toast';
 import { AuthProvider, useAuth } from '@/context/AuthContext';
 import { Logo } from '@/components/ui/Logo';
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
@@ -133,6 +133,12 @@ const DashboardRedirect = () => {
 
 const AnimatedRoutes = () => {
   const location = useLocation();
+  // A toast belongs to the page that triggered it — it must never still be
+  // showing on whatever page the user navigates to next (confusing: looks
+  // like a fresh error on a page that never raised it). Toaster is mounted
+  // once at the app root, so toasts survive route changes unless dismissed
+  // here explicitly.
+  React.useEffect(() => { toast.dismiss(); }, [location.pathname]);
   React.useEffect(() => { window.scrollTo({ top: 0, left: 0, behavior: 'auto' }); }, [location.pathname]);
   return (
     <AnimatePresence mode="wait">

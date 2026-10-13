@@ -734,7 +734,7 @@ export const BatchControlCenter = () => {
     if (recordSearch.trim()) {
       const q = recordSearch.trim().toLowerCase();
       const recordId = record.id || record.user_id || record.entity_id || '';
-      const hay = `${recordTitle(record)} ${record.email || ''} ${recordId}`.toLowerCase();
+      const hay = `${recordTitle(record)} ${record.email || ''} ${recordId} ${record.batch_serial || ''}`.toLowerCase();
       if (!hay.includes(q)) return false;
     }
     return true;
@@ -1164,7 +1164,14 @@ export const BatchControlCenter = () => {
                                 {getInitials(recordTitle(record))}
                               </div>
                               <div className="min-w-0">
-                                <p className="text-sm font-medium text-brand-dark font-inter truncate">{recordTitle(record)}</p>
+                                <div className="flex items-center gap-1.5 min-w-0">
+                                  <p className="text-sm font-medium text-brand-dark font-inter truncate">{recordTitle(record)}</p>
+                                  {record.batch_serial && (
+                                    <span className="shrink-0 rounded-full bg-blue-50 px-1.5 py-0.5 text-[10px] font-semibold text-brand-blue font-inter" title="Batch serial — use this to match verifier-uploaded report filenames">
+                                      {record.batch_serial}
+                                    </span>
+                                  )}
+                                </div>
                                 <p className="text-xs text-gray-400 font-inter truncate">{record.email || '—'}</p>
                               </div>
                             </div>
@@ -1415,7 +1422,9 @@ export const BatchControlCenter = () => {
           <VerificationDetailsModal
             showDocuments
             record={verificationDetailsRecord}
-            title={verificationDetailsRecord ? recordTitle(verificationDetailsRecord) : ''}
+            title={verificationDetailsRecord
+              ? `${recordTitle(verificationDetailsRecord)}${verificationDetailsRecord.batch_serial ? ` (${verificationDetailsRecord.batch_serial})` : ''}`
+              : ''}
             subtitle={verificationDetailsRecord?.email || verificationDetailsRecord?.product_name || ''}
             onClose={() => setVerificationDetailsRecord(null)}
             verifierByType={vdRecordId ? verifierByRecordAndType[vdRecordId] : undefined}

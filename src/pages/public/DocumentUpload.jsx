@@ -4,10 +4,11 @@ import { motion } from 'framer-motion';
 import { verificationAPI, getApiError } from '@/services/api';
 import { Logo } from '@/components/ui/Logo';
 import {
-  AlertTriangle, CheckCircle, Clock, Eye, FileText, RefreshCw, Search, ShieldCheck,
+  AlertTriangle, CheckCircle, Clock, Eye, FileText, Info, RefreshCw, Search, ShieldCheck,
   Sparkles, Upload, X, XCircle,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { filterManualDecisions, manualReviewStatus, stagedManualApprovalUsers, successfulManualUploadCount } from '@/utils/manualApproval';
 
 // Same shape, same page, for Human and Product — request-info's users[]
 // never says which entity type a row is, so nothing here ever guesses that
@@ -50,7 +51,20 @@ const reportLabel = (url) => {
   }
 };
 
-const ROW_GRID = 'grid-cols-[minmax(0,1.3fr)_170px_170px_120px_190px]';
+const ROW_GRID = 'grid-cols-[minmax(220px,1.8fr)_150px_150px_110px_160px]';
+
+// Mirrors the backend's extract_batch_serial_from_filename rule (serial_
+// matching_bulk_upload.md §6): the serial is the filename's entire stem,
+// either alone or followed by `_` + anything else. Matching here is purely
+// client-side — it only decides which row to stage a dropped file against;
+// the actual upload still always goes out with an explicit batch_user_id
+// (mode 1), never relying on the backend's own filename parsing, so it never
+// risks a second upload call hitting the token's single-use limit.
+const candidateSerialFromFilename = (filename) => {
+  const stem = String(filename || '').replace(/\.[^./\\]+$/, '');
+  const base = stem.includes('_') ? stem.split('_')[0] : stem;
+  return base.trim().toUpperCase();
+};
 
 export const DocumentUpload = () => {
   const { token: pathToken } = useParams();
@@ -82,6 +96,12 @@ export const DocumentUpload = () => {
   const [rejectingId, setRejectingId] = useState(null); // row whose reject-reason input is open
   const [rejectReason, setRejectReason] = useState('');
 
+  // Bulk-upload-by-serial — drop/select many files at once, named with each
+  // record's serial (SM-01.pdf …), and auto-stage each one against the
+  // matching row. Results of the most recent attempt are kept so the
+  // verifier can see exactly which files matched and which didn't.
+  const [bulkDragActive, setBulkDragActive] = useState(false);
+  const [lastBulkResults, setLastBulkResults] = useState([]);
   const loadRequestInfo = useCallback(async () => {
     if (!token) return;
     try {
@@ -104,9 +124,9 @@ export const DocumentUpload = () => {
   const isLegacy = !!requestInfo?.is_legacy_whole_batch;
 
   const uploadedCount = users.filter((u) => !!u.report_url).length;
-  const approvedCount = users.filter((u) => u.status === 'approved').length;
-  const rejectedCount = users.filter((u) => u.status === 'rejected').length;
-  const pendingCount = users.filter((u) => (u.status || 'pending') === 'pending').length;
+  const approvedCount = users.filter((u) => manualReviewStatus(u) === 'approved').length;
+  const rejectedCount = users.filter((u) => manualReviewStatus(u) === 'rejected').length;
+  const pendingCount = users.filter((u) => manualReviewStatus(u) === 'pending').length;
   const decidedCount = approvedCount + rejectedCount;
   const allDecided = users.length > 0 && decidedCount === users.length;
   const progressPct = users.length ? Math.round((uploadedCount / users.length) * 100) : 0;
@@ -130,6 +150,60 @@ export const DocumentUpload = () => {
     });
   };
 
+  const serialToUser = useMemo(() => {
+    const map = {};
+    users.forEach((u) => { if (u.batch_serial) map[String(u.batch_serial).toUpperCase()] = u; });
+    return map;
+  }, [users]);
+
+  // Bulk upload: match every dropped/selected file to a record by the
+  // serial in its filename, then stage it exactly like a per-row pick —
+  // same pendingFiles map, same single combined "Submit Reports" call
+  // afterward. A serial claimed by more than one file in this same drop is
+  // rejected for all of them (mirrors the backend's own duplicate rule),
+  // and an unrecognized serial is reported back instead of being guessed at.
+  const handleBulkFiles = (fileListLike) => {
+    const incoming = Array.from(fileListLike || []);
+    if (incoming.length === 0) return;
+    if (uploadLinkUsed) {
+      toast.error('Upload link already used — reports can no longer be attached.');
+      return;
+    }
+
+    const bySerial = {};
+    incoming.forEach((file) => {
+      const serial = candidateSerialFromFilename(file.name);
+      (bySerial[serial] ||= []).push(file);
+    });
+
+    const results = [];
+    Object.entries(bySerial).forEach(([serial, files]) => {
+      const user = serialToUser[serial];
+      if (!user) {
+        files.forEach((f) => results.push({ filename: f.name, outcome: 'unmatched', serial }));
+        return;
+      }
+      if (files.length > 1) {
+        files.forEach((f) => results.push({ filename: f.name, outcome: 'duplicate', serial }));
+        return;
+      }
+      const id = user.batch_user_id;
+      const decided = manualReviewStatus(user) !== 'pending';
+      if (decided) {
+        results.push({ filename: files[0].name, outcome: 'already-decided', serial, name: user.full_name });
+        return;
+      }
+      stageFile(id, files[0]);
+      results.push({ filename: files[0].name, outcome: 'matched', serial, name: user.full_name });
+    });
+
+    setLastBulkResults(results);
+    const matchedCount = results.filter((r) => r.outcome === 'matched').length;
+    const failedCount = results.length - matchedCount;
+    if (matchedCount > 0) toast.success(`${matchedCount} file${matchedCount === 1 ? '' : 's'} matched by serial and staged`);
+    if (failedCount > 0) toast.error(`${failedCount} file${failedCount === 1 ? '' : 's'} could not be matched — see details below`);
+  };
+
   const decisionIds = Object.keys(pendingDecisions);
 
   // Approve/Reject only stage the decision locally — nothing is sent until
@@ -149,6 +223,26 @@ export const DocumentUpload = () => {
     });
   };
 
+  // UI eligibility includes locally staged files. Submission separately
+  // requires a successful upload and fresh server-confirmed associations.
+  const bulkApproveEligible = stagedManualApprovalUsers(requestInfo, pendingFiles);
+  // Only what Approve All would actually newly stage — a user already
+  // staged (e.g. an in-progress manual reject) is left untouched, same as
+  // every other staging path on this page: nothing here ever overwrites an
+  // existing local decision.
+  const bulkApproveToStage = bulkApproveEligible.filter((u) => !pendingDecisions[u.batch_user_id]);
+
+  // Stage approvals across the full assigned list, preserving existing decisions.
+  const handleApproveAllEligible = () => {
+    if (bulkApproveToStage.length === 0) return;
+    setPendingDecisions((prev) => {
+      const next = { ...prev };
+      bulkApproveToStage.forEach((u) => { next[u.batch_user_id] = { status: 'approved' }; });
+      return next;
+    });
+    toast.success(`${bulkApproveToStage.length} record${bulkApproveToStage.length === 1 ? '' : 's'} staged for approval — click Submit Reports to confirm`);
+  };
+
   // The upload link is single-use per token: the backend accepts exactly
   // ONE call to POST /verification/manual/upload/{token} and rejects every
   // call after it with "Link already used", even for a different record.
@@ -162,6 +256,7 @@ export const DocumentUpload = () => {
   // decisions call that follows succeeds — so a decisions failure never
   // leaves a record trying to re-upload against an already-used link.
   const handleSubmitReports = async () => {
+    if (bulkSubmitting) return;
     const fileTargets = stagedIds;
     const decisionTargets = decisionIds;
     if (fileTargets.length === 0 && decisionTargets.length === 0) {
@@ -171,12 +266,22 @@ export const DocumentUpload = () => {
     setBulkSubmitting(true);
     let uploadFailed = false;
     let decisionsFailed = false;
+    let uploadResult = null;
+    let uploadedFiles = 0;
 
     if (fileTargets.length > 0) {
       try {
         const files = fileTargets.map((id) => pendingFiles[id]);
-        await verificationAPI.uploadManualReport(token, files, fileTargets);
-        setPendingFiles({});
+        const { data } = await verificationAPI.uploadManualReport(token, files, fileTargets);
+        uploadResult = data;
+        uploadedFiles = successfulManualUploadCount(data);
+        if (uploadedFiles > 0) {
+          setPendingFiles({});
+          setUploadLinkUsed(true);
+        } else {
+          uploadFailed = true;
+          toast.error('No successfully matched reports were uploaded. Approvals were not submitted.');
+        }
       } catch (err) {
         uploadFailed = true;
         if (isLinkAlreadyUsedError(err)) {
@@ -189,15 +294,43 @@ export const DocumentUpload = () => {
       }
     }
 
-    if (decisionTargets.length > 0) {
+    // Every approval, including individually staged ones, passes the same
+    // server gate. A failed refresh must never fall back to stale UI state.
+    let freshInfo = null;
+    if (fileTargets.length > 0 || decisionTargets.some((id) => pendingDecisions[id].status === 'approved')) {
       try {
-        const decisions = decisionTargets.map((id) => ({
+        const { data } = await verificationAPI.getManualVerificationRequestInfo(token);
+        freshInfo = data;
+        setRequestInfo(data);
+        if (data.used === true) setUploadLinkUsed(true);
+      } catch (err) {
+        toast.error(getApiError(err, 'Could not confirm uploaded reports. Approvals were not submitted.'));
+      }
+    }
+    const finalDecisionIds = filterManualDecisions(pendingDecisions, freshInfo, {
+      uploadAttempted: fileTargets.length > 0,
+      upload: uploadResult,
+    });
+    const blockedApprovalIds = decisionTargets.filter((id) =>
+      pendingDecisions[id].status === 'approved' && !finalDecisionIds.includes(id)
+    );
+    if (blockedApprovalIds.length > 0) {
+      toast.error(`${blockedApprovalIds.length} approval${blockedApprovalIds.length === 1 ? '' : 's'} could not be confirmed against uploaded reports and were not submitted. Review the records and try again.`);
+    }
+
+    if (finalDecisionIds.length > 0) {
+      try {
+        const decisions = finalDecisionIds.map((id) => ({
           batch_user_id: id,
           status: pendingDecisions[id].status,
           ...(pendingDecisions[id].status === 'rejected' ? { reason: pendingDecisions[id].reason } : {}),
         }));
         await verificationAPI.verifyManualVerificationRequest(token, decisions);
-        setPendingDecisions({});
+        setPendingDecisions((prev) => {
+          const next = { ...prev };
+          finalDecisionIds.forEach((id) => delete next[id]);
+          return next;
+        });
       } catch (err) {
         decisionsFailed = true;
         toast.error(getApiError(err, 'Failed to submit decisions'));
@@ -206,9 +339,9 @@ export const DocumentUpload = () => {
 
     if (!uploadFailed && !decisionsFailed) {
       const parts = [];
-      if (fileTargets.length) parts.push(`${fileTargets.length} report${fileTargets.length === 1 ? '' : 's'} uploaded`);
-      if (decisionTargets.length) parts.push(`${decisionTargets.length} decision${decisionTargets.length === 1 ? '' : 's'} submitted`);
-      toast.success(parts.join(' · '));
+      if (uploadedFiles) parts.push(`${uploadedFiles} report${uploadedFiles === 1 ? '' : 's'} uploaded`);
+      if (finalDecisionIds.length) parts.push(`${finalDecisionIds.length} decision${finalDecisionIds.length === 1 ? '' : 's'} submitted`);
+      if (parts.length) toast.success(parts.join(' · '));
     }
     await loadRequestInfo();
     setBulkSubmitting(false);
@@ -257,7 +390,7 @@ export const DocumentUpload = () => {
   return (
     <div className="min-h-screen bg-[#f5f6fa]">
       <header className="bg-white border-b border-gray-100 px-6 py-3.5">
-        <div className="max-w-6xl mx-auto flex items-center justify-between">
+        <div className="max-w-7xl mx-auto flex items-center justify-between">
           <Logo />
           <div className="flex items-center gap-1.5 rounded-full bg-green-50 px-3 py-1.5 text-xs font-semibold text-green-700 font-inter">
             <ShieldCheck size={13} />
@@ -266,8 +399,8 @@ export const DocumentUpload = () => {
         </div>
       </header>
 
-      <main className="max-w-6xl mx-auto px-5 py-8">
-        <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_320px] gap-5 items-start">
+      <main className="max-w-7xl mx-auto px-5 py-8">
+        <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_300px] gap-5 items-start">
 
           {/* ── Left column ─────────────────────────────────────────────── */}
           <div className="min-w-0 space-y-4">
@@ -330,6 +463,68 @@ export const DocumentUpload = () => {
                 </div>
               </div>
 
+              {!isLegacy && users.length > 0 && users.some((u) => u.batch_serial) && (
+                <div className="border-b border-gray-100 bg-blue-50/40 px-5 py-4">
+                  <div className="flex items-start gap-2 mb-3">
+                    <Info size={13} className="mt-0.5 shrink-0 text-brand-blue" />
+                    <p className="text-[11px] leading-relaxed text-blue-800 font-inter">
+                      Each record below has a <span className="font-semibold">serial code</span> (e.g. <span className="font-mono">SM-01</span>) next to its name — the same code used in the Excel sheet emailed with this link.
+                      Drop or select several files at once below, each one named starting with the record's serial (e.g. <span className="font-mono">SM-01.pdf</span>, <span className="font-mono">SM-02_report.pdf</span>), and every file will be matched and staged to the right record automatically.
+                    </p>
+                  </div>
+
+                  <div
+                    onDragOver={(e) => { e.preventDefault(); if (!uploadLinkUsed) setBulkDragActive(true); }}
+                    onDragLeave={() => setBulkDragActive(false)}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      setBulkDragActive(false);
+                      handleBulkFiles(e.dataTransfer.files);
+                    }}
+                    className={`flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed px-4 py-6 text-center transition-colors ${
+                      uploadLinkUsed
+                        ? 'cursor-not-allowed border-gray-200 bg-gray-50 opacity-60'
+                        : bulkDragActive
+                          ? 'border-brand-blue bg-blue-50'
+                          : 'border-blue-200 bg-white hover:border-brand-blue/50'
+                    }`}
+                  >
+                    <Upload size={18} className="text-brand-blue" />
+                    <p className="text-xs text-gray-500 font-inter">Drag and drop multiple report files here, or</p>
+                    <BulkFilePickerButton onPick={handleBulkFiles} disabled={uploadLinkUsed} />
+                  </div>
+
+                  {lastBulkResults.length > 0 && (
+                    <div className="mt-3 space-y-1.5 rounded-xl border border-gray-100 bg-white p-3">
+                      <div className="flex items-center justify-between">
+                        <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 font-inter">Last bulk match</p>
+                        <button
+                          type="button"
+                          onClick={() => setLastBulkResults([])}
+                          className="text-[11px] text-gray-400 hover:text-gray-600 font-inter"
+                        >
+                          Dismiss
+                        </button>
+                      </div>
+                      {lastBulkResults.map((r, i) => (
+                        <div key={`${r.filename}-${i}`} className="flex items-start gap-2 text-[11px] font-inter">
+                          {r.outcome === 'matched'
+                            ? <CheckCircle size={12} className="mt-0.5 shrink-0 text-green-600" />
+                            : <XCircle size={12} className="mt-0.5 shrink-0 text-red-500" />}
+                          <span className="min-w-0 flex-1">
+                            <span className="font-medium text-gray-700 break-all">{r.filename}</span>{' '}
+                            {r.outcome === 'matched' && <span className="text-green-600">→ matched {r.name || r.serial}, staged</span>}
+                            {r.outcome === 'unmatched' && <span className="text-red-500">→ no record found for serial "{r.serial}"</span>}
+                            {r.outcome === 'duplicate' && <span className="text-red-500">→ serial "{r.serial}" was claimed by more than one file</span>}
+                            {r.outcome === 'already-decided' && <span className="text-amber-600">→ {r.name || r.serial} is already decided</span>}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
               {users.length === 0 ? (
                 <div className="py-10 text-center px-6">
                   <p className="text-sm text-gray-400 font-inter">
@@ -342,18 +537,34 @@ export const DocumentUpload = () => {
                 <p className="py-8 text-center text-sm text-gray-400 font-inter">No records match your filters.</p>
               ) : (
                 <div className="overflow-x-auto">
-                  <div className="min-w-[760px]">
+                  <div className="min-w-[860px]">
                     <div className={`grid ${ROW_GRID} gap-x-2 bg-gray-50 px-4 py-2.5 text-[10px] font-semibold uppercase tracking-wide text-gray-400 font-inter border-b border-gray-100`}>
                       <span>Name</span>
                       <span>Upload Report</span>
                       <span>Uploaded File</span>
                       <span>Status</span>
-                      <span>Action</span>
+                      <div className="flex items-center justify-between gap-1.5">
+                        <span>Action</span>
+                        <button
+                          type="button"
+                          onClick={handleApproveAllEligible}
+                          disabled={bulkSubmitting || bulkApproveToStage.length === 0}
+                          title={bulkApproveToStage.length > 0
+                            ? `Approve all ${bulkApproveToStage.length} eligible records, then Submit Reports to save`
+                            : bulkApproveEligible.length > 0
+                              ? 'All eligible records already have a staged decision'
+                              : 'Attach reports for the records you want to approve'}
+                          className="flex shrink-0 items-center gap-1 rounded-lg bg-green-600 px-2 py-1.5 text-[10px] font-semibold normal-case tracking-normal text-white hover:bg-green-700 disabled:bg-green-100 disabled:text-green-700 disabled:cursor-not-allowed"
+                        >
+                          <CheckCircle size={11} />
+                          Approve All{bulkApproveToStage.length > 0 ? ` (${bulkApproveToStage.length})` : ''}
+                        </button>
+                      </div>
                     </div>
                     <div className="divide-y divide-gray-50">
                       {filteredUsers.map((row) => {
                         const id = row.batch_user_id;
-                        const status = row.status || 'pending';
+                        const status = manualReviewStatus(row);
                         const meta = ROW_STATUS_META[status] || ROW_STATUS_META.pending;
                         const StatusIcon = meta.icon;
                         const reportUrl = row.report_url;
@@ -367,8 +578,13 @@ export const DocumentUpload = () => {
                         return (
                           <div key={id}>
                             <div className={`grid ${ROW_GRID} items-center gap-x-2 px-4 py-3`}>
-                              <div className="min-w-0">
+                              <div className="min-w-0 flex items-center gap-1.5">
                                 <p className="truncate text-sm font-medium text-brand-dark font-inter">{row.full_name || 'Assigned record'}</p>
+                                {row.batch_serial && (
+                                  <span className="shrink-0 rounded-full bg-blue-50 px-1.5 py-0.5 text-[10px] font-semibold text-brand-blue font-inter">
+                                    {row.batch_serial}
+                                  </span>
+                                )}
                               </div>
 
                               {/* Upload Report — local staged file, pre-submit.
@@ -635,6 +851,32 @@ const FilePickerButton = ({ onPick }) => {
         className="flex items-center gap-1.5 rounded-lg border border-dashed border-gray-300 px-2.5 py-1.5 text-[11px] font-semibold text-gray-500 font-inter hover:border-brand-blue/50 hover:text-brand-blue transition-colors"
       >
         <Upload size={12} /> Upload File
+      </button>
+    </>
+  );
+};
+
+const BulkFilePickerButton = ({ onPick, disabled }) => {
+  const inputRef = useRef(null);
+  return (
+    <>
+      <input
+        ref={inputRef}
+        type="file"
+        multiple
+        className="hidden"
+        onChange={(e) => {
+          onPick(e.target.files);
+          e.target.value = ''; // allow re-picking the same filename(s) later
+        }}
+      />
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => inputRef.current?.click()}
+        className="rounded-lg border border-brand-blue/40 bg-white px-3 py-1.5 text-xs font-semibold text-brand-blue font-inter hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        Select Files
       </button>
     </>
   );

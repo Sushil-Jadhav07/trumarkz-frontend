@@ -934,11 +934,20 @@ export const DownloadTemplate = () => {
       // submit (Preview step), which is too late to be useful; catching it
       // immediately on upload lets the org fix the file before going any
       // further through Costing/Preview.
+      // Only block on the fields PATCH /verification/batch-users/{user_id}
+      // actually requires (full_name, dob, gender, nationality — see
+      // BASE_FIELDS). Everything else in templateHeaders (email,
+      // phone_number, aadhar_number, pan_number, license_no, and any custom
+      // fields the org added) is optional — their absence from the uploaded
+      // file is fine and must never block Continue. This used to check the
+      // full templateHeaders list, which wrongly treated those optional
+      // columns as blocking-required.
       // Some headers carry a format hint from the generated template (e.g.
       // "DOB (YYYY-MM-DD)" sanitizes to "dob_yyyy_mm_dd") — match by prefix,
       // not exact equality, so those still count as present.
       const uploadedHeaders = (Array.isArray(rows[0]) ? rows[0] : []).map(sanitizeKey).filter(Boolean);
-      const missingHeaders = templateHeaders.filter(
+      const requiredHeaders = BASE_FIELDS.filter((f) => f.required).map((f) => f.key);
+      const missingHeaders = requiredHeaders.filter(
         (h) => !uploadedHeaders.some((u) => u === h || u.startsWith(`${h}_`))
       );
       if (missingHeaders.length > 0) {
