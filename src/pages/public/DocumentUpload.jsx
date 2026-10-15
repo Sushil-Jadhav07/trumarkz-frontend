@@ -8,7 +8,7 @@ import {
   Sparkles, Upload, X, XCircle,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { filterManualDecisions, manualReviewStatus, stagedManualApprovalUsers, successfulManualUploadCount } from '@/utils/manualApproval';
+import { canSubmitEvidenceFor, filterManualDecisions, manualReviewStatus, stagedManualApprovalUsers, successfulManualUploadCount } from '@/utils/manualApproval';
 
 // Same shape, same page, for Human and Product — request-info's users[]
 // never says which entity type a row is, so nothing here ever guesses that
@@ -107,6 +107,14 @@ export const DocumentUpload = () => {
     try {
       const { data } = await verificationAPI.getManualVerificationRequestInfo(token);
       setRequestInfo(data);
+      // can_submit_evidence is this exact request's own authoritative
+      // upload-eligibility signal (falls back to `used !== true` for older
+      // responses) — sync uploadLinkUsed from it on every load, not just
+      // after a failed upload attempt, so reopening an already-exhausted
+      // link shows the locked state immediately, and reopening a fresh
+      // resend-rejected link correctly stays unlocked even though the
+      // user's own historical status still reads "rejected".
+      setUploadLinkUsed(!canSubmitEvidenceFor(data));
       setPageState('ready');
     } catch (err) {
       if (isInvalidTokenError(err)) {
@@ -121,12 +129,47 @@ export const DocumentUpload = () => {
   useEffect(() => { loadRequestInfo(); }, [loadRequestInfo]);
 
   const users = useMemo(() => (Array.isArray(requestInfo?.users) ? requestInfo.users : []), [requestInfo]);
+
+  // Defensive cleanup: a locally-staged file/decision for a row that's no
+  // longer actionable (already decided, or evidence already uploaded
+  // through this exact token) can never be legitimately submitted — left
+  // alone it just sits there forever, silently re-attempted on every
+  // "Submit Reports" click and always failing the same way (confirmed live:
+  // a retry against an already-used upload link came back in a shape this
+  // page didn't recognize as an error, so the phantom staged file was never
+  // cleared, and the Submit button stayed stuck on a permanent "(1)" that
+  // did nothing). Runs whenever fresh server data arrives, so this can
+  // never stay stuck past the next refresh.
+  useEffect(() => {
+    if (!requestInfo) return;
+    // Already-decided rows can never submit either a file or a decision
+    // again. A locked upload link (nothing more can be uploaded through
+    // this token at all) only invalidates staged FILES — staged DECISIONS
+    // for a not-yet-decided row must survive this, since deciding stays
+    // available after upload (see manualReviewStatus above) and clearing
+    // it here would silently discard a reverification decision the
+    // verifier hasn't submitted yet.
+    const decidedIds = new Set(
+      users.filter((u) => manualReviewStatus(u, requestInfo) !== 'pending').map((u) => u.batch_user_id)
+    );
+    const uploadLocked = !canSubmitEvidenceFor(requestInfo);
+    setPendingFiles((prev) => {
+      const next = Object.fromEntries(
+        Object.entries(prev).filter(([id]) => !decidedIds.has(id) && !uploadLocked)
+      );
+      return Object.keys(next).length === Object.keys(prev).length ? prev : next;
+    });
+    setPendingDecisions((prev) => {
+      const next = Object.fromEntries(Object.entries(prev).filter(([id]) => !decidedIds.has(id)));
+      return Object.keys(next).length === Object.keys(prev).length ? prev : next;
+    });
+  }, [requestInfo, users]);
   const isLegacy = !!requestInfo?.is_legacy_whole_batch;
 
   const uploadedCount = users.filter((u) => !!u.report_url).length;
-  const approvedCount = users.filter((u) => manualReviewStatus(u) === 'approved').length;
-  const rejectedCount = users.filter((u) => manualReviewStatus(u) === 'rejected').length;
-  const pendingCount = users.filter((u) => manualReviewStatus(u) === 'pending').length;
+  const approvedCount = users.filter((u) => manualReviewStatus(u, requestInfo) === 'approved').length;
+  const rejectedCount = users.filter((u) => manualReviewStatus(u, requestInfo) === 'rejected').length;
+  const pendingCount = users.filter((u) => manualReviewStatus(u, requestInfo) === 'pending').length;
   const decidedCount = approvedCount + rejectedCount;
   const allDecided = users.length > 0 && decidedCount === users.length;
   const progressPct = users.length ? Math.round((uploadedCount / users.length) * 100) : 0;
@@ -188,7 +231,12 @@ export const DocumentUpload = () => {
         return;
       }
       const id = user.batch_user_id;
-      const decided = manualReviewStatus(user) !== 'pending';
+      // manualReviewStatus alone isn't enough here: a reverification row
+      // stays 'pending' for the whole request (so it can still be decided),
+      // but once evidence has actually been uploaded through this token
+      // (uploadLinkUsed), staging another file for it is pointless and
+      // would just sit stuck, uploadable to nowhere.
+      const decided = manualReviewStatus(user, requestInfo) !== 'pending' || uploadLinkUsed;
       if (decided) {
         results.push({ filename: files[0].name, outcome: 'already-decided', serial, name: user.full_name });
         return;
@@ -302,7 +350,7 @@ export const DocumentUpload = () => {
         const { data } = await verificationAPI.getManualVerificationRequestInfo(token);
         freshInfo = data;
         setRequestInfo(data);
-        if (data.used === true) setUploadLinkUsed(true);
+        setUploadLinkUsed(!canSubmitEvidenceFor(data));
       } catch (err) {
         toast.error(getApiError(err, 'Could not confirm uploaded reports. Approvals were not submitted.'));
       }
@@ -421,6 +469,18 @@ export const DocumentUpload = () => {
                 </div>
               </div>
             </div>
+
+            {requestInfo?.allow_reverification && (
+              <div className="rounded-2xl border border-blue-100 bg-blue-50 px-5 py-4 flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center shrink-0">
+                  <RefreshCw size={18} className="text-brand-blue" />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-blue-800 font-inter">Re-verification Request</p>
+                  <p className="text-xs text-blue-700 font-inter">This verification was previously rejected. You can submit new evidence for review below.</p>
+                </div>
+              </div>
+            )}
 
             {allDecided && (
               <div className="rounded-2xl border border-green-100 bg-green-50 px-5 py-4 flex items-center gap-3">
@@ -564,7 +624,7 @@ export const DocumentUpload = () => {
                     <div className="divide-y divide-gray-50">
                       {filteredUsers.map((row) => {
                         const id = row.batch_user_id;
-                        const status = manualReviewStatus(row);
+                        const status = manualReviewStatus(row, requestInfo);
                         const meta = ROW_STATUS_META[status] || ROW_STATUS_META.pending;
                         const StatusIcon = meta.icon;
                         const reportUrl = row.report_url;
@@ -681,10 +741,16 @@ export const DocumentUpload = () => {
                               </div>
                             </div>
 
-                            {status === 'rejected' && (row.rejection_reason || row.reason) && (
+                            {/* Shows whenever a reason is on record, regardless of the
+                                effective status above — a reopened reverification row
+                                has status 'pending' now, but the verifier should still
+                                see WHY the prior attempt was rejected, just labeled as
+                                history rather than a current blocker. */}
+                            {(row.rejection_reason || row.reason) && (
                               <div className="px-4 pb-2 -mt-1">
-                                <p className="rounded-lg bg-red-50 px-3 py-1.5 text-[11px] text-red-600 font-inter">
-                                  <span className="font-semibold">Reason: </span>{row.rejection_reason || row.reason}
+                                <p className={`rounded-lg px-3 py-1.5 text-[11px] font-inter ${status === 'rejected' ? 'bg-red-50 text-red-600' : 'bg-amber-50 text-amber-700'}`}>
+                                  <span className="font-semibold">{status === 'rejected' ? 'Reason: ' : 'Previous rejection reason: '}</span>
+                                  {row.rejection_reason || row.reason}
                                 </p>
                               </div>
                             )}

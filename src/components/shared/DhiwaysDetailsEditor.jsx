@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Plus, Trash2, Star, RefreshCw } from 'lucide-react';
 import { DHIWAY_SPACE_TYPE_OPTIONS, normalizeDhiwaySpaceType } from '@/utils/dhiway';
+import { CustomSelect } from '@/components/ui/CustomSelect';
 
 // Editable list of { space_id, schema_id, space_type, default } rows. The
 // backend stores them under `dhiways_details`. `space_type` is optional for
@@ -59,17 +60,15 @@ export const DhiwaysDetailsEditor = ({ value = [], onChange, disabled, onSetDefa
             placeholder="Schema ID"
             className="flex-1 h-9 rounded-lg border border-gray-200 px-3 text-sm font-inter text-brand-dark bg-white disabled:bg-gray-50 disabled:text-gray-500 focus:outline-none focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/10 transition-all"
           />
-          <select
+          <CustomSelect
             value={normalizeDhiwaySpaceType(row.space_type)}
-            onChange={(e) => updateRow(i, 'space_type', e.target.value)}
+            onChange={(spaceType) => updateRow(i, 'space_type', spaceType)}
+            options={DHIWAY_SPACE_TYPE_OPTIONS}
             disabled={disabled}
+            ariaLabel={`Space type for Dhiway configuration ${i + 1}`}
             title="Which flow (human / product / warranty) this space is used for"
-            className="h-9 shrink-0 rounded-lg border border-gray-200 bg-white px-2 text-sm font-inter text-brand-dark disabled:bg-gray-50 disabled:text-gray-500 focus:outline-none focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/10 transition-all"
-          >
-            {DHIWAY_SPACE_TYPE_OPTIONS.map((opt) => (
-              <option key={opt.value || 'legacy'} value={opt.value}>{opt.label}</option>
-            ))}
-          </select>
+            className="w-40 shrink-0 [&>button]:h-9 [&>button]:font-normal [&>button]:text-sm"
+          />
 
           {onSetDefault &&
             (row.default ? (

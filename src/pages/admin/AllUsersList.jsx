@@ -772,6 +772,121 @@ const EditUserModal = ({ isOpen, onClose, user, onSuccess }) => {
   );
 };
 
+// ─── Edit Superadmin Modal ──────────────────────────────────────────────────────
+// PATCH /auth/superadmins/{user_id} — the dedicated superadmin-detail
+// editor. Distinct from EditUserModal's generic PATCH /auth/users/{id}:
+// this one additionally supports editing email and setting a new password
+// (never shown/sent for individual users there), and has no
+// email_verified field at all — not part of this endpoint's schema.
+const EditSuperAdminModal = ({ isOpen, onClose, user, onSuccess }) => {
+  const [form, setForm] = useState({
+    full_name: '',
+    phone_number: '',
+    email: '',
+    password: '',
+    is_active: true,
+  });
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (user) {
+      setForm({
+        full_name: user.full_name || '',
+        phone_number: user.phone_number || '',
+        email: user.email || '',
+        password: '',
+        is_active: user.is_active ?? true,
+      });
+    }
+  }, [user]);
+
+  const set = (field) => (e) => setForm((f) => ({ ...f, [field]: e.target.value }));
+  const toggle = (field) => (val) => setForm((f) => ({ ...f, [field]: val }));
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setSubmitting(true);
+    try {
+      const payload = { is_active: form.is_active };
+      if (form.full_name.trim()) payload.full_name = form.full_name.trim();
+      if (form.phone_number.trim()) payload.phone_number = form.phone_number.trim();
+      if (form.email.trim()) payload.email = form.email.trim();
+      // Never sent as an empty string — leaving this blank means "don't
+      // change the password," not "set it to blank."
+      if (form.password.trim()) payload.password = form.password.trim();
+      await adminAPI.updateSuperAdmin(user.id, payload);
+      toast.success('Superadmin updated');
+      onSuccess();
+      onClose();
+    } catch (err) {
+      toast.error(getApiError(err, 'Failed to update superadmin'));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Modal isOpen={isOpen} onClose={onClose} title="Edit Superadmin" size="lg">
+      {user && (
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="flex items-center gap-3 px-3 py-2.5 bg-brand-bg rounded-xl">
+            <div className="w-9 h-9 rounded-full bg-purple-50 flex items-center justify-center shrink-0 text-sm font-bold text-purple-600 font-sora uppercase">
+              {user.full_name?.[0] || user.email?.[0] || '?'}
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold text-brand-dark font-inter truncate">{user.full_name || '—'}</p>
+              <p className="text-xs text-gray-400 font-inter truncate">{user.email}</p>
+            </div>
+            <UserTypeBadge type={user.user_type} />
+          </div>
+
+          <Input label="Full Name" value={form.full_name} onChange={set('full_name')} placeholder="Jane Doe" />
+          <Input label="Phone Number" value={form.phone_number} onChange={set('phone_number')} placeholder="+91 98765 43210" />
+          <Input label="Email" type="email" value={form.email} onChange={set('email')} placeholder="admin@trumarkz.com" />
+          <Input
+            label="New Password"
+            type="password"
+            value={form.password}
+            onChange={set('password')}
+            placeholder="Leave blank to keep current password"
+          />
+
+          {/* Status toggle */}
+          <div className="space-y-3 p-4 bg-brand-bg rounded-xl">
+            <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide font-inter mb-1">
+              Account Status
+            </p>
+            <Toggle
+              checked={form.is_active}
+              onChange={toggle('is_active')}
+              label="Account Active"
+              description="Disable to prevent this superadmin from logging in"
+            />
+          </div>
+
+          <div className="flex gap-3 pt-1">
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={submitting}
+              className="flex-1 px-4 py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors font-inter disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={submitting}
+              className="flex-1 px-4 py-2.5 rounded-xl bg-brand-blue text-white text-sm font-medium font-inter hover:bg-brand-blue/90 transition-colors disabled:opacity-60"
+            >
+              {submitting ? 'Saving…' : 'Save Changes'}
+            </button>
+          </div>
+        </form>
+      )}
+    </Modal>
+  );
+};
+
 // ─── Unverify GST Confirmation Modal ──────────────────────────────────────────
 
 const UnverifyGstModal = ({ isOpen, onClose, user, onSuccess }) => {
@@ -1004,6 +1119,7 @@ export const AllUsersList = () => {
 
   const [createOpen, setCreateOpen] = useState(false);
   const [editModal, setEditModal] = useState({ open: false, user: null });
+  const [editSuperAdminModal, setEditSuperAdminModal] = useState({ open: false, user: null });
   const [deactivateModal, setDeactivateModal] = useState({ open: false, user: null });
   const [permanentDeleteModal, setPermanentDeleteModal] = useState({ open: false, user: null });
   const [unverifyGstModal, setUnverifyGstModal] = useState({ open: false, user: null });
@@ -1314,8 +1430,12 @@ export const AllUsersList = () => {
                       <div className="flex items-center gap-1 justify-end">
                         <button
                           type="button"
-                          onClick={() => setEditModal({ open: true, user })}
-                          title="Edit user"
+                          onClick={() => (
+                            user.user_type === 'super_admin'
+                              ? setEditSuperAdminModal({ open: true, user })
+                              : setEditModal({ open: true, user })
+                          )}
+                          title={user.user_type === 'super_admin' ? 'Edit superadmin' : 'Edit user'}
                           className="p-1.5 rounded-lg text-gray-400 hover:text-brand-blue hover:bg-blue-50 transition-colors"
                         >
                           <Pencil size={14} />
@@ -1432,6 +1552,13 @@ export const AllUsersList = () => {
         isOpen={editModal.open}
         onClose={() => setEditModal({ open: false, user: null })}
         user={editModal.user}
+        onSuccess={refresh}
+      />
+
+      <EditSuperAdminModal
+        isOpen={editSuperAdminModal.open}
+        onClose={() => setEditSuperAdminModal({ open: false, user: null })}
+        user={editSuperAdminModal.user}
         onSuccess={refresh}
       />
 

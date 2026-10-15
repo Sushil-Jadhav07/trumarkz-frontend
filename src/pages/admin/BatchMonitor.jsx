@@ -17,8 +17,8 @@ import { GenerateSDCModal } from '@/pages/admin/SDCVerification';
 import { TablePagination } from '@/components/shared/TablePagination';
 import { normalizeDhiwayDetails, resolveDhiwaySpaceId } from '@/utils/dhiway';
 import {
-  AlertCircle, AlertTriangle, ArrowRight, Building2, Calendar, CheckCircle, ChevronDown, ChevronLeft, ChevronRight, Clock, Download, Eye, FileText, Info,
-  Layers, Mail, MoreVertical, Package, Plus, RefreshCw, Save, Search, Send, ShieldCheck, Sparkles, Trash2, User, Users, X, XCircle, Zap,
+  AlertCircle, AlertTriangle, ArrowRight, Building2, Calendar, CheckCircle, ChevronDown, ChevronLeft, ChevronRight, Clock, Copy, Download, Eye, FileText, Info,
+  Layers, Link2, Mail, MoreVertical, Package, Plus, RefreshCw, Save, Search, Send, ShieldCheck, Sparkles, Trash2, User, Users, X, XCircle, Zap,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -1255,6 +1255,294 @@ export const SendRejectedListModal = ({ batch, onClose }) => {
             <Button onClick={onClose} className="w-full">Done</Button>
           </>
         )}
+      </div>
+    </Modal>
+  );
+};
+
+// ── Resend Rejected — re-verification, NOT the same as Send Rejected List
+// above (that's a read-only Excel export). One API call accepts exactly one
+// verification_type_name, so the modal is built around picking a type
+// first, then only the records currently rejected for that exact type.
+// `prefill` (optional) comes from a single rejected check's own "Resend for
+// Re-verification" button — pre-selects that type + that one record, still
+// requires the admin to pick a verifier before sending.
+export const ResendRejectedModal = ({ batch, records = [], prefill, onClose, onSent }) => {
+  const getId = (r) => r?.id || r?.user_id || r?.entity_id;
+  const getTitle = (r) => r?.product_name || r?.full_name || r?.email || getId(r) || 'Record';
+
+  const rejectedByType = useMemo(() => {
+    const map = {};
+    records.forEach((r) => {
+      Object.entries(r?.verification_type_status || {}).forEach(([name, info]) => {
+        if (info?.status === 'rejected') {
+          (map[name] ||= []).push({ record: r, reason: info?.rejection_reason || info?.reason || null });
+        }
+      });
+    });
+    return map;
+  }, [records]);
+  const typeOptions = Object.keys(rejectedByType);
+
+  const [typeName, setTypeName] = useState(prefill?.typeName || typeOptions[0] || '');
+  const [selectedIds, setSelectedIds] = useState(() => new Set(prefill?.record ? [getId(prefill.record)] : []));
+  const [verifiers, setVerifiers] = useState([]);
+  const [verifiersLoading, setVerifiersLoading] = useState(false);
+  const [verifierEmail, setVerifierEmail] = useState('');
+  const [sending, setSending] = useState(false);
+  const [result, setResult] = useState(null);
+  const [linkCopied, setLinkCopied] = useState(false);
+  // 502 — the request/association rows were created but the email itself
+  // failed to send. This is a real failure, never shown as success; the
+  // request still exists server-side, so retrying (same call, below) is
+  // treated as a reminder that reuses it rather than erroring again.
+  const [deliveryFailure, setDeliveryFailure] = useState(null); // { message, requestId }
+
+  const copyUploadLink = async () => {
+    if (!result?.upload_link) return;
+    try {
+      await navigator.clipboard.writeText(result.upload_link);
+      setLinkCopied(true);
+      setTimeout(() => setLinkCopied(false), 2000);
+    } catch {
+      toast.error('Could not copy — copy the link manually');
+    }
+  };
+
+  useEffect(() => {
+    if (!typeName) return;
+    setVerifiersLoading(true);
+    setVerifierEmail('');
+    verifiersAPI.getByType(typeName)
+      .then(({ data }) => setVerifiers(Array.isArray(data?.verifiers) ? data.verifiers : (Array.isArray(data) ? data : [])))
+      .catch(() => setVerifiers([]))
+      .finally(() => setVerifiersLoading(false));
+  }, [typeName]);
+
+  const handleTypeChange = (next) => {
+    setTypeName(next);
+    setSelectedIds(new Set());
+  };
+
+  const currentRejected = rejectedByType[typeName] || [];
+  const toggleId = (id) => {
+    if (!id) return;
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+  const selectAll = () => setSelectedIds(new Set(currentRejected.map((e) => getId(e.record)).filter(Boolean)));
+  const clearAll = () => setSelectedIds(new Set());
+
+  const handleSend = async () => {
+    if (selectedIds.size === 0 || !verifierEmail || sending) return;
+    setSending(true);
+    setDeliveryFailure(null);
+    try {
+      const { data } = await verificationAPI.resendRejectedForVerification({
+        batch_id: batch.id,
+        verification_type_name: typeName,
+        batch_user_ids: Array.from(selectedIds),
+        verifier_email: verifierEmail,
+      });
+      // A 200 here is always success, whether it created a new request or
+      // reused an existing pending one as a reminder (same request_id,
+      // rotated token) — the backend doesn't distinguish the two in the
+      // response shape, and this modal has no reliable prior request_id to
+      // compare against once reopened, so both cases share one success view.
+      setResult(data || {});
+      toast.success('Re-verification sent');
+      onSent?.();
+    } catch (err) {
+      const status = err?.response?.status;
+      if (status === 400) {
+        toast.error(getApiError(err, 'One or more selected records are no longer eligible for re-verification. Refresh the rejected list.'));
+      } else if (status === 404) {
+        toast.error('Batch or verification type could not be found.');
+      } else if (status === 409) {
+        toast.error(getApiError(err, 'One or more selected records are already covered by another pending verification request. Resolve the existing request before resending.'));
+      } else if (status === 502) {
+        const detail = err?.response?.data?.detail;
+        const message = typeof detail === 'string' ? detail : 'The re-verification request was created, but the verification email could not be delivered.';
+        const requestIdMatch = typeof detail === 'string' ? detail.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i) : null;
+        setDeliveryFailure({ message, requestId: requestIdMatch?.[0] || null });
+      } else {
+        toast.error(getApiError(err, 'Failed to send for re-verification'));
+      }
+    } finally {
+      setSending(false);
+    }
+  };
+
+  if (!batch) return null;
+
+  if (deliveryFailure) {
+    return (
+      <Modal isOpen onClose={onClose} title="Email Delivery Failed" size="md">
+        <div className="space-y-4">
+          <div className="flex items-start gap-3 rounded-2xl border border-red-100 bg-red-50 px-4 py-3.5">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-red-500/15 text-red-600">
+              <AlertTriangle size={20} />
+            </div>
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-brand-dark font-inter">Email Delivery Failed</p>
+              <p className="text-xs text-red-700 font-inter mt-1">
+                The re-verification request was created, but the verification email could not be delivered. Please retry sending the verification link.
+              </p>
+            </div>
+          </div>
+          {deliveryFailure.requestId && (
+            <p className="text-[11px] text-gray-400 font-inter">
+              Request ID: <span className="font-mono text-gray-600">{deliveryFailure.requestId}</span>
+            </p>
+          )}
+          <p className="text-xs text-gray-500 font-inter">
+            The request still exists — clicking "Send for Re-verification" again will retry it as a reminder rather than creating a duplicate.
+          </p>
+          <div className="flex justify-end gap-2 border-t border-gray-100 pt-3">
+            <Button variant="ghost" onClick={onClose}>Close</Button>
+            <Button variant="primary" icon={sending ? RefreshCw : Send} loading={sending} onClick={handleSend}>
+              Retry Send
+            </Button>
+          </div>
+        </div>
+      </Modal>
+    );
+  }
+
+  if (result) {
+    return (
+      <Modal isOpen onClose={onClose} title="Re-verification Sent" size="md">
+        <div className="space-y-4">
+          <div className="flex items-center gap-3 rounded-2xl border border-emerald-100 bg-gradient-to-r from-emerald-50 to-green-50 px-4 py-3.5">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-emerald-500/15 text-emerald-600">
+              <CheckCircle size={20} />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold text-brand-dark font-inter">Re-verification Sent</p>
+              <p className="text-xs text-emerald-700 font-inter">
+                {(result.resent_user_ids?.length ?? selectedIds.size)} rejected record{(result.resent_user_ids?.length ?? selectedIds.size) === 1 ? '' : 's'} sent to {result.verifier_email || verifierEmail}
+              </p>
+            </div>
+          </div>
+
+          {/* This is a brand-new request/token — a DIFFERENT link from the
+              original rejected request's. That old link/page is untouched
+              and will keep showing its own original "Rejected" history
+              forever, by design (see note below) — this is the one that
+              actually reflects the new, pending re-verification. */}
+          {result.upload_link && (
+            <div>
+              <label className="mb-1.5 block text-xs font-medium text-gray-500 font-inter">New Verification Link</label>
+              <div className="flex items-center gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5">
+                <Link2 size={14} className="shrink-0 text-gray-400" />
+                <span className="min-w-0 flex-1 truncate text-xs text-gray-600 font-inter">{result.upload_link}</span>
+                <button
+                  type="button"
+                  onClick={copyUploadLink}
+                  className="flex shrink-0 items-center gap-1 rounded-lg border border-gray-200 bg-white px-2 py-1 text-[11px] font-semibold text-gray-600 font-inter hover:bg-gray-50"
+                >
+                  <Copy size={11} /> {linkCopied ? 'Copied' : 'Copy'}
+                </button>
+              </div>
+            </div>
+          )}
+
+          <p className="text-xs text-gray-500 font-inter">
+            The verifier will receive this link by email. The original rejected request's own link/history is untouched — it will keep showing "Rejected" permanently; only this new link reflects the fresh re-verification.
+          </p>
+          <Button onClick={onClose} className="w-full">Done</Button>
+        </div>
+      </Modal>
+    );
+  }
+
+  return (
+    <Modal isOpen onClose={() => !sending && onClose()} title="Resend Rejected for Re-verification" size="4xl">
+      <div className="space-y-4">
+        <div>
+          <label className="mb-1.5 block text-xs font-medium text-gray-500 font-inter">Verification Type</label>
+          {typeOptions.length === 0 ? (
+            <p className="rounded-xl border border-gray-100 bg-gray-50 px-3 py-2.5 text-xs text-gray-400 font-inter">
+              No rejected records in this batch.
+            </p>
+          ) : (
+            <CustomSelect
+              className="w-full"
+              value={typeName}
+              onChange={handleTypeChange}
+              options={typeOptions.map((t) => ({ value: t, label: `${t.replace(/_/g, ' ')} (${rejectedByType[t].length} rejected)` }))}
+              placeholder="Select a verification type"
+            />
+          )}
+        </div>
+
+        {typeOptions.length > 0 && (
+          <>
+            <div className="overflow-hidden rounded-xl border border-gray-100">
+              <div className="flex items-center justify-between border-b border-gray-100 bg-gray-50 px-3 py-2">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 font-inter">Rejected Records</p>
+                <div className="flex items-center gap-3">
+                  <button type="button" onClick={selectAll} className="text-[11px] font-semibold text-brand-blue font-inter hover:underline">Select All</button>
+                  <button type="button" onClick={clearAll} className="text-[11px] font-medium text-gray-400 font-inter hover:text-gray-600">Clear</button>
+                </div>
+              </div>
+              <div className="max-h-56 divide-y divide-gray-50 overflow-y-auto thin-scrollbar">
+                {currentRejected.map(({ record, reason }) => {
+                  const id = getId(record);
+                  const checked = !!id && selectedIds.has(id);
+                  return (
+                    <label key={id} className="flex cursor-pointer items-start gap-2.5 px-3 py-2 hover:bg-gray-50/70">
+                      <input type="checkbox" checked={checked} onChange={() => toggleId(id)} className="mt-0.5 accent-brand-blue" />
+                      <div className="min-w-0">
+                        <p className="truncate text-xs font-medium text-brand-dark font-inter">{getTitle(record)}</p>
+                        <p className="truncate text-[11px] text-red-500 font-inter">
+                          Rejected{reason ? ` — ${reason}` : ''}
+                        </p>
+                      </div>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+
+            <p className="text-xs font-inter text-gray-500">
+              Selected: <span className="font-semibold text-brand-dark">{selectedIds.size}</span>
+            </p>
+
+            <div>
+              <label className="mb-1.5 block text-xs font-medium text-gray-500 font-inter">Verifier</label>
+              {verifiersLoading ? (
+                <div className="flex items-center gap-2 text-xs text-gray-400 font-inter">
+                  <RefreshCw size={12} className="animate-spin" /> Loading verifiers…
+                </div>
+              ) : (
+                <CustomSelect
+                  className="w-full"
+                  value={verifierEmail}
+                  onChange={setVerifierEmail}
+                  options={verifiers.map((v) => ({ value: v.email, label: v.name ? `${v.name} — ${v.email}` : v.email }))}
+                  placeholder="— Select a verifier —"
+                />
+              )}
+            </div>
+          </>
+        )}
+
+        <div className="flex justify-end gap-2 border-t border-gray-100 pt-3">
+          <Button variant="ghost" onClick={onClose} disabled={sending}>Cancel</Button>
+          <Button
+            variant="primary"
+            icon={sending ? RefreshCw : Send}
+            loading={sending}
+            disabled={selectedIds.size === 0 || !verifierEmail}
+            onClick={handleSend}
+          >
+            Send for Re-verification
+          </Button>
+        </div>
       </div>
     </Modal>
   );

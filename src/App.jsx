@@ -1,3 +1,4 @@
+import OrganizationDetail from '@/pages/admin/OrganizationDetail';
 import React from 'react';
 import { Navigate, Routes, Route, useLocation } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
@@ -87,6 +88,7 @@ import SDCVerification from '@/pages/admin/SDCVerification';
 import PromoteSuperAdmin from '@/pages/admin/PromoteSuperAdmin';
 import CreateSuperAdmin from '@/pages/admin/CreateSuperAdmin';
 import AllUsersList from '@/pages/admin/AllUsersList';
+import OrganizationList from '@/pages/admin/OrganizationList';
 import EmailDrafts from '@/pages/admin/EmailDrafts';
 import ProductWarrantyAdmin from '@/pages/admin/ProductWarrantyAdmin';
 import ProductWarrantyUpload from '@/pages/org/ProductWarrantyUpload';
@@ -235,6 +237,9 @@ const AnimatedRoutes = () => {
           <Route path="/admin/promote-super-admin" element={<ProtectedRoute><AdminRoute><PromoteSuperAdmin /></AdminRoute></ProtectedRoute>} />
           <Route path="/admin/create-super-admin" element={<ProtectedRoute><AdminRoute><CreateSuperAdmin /></AdminRoute></ProtectedRoute>} />
           <Route path="/admin/user-list" element={<ProtectedRoute><AdminRoute><AllUsersList /></AdminRoute></ProtectedRoute>} />
+          <Route path="/admin/organizations" element={<ProtectedRoute><AdminRoute><OrganizationList /></AdminRoute></ProtectedRoute>} />
+          <Route path="/admin/organizations/:orgId" element={<ProtectedRoute><AdminRoute><OrganizationDetail /></AdminRoute></ProtectedRoute>} />
+          <Route path="/admin/organizations/:orgId/edit" element={<ProtectedRoute><AdminRoute><OrganizationDetail edit /></AdminRoute></ProtectedRoute>} />
           <Route path="/admin/email-drafts" element={<ProtectedRoute><AdminRoute><EmailDrafts /></AdminRoute></ProtectedRoute>} />
           <Route path="/admin/product-warranty" element={<ProtectedRoute><AdminRoute><ProductWarrantyAdmin /></AdminRoute></ProtectedRoute>} />
           <Route path="/admin/skills-management" element={<ProtectedRoute><AdminRoute><SkillsManagement /></AdminRoute></ProtectedRoute>} />

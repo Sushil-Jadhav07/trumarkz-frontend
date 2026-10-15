@@ -116,7 +116,13 @@ const getCertificateMeta = (certificate) => (
 // { record, typeName } pair that was clicked. Reads only
 // record.verification_type_status[typeName]; never searches other records or
 // other types. verifierEmail is resolved by the caller for that same pair.
-export const VerificationCheckDetailsModal = ({ selection, title, verifierEmail, onClose }) => {
+// onResendRejected (optional) — admin-only secondary action for a rejected
+// check: "Resend for Re-verification". Omitted entirely by every org-side
+// caller, so org stays exactly as read-only as before; passing it is what
+// opts a caller into showing the button at all. This is re-verification
+// (a brand-new request), never an Approve/Reject control — those remain the
+// token-authenticated verifier's alone, never added here.
+export const VerificationCheckDetailsModal = ({ selection, title, verifierEmail, onClose, onResendRejected }) => {
   if (!selection) return null;
   const { record, typeName } = selection;
   const check = record?.verification_type_status?.[typeName];
@@ -206,6 +212,18 @@ export const VerificationCheckDetailsModal = ({ selection, title, verifierEmail,
             <div className="border-t border-red-100 bg-red-50 px-4 py-3">
               <p className="text-[11px] font-semibold uppercase tracking-wide text-red-400 font-inter">Rejection Reason</p>
               <p className="mt-1 text-sm text-red-600 font-inter">{rejectionReason}</p>
+            </div>
+          )}
+
+          {isRejected && onResendRejected && (
+            <div className="border-t border-gray-100 px-4 py-3">
+              <button
+                type="button"
+                onClick={() => onResendRejected(record, typeName)}
+                className="flex items-center gap-1.5 rounded-lg border border-brand-blue/30 bg-white px-2.5 py-1.5 text-xs font-semibold text-brand-blue hover:bg-blue-50 transition-colors"
+              >
+                <RefreshCw size={12} /> Resend for Re-verification
+              </button>
             </div>
           )}
         </div>

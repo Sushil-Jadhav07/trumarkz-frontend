@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState, useCallback } from 'react';
+import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import * as XLSX from 'xlsx';
 import { AuthLayout } from '@/components/layout/AuthLayout';
@@ -182,6 +182,34 @@ const Detail = ({ label, value, mono }) => (
   </div>
 );
 
+// ── Generate SDC modal — selection + partial-approval helpers ──────────────
+const recordSDCId = (r) => r?.id || r?.user_id || r?.entity_id;
+
+// Client-side-only estimate for display — the backend remains authoritative
+// (it silently skips an actually-ineligible selected user rather than
+// trusting this). A record with no per-type breakdown falls back to its
+// overall status bucket.
+const getRecordEligibility = (r) => {
+  const types = Object.values(r?.verification_type_status || {});
+  if (types.length > 0) {
+    const approved = types.filter((v) => v?.status === 'approved').length;
+    if (approved === 0) return 'ineligible';
+    if (approved === types.length) return 'verified';
+    return 'partial';
+  }
+  const bucket = classifyRecordStatus(r?.verification_status ?? r?.status);
+  if (bucket === 'verified') return 'verified';
+  if (bucket === 'failed') return 'ineligible';
+  return 'pending';
+};
+
+const ELIGIBILITY_META = {
+  verified:   { label: 'Verified',           badge: 'success' },
+  partial:    { label: 'Partially Verified', badge: 'partial' },
+  pending:    { label: 'Pending',             badge: 'pending' },
+  ineligible: { label: 'Not Eligible',        badge: 'default' },
+};
+
 // ── Generate SDC modal ───────────────────────────────────────────────────────
 // org_id is fixed backend-side, space_id comes from the org's own Dhiway
 // Space ID (set on the Profile page), and schema_id resolves from the
@@ -196,12 +224,109 @@ export const GenerateSDCModal = ({ batch, onClose, onGenerated, liveStatus, poll
   const [certLoading, setCertLoading] = useState(false);
   const [openingId, setOpeningId] = useState(null);
 
+  // ── Selection — which records to generate for ──────────────────────────
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
+  const [recordSearch, setRecordSearch] = useState('');
+  const [recordFilter, setRecordFilter] = useState('all'); // all | verified | partial | pending | ineligible
+  const initializedForBatchId = useRef(null);
+
+  // Defaults to "every eligible record" selected — keeps the original
+  // whole-batch behavior a single click away, while still letting the admin
+  // deselect specific records before generating. Re-runs only when a
+  // different batch's modal opens, never on every records re-render.
+  useEffect(() => {
+    if (initializedForBatchId.current === batch?.id) return;
+    initializedForBatchId.current = batch?.id;
+    const eligible = records.filter((r) => getRecordEligibility(r) !== 'ineligible');
+    setSelectedIds(new Set(eligible.map(recordSDCId).filter(Boolean)));
+  }, [batch?.id, records]);
+
+  const filteredRecords = useMemo(() => {
+    const q = recordSearch.trim().toLowerCase();
+    return records.filter((r) => {
+      if (recordFilter !== 'all' && getRecordEligibility(r) !== recordFilter) return false;
+      if (q && !String(recordTitle(r)).toLowerCase().includes(q)) return false;
+      return true;
+    });
+  }, [records, recordSearch, recordFilter]);
+
+  const toggleRecord = (id) => {
+    if (!id) return;
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+  const selectAllEligible = () => {
+    const eligible = records.filter((r) => getRecordEligibility(r) !== 'ineligible');
+    setSelectedIds(new Set(eligible.map(recordSDCId).filter(Boolean)));
+  };
+  const clearSelection = () => setSelectedIds(new Set());
+
+  // ── Partial-SDC approval state ──────────────────────────────────────────
+  // Only ever set from a /generate 403 whose body actually matches the
+  // documented structured shape — a generic 403 (auth, etc.) is never
+  // reinterpreted as this, so it falls through to the normal error toast.
+  const [approvalState, setApprovalState] = useState(null);
+  const [approvalRefreshing, setApprovalRefreshing] = useState(false);
+  const pollRef = useRef(null);
+
+  const isStructuredApprovalDetail = (detail) =>
+    !!detail && typeof detail === 'object' &&
+    typeof detail.approval_status === 'string' && !!detail.approval_request_id;
+
+  const refreshApprovalStatus = useCallback(async () => {
+    if (!approvalState?.approval_request_id) return;
+    setApprovalRefreshing(true);
+    try {
+      const { data } = await sdcAPI.getSDCApprovals(batch.id);
+      const list = Array.isArray(data) ? data : [];
+      const match = list.find((a) => a.id === approvalState.approval_request_id);
+      if (match) {
+        setApprovalState((prev) => (prev ? { ...prev, status: match.status, decision_reason: match.decision_reason } : prev));
+      }
+    } catch {
+      // Silent — this is a background status check; the next poll tick or
+      // another manual Refresh click will try again.
+    } finally {
+      setApprovalRefreshing(false);
+    }
+  }, [approvalState?.approval_request_id, batch?.id]);
+
+  // Poll only while a request is genuinely pending and this modal is open —
+  // stops the moment it leaves 'pending' (approved/rejected) or the modal
+  // unmounts, never leaves a stray timer running.
+  useEffect(() => {
+    if (approvalState?.status !== 'pending') return undefined;
+    pollRef.current = setInterval(refreshApprovalStatus, 12000);
+    return () => clearInterval(pollRef.current);
+  }, [approvalState?.status, refreshApprovalStatus]);
+  useEffect(() => () => clearInterval(pollRef.current), []);
+
   // Matches this batch's records against the org's Dhiway record list by
   // email/title for human records and serial/title for product/warranty
   // records so the success panel can offer a direct "View" link instead of
   // sending the admin elsewhere to find it.
+  //
+  // Scoped to exactly the ids this generate call actually targeted
+  // (sentPayload.user_ids) when a selection was made — NOT every record in
+  // the batch. Confirmed live: generating for one specific selected record
+  // (who genuinely had no cert yet) still showed an unrelated OTHER
+  // record's pre-existing certificate in this panel, because the matching
+  // loop below ran over the whole batch's `records` regardless of what was
+  // actually selected — any batch member who already happened to have a
+  // matching Dhiway cert got pulled in and shown as if they were part of
+  // this result. Falls back to every record only for a true whole-batch
+  // generate (no user_ids sent at all).
   const matchCertificates = useCallback(async () => {
-    if (!records.length) return;
+    const targetIds = Array.isArray(sentPayload?.user_ids) && sentPayload.user_ids.length > 0
+      ? new Set(sentPayload.user_ids)
+      : null;
+    const scopedRecords = targetIds
+      ? records.filter((r) => targetIds.has(recordSDCId(r)))
+      : records;
+    if (!scopedRecords.length) return;
     setCertLoading(true);
     try {
       const allRecords = [];
@@ -235,7 +360,7 @@ export const GenerateSDCModal = ({ batch, onClose, onGenerated, liveStatus, poll
       const matchedPublicIds = new Set();
       const matchedRecordIds = new Set();
 
-      records.forEach((r) => {
+      scopedRecords.forEach((r) => {
         const email = normalizeMatchKey(r?.email);
         const serial = normalizeMatchKey(getRecordSerialNumber(r));
         const title = normalizeMatchKey(recordTitle(r));
@@ -266,7 +391,7 @@ export const GenerateSDCModal = ({ batch, onClose, onGenerated, liveStatus, poll
       // still-unclaimed, most-recently-created certs and pair by the
       // certificate's own credentialSubject.product_id, an authoritative
       // identity key, before ever falling back to position-guessing below.
-      const unmatchedProductRecords = records.filter((r) => {
+      const unmatchedProductRecords = scopedRecords.filter((r) => {
         const recordId = r?.id || r?.user_id || r?.entity_id;
         const serial = normalizeMatchKey(getRecordSerialNumber(r));
         return recordId && (isProductRecord(r) || !!serial) && !matchedRecordIds.has(recordId);
@@ -302,8 +427,18 @@ export const GenerateSDCModal = ({ batch, onClose, onGenerated, liveStatus, poll
         });
       }
 
-      if (matches.length === 0 && allRecords.length > 0) {
-        const fallbackRecords = [...records];
+      // Position-based last resort: pairs record N with the Nth
+      // most-recently-created cert in the whole space, purely by array
+      // position — there's no identity check at all. Safe-ish for a true
+      // whole-batch generate (records and candidate certs are both the
+      // full set, created together), but for a scoped/selected generation
+      // this would happily label an unrelated record's pre-existing
+      // certificate with the selected record's name. Never run it when
+      // this result is scoped to a specific selection — an unmatched
+      // selected record just shows "not matched yet" instead (see the
+      // empty-state message below) rather than a guess that could be wrong.
+      if (matches.length === 0 && allRecords.length > 0 && !targetIds) {
+        const fallbackRecords = [...scopedRecords];
         const fallbackCertificates = [...allRecords].sort((a, b) => {
           const aTime = new Date(a.createdAt || a.updatedAt || a.anchorTime || 0).getTime();
           const bTime = new Date(b.createdAt || b.updatedAt || b.anchorTime || 0).getTime();
@@ -324,7 +459,7 @@ export const GenerateSDCModal = ({ batch, onClose, onGenerated, liveStatus, poll
     } finally {
       setCertLoading(false);
     }
-  }, [records, batch?.spaceId, batch?.sdcInfo]);
+  }, [records, sentPayload, batch?.spaceId, batch?.sdcInfo]);
 
   useEffect(() => {
     if (result && !(result.issue_pending && !liveStatus)) {
@@ -365,21 +500,78 @@ export const GenerateSDCModal = ({ batch, onClose, onGenerated, liveStatus, poll
   // Only calls /generate — never auto-calls /issue. If Dhiway comes back with
   // issue_pending: true, the result panel below surfaces an "Issue Now" button
   // so the admin triggers /issue explicitly instead of it firing silently.
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  //
+  // A 403 with the documented structured body means "organization approval
+  // required," not a failure — it's switched into approvalState instead of
+  // a generic error toast. Any other 403 (or any other error) falls through
+  // to the normal toast, unchanged from before.
+  const runGenerate = async (userIds) => {
     setSubmitting(true);
     try {
-      const payload = { publish: false, active };
+      const payload = { publish: false, active, user_ids: userIds };
       const { data } = await sdcAPI.generateBatchSDC(batch.id, payload);
-      if (!data.issue_pending) toast.success('SDC created');
+      const nothingNew = !data.issue_pending && data.records_sent === 0 &&
+        Array.isArray(data.already_generated_user_ids) && data.already_generated_user_ids.length > 0;
+      if (!data.issue_pending) {
+        toast.success(nothingNew ? 'Nothing to generate — selected records already have SDCs' : 'SDC created');
+      }
+      // "already_generated" only means a DRAFT was created earlier for this
+      // id — confirmed from the backend source — never that it was actually
+      // issued (anchored into a real, retrievable certificate). That draft/
+      // issue split is invisible to this response: `already_generated_user_ids`
+      // carries no issued/active signal at all, so a user whose draft was
+      // never issued stays permanently "already generated" on every future
+      // attempt, with no real certificate ever appearing — confirmed live
+      // (selected generation for a user with no certificate returned
+      // sdc_status: "already_generated", yet the real Dhiway record search
+      // found nothing for them). A single best-effort /issue attempt here
+      // closes that gap for anyone still sitting as an un-issued draft,
+      // without blocking the UI on Dhiway's full retry/backoff window (that
+      // long-form retry stays reserved for the genuine issue_pending path
+      // below, which already surfaces its own "Issue Certificates Now" UI).
+      if (nothingNew) {
+        try { await sdcAPI.issueBatchSDC(batch.id); } catch { /* best-effort only */ }
+      }
+      setApprovalState(null);
       onGenerated(payload, data);
       setSentPayload(payload);
       setResult(data);
     } catch (err) {
-      toast.error(getApiError(err, 'Failed to start SDC generation'));
+      const detail = err?.response?.data?.detail;
+      if (err?.response?.status === 403 && isStructuredApprovalDetail(detail)) {
+        setApprovalState({
+          status: detail.approval_status,
+          approval_request_id: detail.approval_request_id,
+          selected_user_ids: Array.isArray(detail.selected_user_ids) ? detail.selected_user_ids : userIds,
+          incomplete_user_ids: Array.isArray(detail.incomplete_user_ids) ? detail.incomplete_user_ids : [],
+          decision_reason: null,
+        });
+      } else {
+        toast.error(getApiError(err, 'Failed to start SDC generation'));
+      }
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (selectedIds.size === 0) return;
+    runGenerate(Array.from(selectedIds));
+  };
+
+  // After the org approves, "Generate Now" must resend the EXACT selection
+  // the approval was granted for — never the modal's current selectedIds,
+  // which the admin could have changed in the meantime (that would be a
+  // different approval scope entirely, per the backend's exact-selection rule).
+  const handleGenerateApproved = () => {
+    if (!approvalState?.selected_user_ids?.length) return;
+    runGenerate(approvalState.selected_user_ids);
+  };
+
+  const handleAdjustSelection = () => {
+    setApprovalState(null);
+    toast('Back to selection — changing it will require a new approval request', { icon: 'ℹ️' });
   };
 
   // Manual trigger for the /issue fallback — only ever called by the admin
@@ -397,6 +589,108 @@ export const GenerateSDCModal = ({ batch, onClose, onGenerated, liveStatus, poll
       setRetrying(false);
     }
   };
+
+  // ── Partial-SDC approval state — takes over the modal until it's resolved
+  // or the admin backs out of it. Superadmin can only VIEW this status and
+  // refresh it; only the organization decides (see the org-side review UI).
+  if (approvalState) {
+    const selectedCount = approvalState.selected_user_ids?.length || 0;
+    const incompleteCount = approvalState.incomplete_user_ids?.length || 0;
+
+    if (approvalState.status === 'approved') {
+      return (
+        <Modal isOpen onClose={onClose} title="Approval Received" size="sm">
+          <div className="space-y-4">
+            <div className="flex items-center gap-3 rounded-2xl border border-emerald-100 bg-emerald-50 px-4 py-3.5">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-emerald-500/15 text-emerald-600">
+                <CheckCircle size={20} />
+              </div>
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-brand-dark font-inter">The organization approved this request</p>
+                <p className="text-xs text-emerald-700 font-inter mt-0.5">Selection: {selectedCount} record{selectedCount === 1 ? '' : 's'}</p>
+              </div>
+            </div>
+            <p className="text-xs text-gray-500 font-inter">
+              Approval alone doesn't generate anything — click below to generate using the exact same selection the organization approved.
+            </p>
+            <div className="flex gap-3">
+              <Button loading={submitting} onClick={handleGenerateApproved}>
+                <Sparkles size={14} /> Generate Now
+              </Button>
+              <Button variant="ghost" onClick={onClose}>Close</Button>
+            </div>
+          </div>
+        </Modal>
+      );
+    }
+
+    if (approvalState.status === 'rejected') {
+      return (
+        <Modal isOpen onClose={onClose} title="Request Rejected" size="sm">
+          <div className="space-y-4">
+            <div className="flex items-start gap-3 rounded-2xl border border-red-100 bg-red-50 px-4 py-3.5">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-red-500/15 text-red-600">
+                <XCircle size={20} />
+              </div>
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-brand-dark font-inter">The organization rejected SDC generation for this selection</p>
+                {approvalState.decision_reason && (
+                  <p className="text-xs text-red-700 font-inter mt-1">Reason: {approvalState.decision_reason}</p>
+                )}
+              </div>
+            </div>
+            <div className="flex gap-3">
+              <Button variant="secondary" onClick={handleAdjustSelection}>Adjust Selection</Button>
+              <Button variant="ghost" onClick={onClose}>Close</Button>
+            </div>
+          </div>
+        </Modal>
+      );
+    }
+
+    // pending — "Generate Selected" never appears here; only the owning
+    // organization can move this forward (Approve/Reject never shown to
+    // SuperAdmin either). Only Adjust Selection (back to the selection
+    // table) and Refresh Status (re-check this exact request) are offered.
+    return (
+      <Modal isOpen onClose={onClose} title="Organization Approval Required" size="sm">
+        <div className="space-y-4">
+          <p className="text-xs text-gray-500 font-inter">
+            This selection contains records that are not fully verified.
+          </p>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="rounded-xl border border-gray-100 bg-brand-bg px-3 py-2.5">
+              <p className="text-[10px] uppercase tracking-wide text-gray-400 font-inter">Selected Records</p>
+              <p className="text-lg font-semibold text-brand-dark font-sora">{selectedCount}</p>
+            </div>
+            <div className="rounded-xl border border-amber-100 bg-amber-50 px-3 py-2.5">
+              <p className="text-[10px] uppercase tracking-wide text-amber-600 font-inter">Partially Verified</p>
+              <p className="text-lg font-semibold text-amber-700 font-sora">{incompleteCount}</p>
+            </div>
+          </div>
+          <div className="flex items-center justify-between rounded-xl border border-gray-100 px-3 py-2.5">
+            <div>
+              <p className="text-xs text-gray-400 font-inter mb-1">Status</p>
+              <Badge status="pending">Pending Approval</Badge>
+            </div>
+            <div className="text-right">
+              <p className="text-xs text-gray-400 font-inter">Approval Request</p>
+              <p className="text-xs font-mono text-brand-dark font-inter">#{String(approvalState.approval_request_id).slice(0, 8)}</p>
+            </div>
+          </div>
+          <p className="text-xs text-gray-400 font-inter">
+            The organization must approve this exact selection before SDC generation can continue.
+          </p>
+          <div className="flex gap-3">
+            <Button variant="secondary" onClick={handleAdjustSelection}>Adjust Selection</Button>
+            <Button variant="outline" loading={approvalRefreshing} onClick={refreshApprovalStatus}>
+              <RefreshCw size={14} /> Refresh Status
+            </Button>
+          </div>
+        </div>
+      </Modal>
+    );
+  }
 
   // ── Post-submit ──────────────────────────────────────────────────────────
   if (result) {
@@ -486,11 +780,16 @@ export const GenerateSDCModal = ({ batch, onClose, onGenerated, liveStatus, poll
     }
 
     // Done — minimal summary + a direct way to actually view the certificate.
-    const issuedLabel = liveStatus
-      ? `${liveStatus.ready}/${liveStatus.total} issued`
-      : `${result.issued_count ?? 0}/${result.records_sent ?? '—'} issued`;
+    const alreadyGenerated = Array.isArray(result.already_generated_user_ids) ? result.already_generated_user_ids : [];
+    const unconfirmed = Array.isArray(result.accepted_unconfirmed_user_ids) ? result.accepted_unconfirmed_user_ids : [];
+    const nothingNew = result.records_sent === 0 && alreadyGenerated.length > 0;
+    const issuedLabel = nothingNew
+      ? 'Nothing to generate — already up to date'
+      : liveStatus
+        ? `${liveStatus.ready}/${liveStatus.total} issued`
+        : `${result.issued_count ?? 0}/${result.records_sent ?? '—'} issued`;
     return (
-      <Modal isOpen onClose={onClose} title="Certificates Issued" size="md">
+      <Modal isOpen onClose={onClose} title={nothingNew ? 'SDC Generation Complete' : 'Certificates Issued'} size="xl">
         <div className="space-y-5">
           {/* Success summary */}
           <div className="flex items-center gap-3 rounded-2xl border border-emerald-100 bg-gradient-to-r from-emerald-50 to-green-50 px-4 py-3.5">
@@ -498,10 +797,57 @@ export const GenerateSDCModal = ({ batch, onClose, onGenerated, liveStatus, poll
               <CheckCircle size={20} />
             </div>
             <div className="min-w-0 flex-1">
-              <p className="text-sm font-semibold text-brand-dark font-inter">SDC Certificates Created</p>
+              <p className="text-sm font-semibold text-brand-dark font-inter">
+                {nothingNew ? 'SDC Generation Complete' : 'SDC Certificates Created'}
+              </p>
               <p className="text-xs text-emerald-700 font-inter">{issuedLabel}</p>
             </div>
           </div>
+
+          {/* Exactly who this call targeted — resolved by name, not just a
+              count, so it's immediately verifiable against what you
+              actually selected (and against the Certificates list below,
+              which is now scoped to these same ids — never the whole batch). */}
+          {Array.isArray(sentPayload?.user_ids) && sentPayload.user_ids.length > 0 && (
+            <div>
+              <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-gray-400 font-inter">Requested</p>
+              <div className="flex flex-wrap gap-1.5">
+                {sentPayload.user_ids.map((id) => {
+                  const r = records.find((rec) => recordSDCId(rec) === id);
+                  return (
+                    <span key={id} className="rounded-full bg-gray-100 px-2.5 py-1 text-xs font-medium text-gray-600 font-inter">
+                      {r ? recordTitle(r) : id}
+                    </span>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Informational, never shown as an error — these selected users
+              simply already had SDCs and were skipped (not resubmitted). */}
+          {alreadyGenerated.length > 0 && (
+            <div className="flex items-start gap-2 rounded-xl border border-blue-100 bg-blue-50 px-3 py-2.5">
+              <AlertCircle size={13} className="mt-0.5 shrink-0 text-brand-blue" />
+              <p className="text-xs text-brand-blue/90 font-inter leading-relaxed">
+                {alreadyGenerated.length} selected record{alreadyGenerated.length === 1 ? '' : 's'} already had {alreadyGenerated.length === 1 ? 'an SDC' : 'SDCs'} and {alreadyGenerated.length === 1 ? 'was' : 'were'} skipped.
+              </p>
+            </div>
+          )}
+
+          {/* Legacy-Human only — Dhiway only confirmed the job was accepted,
+              not finished. Informational, never an error. */}
+          {unconfirmed.length > 0 && (
+            <div className="flex items-start gap-2 rounded-xl border border-gray-100 bg-gray-50 px-3 py-2.5">
+              <Clock size={13} className="mt-0.5 shrink-0 text-gray-400" />
+              <div>
+                <p className="text-xs font-semibold text-gray-600 font-inter">Submitted for Generation</p>
+                <p className="text-xs text-gray-500 font-inter leading-relaxed mt-0.5">
+                  {unconfirmed.length} credential{unconfirmed.length === 1 ? ' was' : 's were'} accepted for processing but {unconfirmed.length === 1 ? 'is' : 'are'} not yet confirmed. Use "Refresh Certificates" shortly to check.
+                </p>
+              </div>
+            </div>
+          )}
 
           <div>
             <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-gray-400 font-inter">Certificates</p>
@@ -543,12 +889,76 @@ export const GenerateSDCModal = ({ batch, onClose, onGenerated, liveStatus, poll
   }
 
   return (
-    <Modal isOpen onClose={onClose} title="Generate SDC Certificates" size="lg">
+    <Modal isOpen onClose={onClose} title="Generate SDC" size="lg">
       <form onSubmit={handleSubmit} className="space-y-4">
         <p className="text-xs text-gray-500 font-inter">
-          Generates signed digital certificates for every user in <span className="font-semibold text-brand-dark">{batch.name}</span> via
-          Dhiway Studio. The Dhiway org is fixed, the space comes from this organization's Dhiway Space ID (set on the
-          Profile page), and the schema resolves from this batch's industry — nothing else to fill in.
+          Select the records to generate digital credentials for in <span className="font-semibold text-brand-dark">{batch.name}</span> via
+          Dhiway Studio — the org, space, and schema all resolve automatically.
+        </p>
+
+        {/* Search + filters */}
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex min-w-[180px] flex-1 items-center gap-1.5 rounded-lg border border-gray-200 px-2.5 py-1.5">
+            <Search size={12} className="text-gray-400" />
+            <input
+              value={recordSearch}
+              onChange={(e) => setRecordSearch(e.target.value)}
+              placeholder="Search records…"
+              className="w-full text-xs font-inter outline-none placeholder:text-gray-400"
+            />
+          </div>
+          {['all', 'verified', 'partial', 'pending', 'ineligible'].map((f) => (
+            <button
+              key={f}
+              type="button"
+              onClick={() => setRecordFilter(f)}
+              className={`rounded-full border px-2.5 py-1 text-[11px] font-medium font-inter transition-colors ${
+                recordFilter === f ? 'border-brand-blue bg-brand-blue/10 text-brand-blue' : 'border-gray-200 text-gray-500 hover:bg-gray-50'
+              }`}
+            >
+              {f === 'all' ? 'All' : ELIGIBILITY_META[f].label}
+            </button>
+          ))}
+        </div>
+
+        {/* Selection table */}
+        <div className="rounded-xl border border-gray-100 overflow-hidden">
+          <div className="flex items-center justify-between border-b border-gray-100 bg-gray-50 px-3 py-2">
+            <button type="button" onClick={selectAllEligible} className="text-[11px] font-semibold text-brand-blue font-inter hover:underline">
+              Select All Eligible
+            </button>
+            <button type="button" onClick={clearSelection} className="text-[11px] font-medium text-gray-400 font-inter hover:text-gray-600">
+              Clear
+            </button>
+          </div>
+          <div className="max-h-56 overflow-y-auto thin-scrollbar divide-y divide-gray-50">
+            {filteredRecords.length === 0 ? (
+              <p className="py-6 text-center text-xs text-gray-400 font-inter">No records match.</p>
+            ) : (
+              filteredRecords.map((r) => {
+                const id = recordSDCId(r);
+                const eligibility = getRecordEligibility(r);
+                const meta = ELIGIBILITY_META[eligibility];
+                const checked = !!id && selectedIds.has(id);
+                return (
+                  <label key={id || recordTitle(r)} className="flex cursor-pointer items-center gap-2.5 px-3 py-2 hover:bg-gray-50/70">
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => toggleRecord(id)}
+                      className="accent-brand-blue"
+                    />
+                    <span className="min-w-0 flex-1 truncate text-xs font-medium text-brand-dark font-inter">{recordTitle(r)}</span>
+                    <Badge status={meta.badge}>{meta.label}</Badge>
+                  </label>
+                );
+              })
+            )}
+          </div>
+        </div>
+
+        <p className="text-xs font-inter text-gray-500">
+          Selected: <span className="font-semibold text-brand-dark">{selectedIds.size}</span> record{selectedIds.size === 1 ? '' : 's'}
         </p>
 
         <div className="rounded-xl border border-gray-100 bg-brand-bg p-4">
@@ -578,14 +988,13 @@ export const GenerateSDCModal = ({ batch, onClose, onGenerated, liveStatus, poll
         <div className="flex items-start gap-2 bg-blue-50 border border-blue-100 rounded-xl px-3 py-2.5">
           <AlertCircle size={14} className="text-brand-blue mt-0.5 shrink-0" />
           <p className="text-xs text-brand-blue/90 font-inter">
-            Generation runs in the background on Dhiway's side (202 Processing). Records may take a moment to appear
-            after this completes — use "Refresh Certificates" in the batch view to check.
+            Generation runs in the background on Dhiway's side. If any selected record isn't fully verified, this may require organization approval before it can proceed.
           </p>
         </div>
 
-        <div className="flex gap-3 pt-2">
-          <Button type="submit" loading={submitting}>
-            <Sparkles size={14} /> Generate SDCs
+        <div className="sticky bottom-0 flex gap-3 bg-white pt-2">
+          <Button type="submit" loading={submitting} disabled={selectedIds.size === 0}>
+            <Sparkles size={14} /> Generate Selected ({selectedIds.size})
           </Button>
           <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
         </div>

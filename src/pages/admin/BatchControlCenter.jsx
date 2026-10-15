@@ -13,7 +13,7 @@ import { TablePagination } from '@/components/shared/TablePagination';
 import {
   useBatchList, WORKFLOW_STEPS, isProductRecord, recordTitle, getCertificateProductId,
   formatVerifTypeLabel, statusBadge,
-  SmartSendModal, SendRejectedListModal, DeleteBatchModal,
+  SmartSendModal, SendRejectedListModal, DeleteBatchModal, ResendRejectedModal,
 } from '@/pages/admin/BatchMonitor';
 import {
   ArrowLeft, ArrowRight, Building2, Calendar, CheckCircle, ChevronDown, Clock, Download, Eye,
@@ -109,6 +109,8 @@ export const BatchControlCenter = () => {
   const [manualAssignments, setManualAssignments] = useState(null);
 
   const [rejectedListTarget, setRejectedListTarget] = useState(null);
+  const [resendRejectedTarget, setResendRejectedTarget] = useState(null); // batch for the Resend Rejected modal
+  const [resendRejectedPrefill, setResendRejectedPrefill] = useState(null); // { record, typeName } from a single check's own action
   const [verificationDetailsRecord, setVerificationDetailsRecord] = useState(null);
   // Exact clicked pair — { record, typeName } — for the single-check modal.
   const [selectedVerification, setSelectedVerification] = useState(null);
@@ -315,10 +317,16 @@ export const BatchControlCenter = () => {
 
       setBatchSdcRecords(matchedRecords);
       setBatchSdcByRecordId(matchedByRecordId);
+      // Returned (not just set as state) so a caller that needs the result
+      // synchronously right after awaiting this — the post-generate poll
+      // below, specifically — doesn't have to wait a render cycle for state
+      // to catch up, or re-derive the same match itself.
+      return matchedByRecordId;
     } catch {
       // silent — certificate column just stays blank if this fails
       setBatchSdcRecords([]);
       setBatchSdcByRecordId({});
+      return {};
     } finally {
       setSdcCertsLoading(false);
     }
@@ -337,22 +345,62 @@ export const BatchControlCenter = () => {
   // used in SDCVerification.jsx so the still-open panel can update itself
   // once Dhiway actually finishes issuing (instead of staying stuck on
   // "pending").
-  const pollSdcStatusUntilDone = useCallback((polledBatchId) => {
+  //
+  // `watchUserIds` (optional): the exact BatchUser ids this specific
+  // generate call targeted (a selected-user generation, not the whole
+  // batch). GET /status's own `done` flag is computed against every
+  // eligible user in the WHOLE batch — confirmed by direct backend review —
+  // so for a selected-subset generation it can sit at `false` forever even
+  // though the selected users' certificates already exist, leaving this
+  // page polling for up to 80s and then giving up, with the real
+  // certificate only ever showing up after a manual page refresh (refresh
+  // re-runs refreshSdcCertificates unconditionally, which is the one thing
+  // this loop wasn't doing). Every tick now calls refreshSdcCertificates()
+  // itself and checks it directly for a real, per-user signal (a matched,
+  // issued Dhiway record) — stopping as soon as every watched id has one,
+  // entirely independent of the batch-wide `done` flag. Call sites with no
+  // `watchUserIds` (whole-batch generation) keep relying on `done` exactly
+  // as before — unchanged behavior there.
+  const pollSdcStatusUntilDone = useCallback((polledBatchId, watchUserIds = null) => {
     let attempts = 0;
     const maxAttempts = 10;
     setSdcPollingBatchId(polledBatchId);
     const tick = async () => {
       attempts += 1;
       try {
-        const { data } = await sdcAPI.getBatchStatus(polledBatchId);
-        if (data.done) {
-          setSdcLiveStatus({ batchId: polledBatchId, ready: data.ready, total: data.total });
+        const [{ data }, certMap] = await Promise.all([
+          sdcAPI.getBatchStatus(polledBatchId),
+          refreshSdcCertificates(polledBatchId),
+        ]);
+        const watchedReady = Array.isArray(watchUserIds) && watchUserIds.length > 0
+          ? watchUserIds.every((id) => certMap?.[id]?.issued)
+          : false;
+        if (data.done || watchedReady) {
+          // liveStatus isn't just bookkeeping — GenerateSDCModal's own
+          // "isPending" check is `result.issue_pending && !liveStatus`, so
+          // the still-open modal reads THIS to know whether to leave its
+          // "Issuance still pending" screen. Only setting it on `data.done`
+          // left the modal stuck showing "pending" forever on a
+          // watchedReady resolution — polling had already stopped and the
+          // success toast had already fired, but the open modal never found
+          // out, even though a page refresh correctly showed the real,
+          // ready certificates (confirmed live). For the batch-wide `done`
+          // case this is the real ready/total; for the selected-subset
+          // case there's no batch-wide count to report, so it reflects the
+          // watched selection itself — still accurate for what the admin
+          // actually asked this call to do.
+          setSdcLiveStatus(
+            data.done
+              ? { batchId: polledBatchId, ready: data.ready, total: data.total }
+              : { batchId: polledBatchId, ready: watchUserIds.length, total: watchUserIds.length }
+          );
           setSdcPollingBatchId((current) => (current === polledBatchId ? null : current));
           setData((prev) => (prev || []).map((b) => (
             b.id === polledBatchId ? { ...b, sdcInfo: { ...(b.sdcInfo || {}), status: 'sdc_created' } } : b
           )));
-          toast.success(`Certificates ready — ${data.ready}/${data.total} issued`);
-          refreshSdcCertificates();
+          toast.success(
+            data.done ? `Certificates ready — ${data.ready}/${data.total} issued` : 'Certificate ready'
+          );
           return;
         }
       } catch {
@@ -367,7 +415,7 @@ export const BatchControlCenter = () => {
     };
     tick();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [refreshSdcCertificates]);
 
   // Fetches (or refreshes) manual-assignments on its own — deliberately not
   // folded into the detail+reports Promise.all below, since its failure must
@@ -913,8 +961,14 @@ export const BatchControlCenter = () => {
                 <div className="flex-1 flex flex-col justify-center">
                   <div className="flex items-center">
                     {WORKFLOW_STEPS.map((step, index) => {
-                      const completed = index < activeWorkflowIndex;
-                      const active    = index === activeWorkflowIndex;
+                      // The last step ("SDC Issued") has no further stage to
+                      // hand off to — reaching it IS completion, so it must
+                      // render filled/checked like every prior step, not
+                      // left in the hollow "active" state that only makes
+                      // sense for a stage still in progress.
+                      const isLastStep = index === WORKFLOW_STEPS.length - 1;
+                      const completed = index < activeWorkflowIndex || (isLastStep && index === activeWorkflowIndex);
+                      const active    = index === activeWorkflowIndex && !isLastStep;
                       const StepIcon  = step.icon;
                       return (
                         <React.Fragment key={step.id}>
@@ -978,6 +1032,10 @@ export const BatchControlCenter = () => {
                 <Button variant="outline" size="sm" icon={Send} className="!px-2 text-xs text-center leading-tight"
                   onClick={() => setRejectedListTarget(selectedBatch)}>
                   Send Rejected List
+                </Button>
+                <Button variant="outline" size="sm" icon={RefreshCw} className="!px-2 text-xs text-center leading-tight"
+                  onClick={() => { setResendRejectedPrefill(null); setResendRejectedTarget(selectedBatch); }}>
+                  Resend Rejected
                 </Button>
                 {!!sdcInfo?.status && !selectedBatch.sharedWithOrganization && (
                   <Button variant="success" size="sm" icon={sendingToOrg ? RefreshCw : Send}
@@ -1445,9 +1503,29 @@ export const BatchControlCenter = () => {
             title={recordTitle(svRecord)}
             verifierEmail={verifierByRecordAndType[svRecordId]?.[selectedVerification.typeName]}
             onClose={() => setSelectedVerification(null)}
+            onResendRejected={(record, typeName) => {
+              setSelectedVerification(null);
+              setResendRejectedPrefill({ record, typeName });
+              setResendRejectedTarget(selectedBatch);
+            }}
           />
         );
       })()}
+
+      {/* ── Resend Rejected Modal — re-verification, separate from Send Rejected List above ─── */}
+      {resendRejectedTarget && (
+        <ResendRejectedModal
+          batch={resendRejectedTarget}
+          records={batchDetail?.users || resendRejectedTarget.records || []}
+          prefill={resendRejectedPrefill}
+          onClose={() => { setResendRejectedTarget(null); setResendRejectedPrefill(null); }}
+          onSent={() => {
+            verificationAPI.getBatchDetails(resendRejectedTarget.id)
+              .then(({ data }) => setBatchDetail(data))
+              .catch(() => {});
+          }}
+        />
+      )}
 
       {/* ── Generate SDC Modal — same component/flow as SDC Verification ─── */}
       {sdcGenerateBatch && (
@@ -1457,12 +1535,15 @@ export const BatchControlCenter = () => {
           liveStatus={sdcLiveStatus?.batchId === sdcGenerateBatch.id ? sdcLiveStatus : null}
           polling={sdcPollingBatchId === sdcGenerateBatch.id}
           onClose={() => { setSdcGenerateBatch(null); setSdcLiveStatus(null); }}
-          onGenerated={() => {
+          onGenerated={(payload) => {
             const generatedBatchId = sdcGenerateBatch.id;
             setData((prev) => (prev || []).map((b) => (
               b.id === generatedBatchId ? { ...b, sdcInfo: { ...(b.sdcInfo || {}), status: 'draft_created' } } : b
             )));
-            pollSdcStatusUntilDone(generatedBatchId);
+            // payload.user_ids is exactly the selected-subset this generate
+            // call targeted (undefined/empty for a whole-batch generate) —
+            // see pollSdcStatusUntilDone's own comment for why this matters.
+            pollSdcStatusUntilDone(generatedBatchId, payload?.user_ids);
           }}
         />
       )}

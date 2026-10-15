@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useId } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X } from 'lucide-react';
 
@@ -6,7 +6,8 @@ import { X } from 'lucide-react';
 // second card docked to the right of the main dialog, inside the same
 // overlay, sliding in/out independently. Existing callers that don't pass
 // it are completely unaffected.
-export const Modal = ({ isOpen, onClose, title, description = null, headerActions = null, children, size = 'md', sidePanel = null, sidePanelWidth = 'max-w-sm', containerClassName = '' }) => {
+export const Modal = ({ isOpen, onClose, title, description = null, headerActions = null, children, footer = null, bodyClassName = '', size = 'md', sidePanel = null, sidePanelWidth = 'max-w-sm', containerClassName = '' }) => {
+  const titleId = useId();
   const sizes = {
     sm: 'max-w-sm',
     md: 'max-w-md',
@@ -35,6 +36,9 @@ export const Modal = ({ isOpen, onClose, title, description = null, headerAction
           />
           <div className={`relative flex max-h-[96vh] items-stretch gap-4 ${containerClassName}`}>
             <motion.div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby={title ? titleId : undefined}
               initial={{ scale: 0.95, opacity: 0, y: 20 }}
               animate={{ scale: 1, opacity: 1, y: 0 }}
               exit={{ scale: 0.95, opacity: 0, y: 20 }}
@@ -42,14 +46,17 @@ export const Modal = ({ isOpen, onClose, title, description = null, headerAction
               className={`w-full ${sizes[size]} bg-white rounded-2xl shadow-xl overflow-hidden max-h-[96vh] flex flex-col`}
             >
               {title && (
-                <div className="flex items-center justify-between gap-3 px-6 py-4 border-b border-gray-100">
+                <div className="flex shrink-0 items-center justify-between gap-3 px-6 py-4 border-b border-gray-100">
                   <div className="min-w-0">
-                    <h3 className="font-sora font-semibold text-lg text-brand-dark">{title}</h3>
+                    <h3 id={titleId} className="font-sora font-semibold text-lg text-brand-dark">{title}</h3>
                     {description && <p className="mt-0.5 text-xs text-gray-400 font-inter">{description}</p>}
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
                     {headerActions}
                     <button
+                      type="button"
+                      aria-label="Close dialog"
+                      disabled={!onClose}
                       onClick={onClose}
                       className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors"
                     >
@@ -58,7 +65,8 @@ export const Modal = ({ isOpen, onClose, title, description = null, headerAction
                   </div>
                 </div>
               )}
-              <div className="p-6 overflow-y-auto thin-scrollbar">{children}</div>
+              <div className={`min-h-0 p-6 overflow-y-auto thin-scrollbar ${bodyClassName}`}>{children}</div>
+              {footer && <div className="shrink-0 border-t border-gray-100 bg-white px-6 py-4">{footer}</div>}
             </motion.div>
             <AnimatePresence>
               {sidePanel && (

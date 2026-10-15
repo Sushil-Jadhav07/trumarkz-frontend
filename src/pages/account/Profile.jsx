@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { useAuth } from '@/context/AuthContext';
-import { authAPI, getApiError } from '@/services/api';
+import { authAPI, adminAPI, getApiError } from '@/services/api';
 import {
   Mail, Phone, Building2, Save,
   CheckCircle, FileText, MapPin, RefreshCw, Shield, ShieldCheck, ShieldOff, AlertTriangle,
@@ -99,10 +99,19 @@ export const Profile = () => {
   const [organizationIndustry, setOrganizationIndustry] = useState(() => normalizeIndustryList(user?.industryType));
 
   const isOrg = role === 'organization';
+  // AuthContext normalizes the backend's `super_admin` to `'super-admin'`,
+  // but this file's own roleLabels/roleColors maps already defend against
+  // either spelling reaching here — match both the same way.
+  const isSuperAdmin = role === 'super-admin' || role === 'super_admin';
 
-  // Personal Information card — Organization Name + Phone Number, org users only.
+  // Personal Information card — editable for org (Organization Name + Phone
+  // Number, via PATCH /auth/me) and superadmin (Full Name + Phone + Email,
+  // via the dedicated PATCH /auth/superadmins/{user_id} — the same endpoint
+  // used to manage OTHER superadmins from User List, here targeting the
+  // logged-in superadmin's own id). Individual accounts have no edit
+  // control on this card — unchanged, pre-existing scope.
   const [editingPersonal, setEditingPersonal] = useState(false);
-  const [personalDraft, setPersonalDraft] = useState({ organizationName: '', phoneNumber: '' });
+  const [personalDraft, setPersonalDraft] = useState({ organizationName: '', phoneNumber: '', email: '' });
   const [savingPersonal, setSavingPersonal] = useState(false);
 
   // Organization Details card — Service Type, Dhiway spaces, GSTIN, business
@@ -174,6 +183,7 @@ export const Profile = () => {
     setPersonalDraft({
       organizationName: user?.name || '',
       phoneNumber: user?.phoneNumber || '',
+      email: user?.email || '',
     });
     setEditingPersonal(true);
   };
@@ -183,23 +193,34 @@ export const Profile = () => {
   const savePersonal = async () => {
     setSavingPersonal(true);
     try {
-      const payload = {};
-      const updates = {};
-
       const trimmedName = personalDraft.organizationName.trim();
-      if (trimmedName !== (user?.name || '')) {
-        payload.organizationName = trimmedName;
-        updates.name = trimmedName;
-      }
-
       const trimmedPhone = personalDraft.phoneNumber.trim();
-      if (trimmedPhone !== (user?.phoneNumber || '')) {
-        payload.phoneNumber = trimmedPhone;
-        updates.phoneNumber = trimmedPhone;
+      const updates = {};
+      let hasChanges = false;
+
+      if (isSuperAdmin) {
+        // Own-account edit through the same superadmin-management endpoint
+        // used for other superadmins — self-targeted via `user.id`. Email
+        // is editable here (unlike the org path below); there's no
+        // password field on this card — that stays in the dedicated
+        // superadmin-management modal in User List, to keep this page's
+        // single "Edit" toggle from also doubling as a password-change form.
+        const payload = {};
+        if (trimmedName !== (user?.name || '')) { payload.full_name = trimmedName; updates.name = trimmedName; }
+        if (trimmedPhone !== (user?.phoneNumber || '')) { payload.phone_number = trimmedPhone; updates.phoneNumber = trimmedPhone; }
+        const trimmedEmail = personalDraft.email.trim();
+        if (trimmedEmail !== (user?.email || '')) { payload.email = trimmedEmail; updates.email = trimmedEmail; }
+        hasChanges = Object.keys(payload).length > 0;
+        if (hasChanges) await adminAPI.updateSuperAdmin(user.id, payload);
+      } else {
+        const payload = {};
+        if (trimmedName !== (user?.name || '')) { payload.organizationName = trimmedName; updates.name = trimmedName; }
+        if (trimmedPhone !== (user?.phoneNumber || '')) { payload.phoneNumber = trimmedPhone; updates.phoneNumber = trimmedPhone; }
+        hasChanges = Object.keys(payload).length > 0;
+        if (hasChanges) await authAPI.updateOwnProfile(payload);
       }
 
-      if (Object.keys(payload).length > 0) {
-        await authAPI.updateOwnProfile(payload);
+      if (hasChanges) {
         updateUserProfile(updates);
         await refreshUser();
         toast.success('Profile updated');
@@ -391,7 +412,7 @@ export const Profile = () => {
             <Card className="p-5">
               <div className="flex items-center justify-between gap-3 mb-4">
                 <h3 className="font-sora font-bold text-brand-dark">Personal Information</h3>
-                {isOrg && (
+                {(isOrg || isSuperAdmin) && (
                   <CardEditControl
                     isEditing={editingPersonal}
                     saving={savingPersonal}
@@ -414,7 +435,22 @@ export const Profile = () => {
                   <DetailRow icon={Building2} label={isOrg ? 'Organization Name' : 'Full Name'} value={user?.name} />
                 )}
                 <div className="border-t border-gray-50" />
-                <DetailRow icon={Mail} label="Email Address" value={user?.email} hint="Cannot be changed" />
+                {editingPersonal && isSuperAdmin ? (
+                  <FieldInput
+                    icon={Mail}
+                    label="Email Address"
+                    value={personalDraft.email}
+                    onChange={(v) => updatePersonalDraft('email', v)}
+                    disabled={savingPersonal}
+                  />
+                ) : (
+                  <DetailRow
+                    icon={Mail}
+                    label="Email Address"
+                    value={user?.email}
+                    hint={isSuperAdmin ? undefined : 'Cannot be changed'}
+                  />
+                )}
                 <div className="border-t border-gray-50" />
                 {editingPersonal ? (
                   <FieldInput

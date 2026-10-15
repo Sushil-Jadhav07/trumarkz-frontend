@@ -309,6 +309,41 @@ export const authAPI = {
   // in the User List), not an access gate. `org_id` body key confirmed
   // against the backend team's contract doc.
   approveOrganization: (orgId) => api.post('/auth/organizations/approve', { org_id: orgId }),
+  // ── Superadmin organization management (org-scoped, never mixes in the
+  // signup contact person's personal fields/credentials) — use these for
+  // organization profile viewing/editing instead of the generic
+  // getAllUsers/updateUser above, which still carry full_name/phone_number/
+  // is_active/email_verified and have no organization-specific allowlist.
+  // GET /auth/organizations — `total` is this page's item count, not a
+  // cross-page total (matches this backend's existing pagination convention
+  // elsewhere — never treat it as the overall dataset size).
+  getOrganizations: (params = {}) => {
+    const p = {};
+    if (params.limit != null) p.limit = params.limit;
+    if (params.offset != null) p.offset = params.offset;
+    return api.get('/auth/organizations', { params: p });
+  },
+  getOrganization: (orgId) => api.get(`/auth/organizations/${orgId}`),
+  // PATCH /auth/organizations/{org_id} — every field optional. Only
+  // organization_name/service_type/industry_type/gstin/business_reg_number/
+  // address_line1-3/use_cases/dhiways_details are part of this schema;
+  // org_approved/is_active/email_verified/onboarding_completed/gst_verified
+  // are read-only here (sending them is simply ignored) — use the existing
+  // dedicated actions (approveOrganization, deactivateUser, etc.) for those.
+  // Never send full_name/phone_number/email/password/OTP/token here — this
+  // surface is organization-scoped only, never the signup contact person's.
+  updateOrganization: (orgId, payload) => api.patch(`/auth/organizations/${orgId}`, cleanObject(payload)),
+
+  // PATCH /auth/superadmins/{user_id} — superadmin-only. Updates an existing
+  // superadmin's own details (full_name, phone_number, email, password,
+  // is_active). Every field optional — only send what's actually changing;
+  // omit `password` entirely to leave it unchanged (never send an empty
+  // string for it). This is the dedicated surface for editing an existing
+  // superadmin account — distinct from promoteSuperAdmin (grants super-admin
+  // to an existing non-admin user) and createSuperAdmin (creates a brand
+  // new one) below, neither of which edits an existing admin's details.
+  updateSuperAdmin: (userId, payload) => api.patch(`/auth/superadmins/${userId}`, cleanObject(payload)),
+
   promoteSuperAdmin: (email) => api.post('/auth/promote-super-admin', { email }),
   createSuperAdmin: (payload) => api.post('/auth/create-super-admin', payload),
   getOrganizationIndustryType: (orgId) => api.get(`/auth/organization/${orgId}/industry-type`),
@@ -322,11 +357,15 @@ export const adminAPI = {
   getAllUsers: authAPI.getAllUsers,
   createUser: authAPI.createUser,
   updateUser: authAPI.updateUser,
+  updateSuperAdmin: authAPI.updateSuperAdmin,
   deactivateUser: authAPI.deactivateUser,
   permanentlyDeleteUser: authAPI.permanentlyDeleteUser,
   approveOrganization: authAPI.approveOrganization,
   unverifyGstForOrg: authAPI.unverifyGstForOrg,
   setDhiwayDefault: authAPI.setDhiwayDefault,
+  getOrganizations: authAPI.getOrganizations,
+  getOrganization: authAPI.getOrganization,
+  updateOrganization: authAPI.updateOrganization,
   promoteSuperAdmin: authAPI.promoteSuperAdmin,
   createSuperAdmin: (payload) =>
     authAPI.createSuperAdmin(
@@ -755,6 +794,23 @@ export const verificationAPI = {
   resendManualVerification: (requestId) =>
     verificationApi.post(`/verification/manual/resend/${requestId}`),
 
+  // POST /verification/manual/resend-rejected — re-verification, NOT the
+  // same as resendManualVerification above (that resends the same link for
+  // the same request; this creates a brand-new request for a fresh round of
+  // review). Org-authenticated, owns-the-batch enforced (404 if not, never
+  // 403). Only users CURRENTLY rejected for this exact verification_type_name
+  // may be included — the old rejection stays in history untouched; only
+  // this type's current verification_type_status entry can move once the
+  // new request is decided. 409 if a pending resend already exists for one
+  // of these users/this type — never retry blindly on that.
+  resendRejectedForVerification: (payload) =>
+    verificationApi.post('/verification/manual/resend-rejected', {
+      batch_id: payload.batch_id,
+      verification_type_name: payload.verification_type_name,
+      batch_user_ids: payload.batch_user_ids,
+      verifier_email: payload.verifier_email,
+    }),
+
   // ── Submitted verifier reports for a batch ─────────────────────────────────
   getSubmittedReports: (batchId, submittedOnly = false) =>
     verificationApi.get(`/verification/batches/${batchId}/submitted-reports`, {
@@ -945,6 +1001,10 @@ export const sdcAPI = {
   // config default) and schema_id resolves from the batch's industry — both
   // can optionally be passed here to override that resolution, but that's a
   // testing-only escape hatch, not part of the normal admin flow.
+  // user_ids (optional): generate for only these BatchUser ids instead of
+  // the whole eligible batch. Omit/empty to keep the original whole-batch
+  // behavior — cleanObject already drops an empty array, so passing [] here
+  // is always safe and never accidentally narrows the request.
   generateBatchSDC: (batchId, payload = {}) =>
     verificationApi.post(
       `/sdc/batches/${batchId}/generate`,
@@ -953,8 +1013,27 @@ export const sdcAPI = {
         active: !!payload.active,
         space_id: payload.space_id?.trim(),
         schema_id: payload.schema_id?.trim(),
+        user_ids: Array.isArray(payload.user_ids) ? payload.user_ids : undefined,
       })
     ),
+
+  // GET /sdc/batches/{batch_id}/approvals — full history (pending, approved,
+  // rejected), newest first. Org restricted to its own batches; super admin
+  // can view any. Used both to show the org's "SDC Approval Requests" card
+  // and the superadmin's read-only approval-status view (superadmin never
+  // gets an approve/reject action — only the owning org decides).
+  getSDCApprovals: (batchId) =>
+    verificationApi.get(`/sdc/batches/${batchId}/approvals`),
+
+  // POST /sdc/approvals/{request_id}/decide — org-authenticated only. A
+  // super admin or a different org gets 404 (never 403 — same
+  // indistinguishable-404 pattern as every other batch-scoped endpoint).
+  // 409 if the request was already decided — never retry blindly on that.
+  decideSDCApproval: (requestId, payload) =>
+    verificationApi.post(`/sdc/approvals/${requestId}/decide`, {
+      decision: payload.decision,
+      ...(payload.reason?.trim() ? { reason: payload.reason.trim() } : {}),
+    }),
 
   // GET /sdc/batches/{batch_id}/status — poll until done:true. Reports exact
   // ready/pending/total counts for this batch (unlike /sdc/records, which

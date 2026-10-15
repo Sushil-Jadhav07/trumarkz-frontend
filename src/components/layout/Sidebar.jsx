@@ -5,7 +5,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, Layers, Award,
   Wallet, HelpCircle, User, LogOut, ChevronLeft, ChevronRight,
-  GitBranch, Share2, Building2,
+  GitBranch, Share2, Building2, Briefcase,
   ShieldCheck, UserCog, UserSearch,
   Mail, Package, Star,
 } from 'lucide-react';
@@ -52,6 +52,7 @@ export const Sidebar = ({ collapsed, onToggle, mobileOpen = false, onMobileClose
         { path: '/admin/batch-monitor', label: 'Batch Monitor', icon: Layers },
         { path: '/admin/sdc-verification', label: 'SDC Verification', icon: ShieldCheck },
         { path: '/admin/user-list', label: 'User List', icon: UserSearch },
+        { path: '/admin/organizations', label: 'Organizations', icon: Briefcase },
         { path: '/admin/email-drafts', label: 'Email Drafts', icon: Mail },
         { path: '/admin/product-warranty', label: 'Warranty Review', icon: Package },
         { path: '/admin/skills-management', label: 'Skills Review', icon: Star },
