@@ -62,40 +62,36 @@ const TypeRow = ({ name, info, verifierEmail }) => {
   const isAutomatic = info?.label === 'automatic';
 
   return (
-    <div className="rounded-xl border border-gray-100 px-4 py-3">
-      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
-        <div className="flex min-w-0 items-center gap-2.5">
-          <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${meta.ring}`}>
-            <StatusIcon size={14} />
+    <div className="inline-flex max-w-full flex-col rounded-xl border border-gray-100 px-2.5 py-2">
+      <div className="flex items-center gap-1.5">
+        <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full ${meta.ring}`}>
+          <StatusIcon size={11} />
+        </span>
+        <p className="min-w-0 truncate text-xs font-semibold text-brand-dark font-inter">{name}</p>
+        {info?.label && (
+          <span className="shrink-0 rounded-full bg-gray-100 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-gray-500 font-inter">
+            {info.label}
           </span>
-          <p className="min-w-0 truncate text-sm font-semibold text-brand-dark font-inter">{name}</p>
-          {info?.label && (
-            <span className="shrink-0 rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-gray-500 font-inter">
-              {info.label}
-            </span>
-          )}
-        </div>
-        <div className="flex shrink-0 items-center gap-2 pl-9 sm:pl-0">
-          <span className={`flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold font-inter ${meta.ring}`}>
-            {meta.label}
-          </span>
-        </div>
+        )}
+        <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold font-inter ${meta.ring}`}>
+          {meta.label}
+        </span>
       </div>
       {/* Assigned verifier — never a fake value; a manual type with no
           assignment match shows nothing here rather than guessing. */}
       {(isAutomatic || verifierEmail) && (
-        <p className="mt-2 ml-9 text-xs text-gray-400 font-inter">
+        <p className="mt-1.5 text-[11px] text-gray-400 font-inter">
           <span className="font-semibold text-gray-500">Verifier: </span>
           {isAutomatic ? 'Automatic' : verifierEmail}
         </p>
       )}
       {checkStatus === 'rejected' && info?.rejection_reason && (
-        <p className="mt-2 ml-9 rounded-lg bg-red-50 px-2.5 py-1.5 text-xs text-red-600 font-inter">
+        <p className="mt-1.5 rounded-lg bg-red-50 px-2 py-1 text-[11px] text-red-600 font-inter">
           <span className="font-semibold">Reason: </span>{info.rejection_reason}
         </p>
       )}
       {!canView && checkStatus !== 'rejected' && (
-        <p className="mt-2 ml-9 text-xs text-gray-400 font-inter">
+        <p className="mt-1.5 text-[11px] text-gray-400 font-inter">
           {reportUrl ? 'Report pending review.' : 'No report available.'}
         </p>
       )}
@@ -300,7 +296,7 @@ export const VerificationDetailsModal = ({
           <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-gray-400 font-inter">
             Verification Check{checkEntries.length === 1 ? '' : 's'}
           </p>
-          <div className="space-y-2.5">
+          <div className="flex flex-wrap gap-2">
             {checkEntries.length === 0 ? (
               <p className="py-6 text-center text-xs text-gray-400 font-inter">No verification types recorded for this record.</p>
             ) : (

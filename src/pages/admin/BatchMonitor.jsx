@@ -17,8 +17,8 @@ import { GenerateSDCModal } from '@/pages/admin/SDCVerification';
 import { TablePagination } from '@/components/shared/TablePagination';
 import { normalizeDhiwayDetails, resolveDhiwaySpaceId } from '@/utils/dhiway';
 import {
-  AlertCircle, AlertTriangle, ArrowRight, Building2, Calendar, CheckCircle, ChevronDown, ChevronLeft, ChevronRight, Clock, Copy, Download, Eye, FileText, Info,
-  Layers, Link2, Mail, MoreVertical, Package, Plus, RefreshCw, Save, Search, Send, ShieldCheck, Sparkles, Trash2, User, Users, X, XCircle, Zap,
+  AlertCircle, AlertTriangle, ArrowRight, Building2, Calendar, CheckCircle, ChevronDown, ChevronLeft, ChevronRight, Clock, Download, Eye, FileText, Info,
+  Layers, Mail, MoreVertical, Package, Plus, RefreshCw, Save, Search, Send, ShieldCheck, Sparkles, Trash2, User, Users, X, XCircle, Zap,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -1291,23 +1291,11 @@ export const ResendRejectedModal = ({ batch, records = [], prefill, onClose, onS
   const [verifierEmail, setVerifierEmail] = useState('');
   const [sending, setSending] = useState(false);
   const [result, setResult] = useState(null);
-  const [linkCopied, setLinkCopied] = useState(false);
   // 502 — the request/association rows were created but the email itself
   // failed to send. This is a real failure, never shown as success; the
   // request still exists server-side, so retrying (same call, below) is
   // treated as a reminder that reuses it rather than erroring again.
   const [deliveryFailure, setDeliveryFailure] = useState(null); // { message, requestId }
-
-  const copyUploadLink = async () => {
-    if (!result?.upload_link) return;
-    try {
-      await navigator.clipboard.writeText(result.upload_link);
-      setLinkCopied(true);
-      setTimeout(() => setLinkCopied(false), 2000);
-    } catch {
-      toast.error('Could not copy — copy the link manually');
-    }
-  };
 
   useEffect(() => {
     if (!typeName) return;
@@ -1428,30 +1416,8 @@ export const ResendRejectedModal = ({ batch, records = [], prefill, onClose, onS
             </div>
           </div>
 
-          {/* This is a brand-new request/token — a DIFFERENT link from the
-              original rejected request's. That old link/page is untouched
-              and will keep showing its own original "Rejected" history
-              forever, by design (see note below) — this is the one that
-              actually reflects the new, pending re-verification. */}
-          {result.upload_link && (
-            <div>
-              <label className="mb-1.5 block text-xs font-medium text-gray-500 font-inter">New Verification Link</label>
-              <div className="flex items-center gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5">
-                <Link2 size={14} className="shrink-0 text-gray-400" />
-                <span className="min-w-0 flex-1 truncate text-xs text-gray-600 font-inter">{result.upload_link}</span>
-                <button
-                  type="button"
-                  onClick={copyUploadLink}
-                  className="flex shrink-0 items-center gap-1 rounded-lg border border-gray-200 bg-white px-2 py-1 text-[11px] font-semibold text-gray-600 font-inter hover:bg-gray-50"
-                >
-                  <Copy size={11} /> {linkCopied ? 'Copied' : 'Copy'}
-                </button>
-              </div>
-            </div>
-          )}
-
           <p className="text-xs text-gray-500 font-inter">
-            The verifier will receive this link by email. The original rejected request's own link/history is untouched — it will keep showing "Rejected" permanently; only this new link reflects the fresh re-verification.
+            The verifier will receive a new verification link by email. The original rejected request's own link/history is untouched — it will keep showing "Rejected" permanently; only the new link reflects the fresh re-verification.
           </p>
           <Button onClick={onClose} className="w-full">Done</Button>
         </div>
