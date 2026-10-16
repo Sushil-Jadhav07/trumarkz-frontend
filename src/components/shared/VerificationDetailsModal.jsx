@@ -1,5 +1,5 @@
 import React from 'react';
-import { CheckCircle, Clock, Download, Eye, RefreshCw, XCircle } from 'lucide-react';
+import { CheckCircle, Clock, FileDown, Eye, RefreshCw, XCircle } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
 import { Badge } from '@/components/ui/Badge';
 import { RecordDocuments } from '@/components/shared/RecordDocuments';
@@ -212,7 +212,7 @@ export const VerificationCheckDetailsModal = ({ selection, title, verifierEmail,
           )}
 
           {isRejected && onResendRejected && (
-            <div className="border-t border-gray-100 px-4 py-3">
+            <Modal.Footer>
               <button
                 type="button"
                 onClick={() => onResendRejected(record, typeName)}
@@ -220,7 +220,7 @@ export const VerificationCheckDetailsModal = ({ selection, title, verifierEmail,
               >
                 <RefreshCw size={12} /> Resend for Re-verification
               </button>
-            </div>
+            </Modal.Footer>
           )}
         </div>
       </div>
@@ -260,9 +260,11 @@ export const VerificationDetailsModal = ({
           disabled={certificate.downloading}
           onClick={onDownloadCertificate}
           title="Download SDC Certificate"
-          className="flex items-center gap-1.5 rounded-lg bg-brand-blue px-2.5 py-1.5 text-xs font-semibold font-inter text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
+          className="flex min-h-10 items-center gap-2 rounded-xl bg-green-600 px-4 py-2.5 text-sm font-semibold font-inter text-white shadow-sm hover:bg-green-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-600/40 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 transition-colors"
         >
-          {certificate.downloading ? <RefreshCw size={13} className="animate-spin" /> : <Download size={13} />}
+          {certificate.downloading
+            ? <RefreshCw size={18} strokeWidth={1.75} className="shrink-0 animate-spin" />
+            : <FileDown size={18} strokeWidth={1.75} className="shrink-0" />}
           Download SDC Certificate
         </button>
       )}

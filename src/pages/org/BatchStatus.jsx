@@ -1414,7 +1414,7 @@ const BatchDetailModal = ({ batchId, batchName, onClose, asPage = false, onLoade
                         ? `This request includes ${notFullyVerifiedCount} record${notFullyVerifiedCount === 1 ? '' : 's'} not fully verified. Approving allows the SuperAdmin to generate SDCs for this exact selection.`
                         : 'This decision cannot be undone once submitted.'}
                     </p>
-                    <div className="flex gap-2">
+                    <Modal.Footer className="flex gap-2">
                       <Button size="sm" variant="ghost" onClick={() => setApprovalConfirmAction(null)}>Cancel</Button>
                       <Button
                         size="sm"
@@ -1424,13 +1424,13 @@ const BatchDetailModal = ({ batchId, batchName, onClose, asPage = false, onLoade
                       >
                         {approvalConfirmAction === 'approved' ? 'Approve Request' : 'Reject Request'}
                       </Button>
-                    </div>
+                    </Modal.Footer>
                   </div>
                 ) : (
-                  <div className="flex gap-3">
+                  <Modal.Footer className="flex gap-3">
                     <Button variant="danger" onClick={() => setApprovalConfirmAction('rejected')}>Reject</Button>
                     <Button variant="primary" onClick={() => setApprovalConfirmAction('approved')}>Approve</Button>
-                  </div>
+                  </Modal.Footer>
                 )}
               </>
             ) : (
@@ -1451,9 +1451,9 @@ const BatchDetailModal = ({ batchId, batchName, onClose, asPage = false, onLoade
                     <p className="mt-1 text-xs text-gray-400 font-inter">Decided {formatDate(approval.decided_at)}</p>
                   )}
                 </div>
-                <div className="flex justify-end">
+                <Modal.Footer className="flex justify-end">
                   <Button variant="ghost" onClick={closeReviewApproval}>Close</Button>
-                </div>
+                </Modal.Footer>
               </>
             )}
           </div>
@@ -2293,7 +2293,7 @@ export const BatchStatus = () => {
               </p>
             </div>
           </div>
-          <div className="flex justify-end gap-2">
+          <Modal.Footer className="flex justify-end gap-2">
             <Button variant="outline" size="sm" onClick={() => setShowGstGate(false)}>Cancel</Button>
             <Button
               variant="primary"
@@ -2303,7 +2303,7 @@ export const BatchStatus = () => {
             >
               Go to Profile
             </Button>
-          </div>
+          </Modal.Footer>
         </div>
       </Modal>
     </AuthLayout>

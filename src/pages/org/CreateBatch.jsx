@@ -244,12 +244,12 @@ const SingleHumanModal = ({ isOpen, onClose, onSuccess, selectedIndustry, select
         </div>
       </div>
 
-      <div className="flex gap-3 mt-5 pt-4 border-t border-gray-100">
+      <Modal.Footer className="flex gap-3">
         <Button variant="outline" size="md" className="flex-1" onClick={handleClose} disabled={loading}>Cancel</Button>
         <Button variant="primary" size="md" className="flex-1" onClick={handleSubmit} loading={loading} icon={CheckCircle}>
           Create &amp; Generate Invite
         </Button>
-      </div>
+      </Modal.Footer>
     </Modal>
   );
 };
@@ -384,12 +384,12 @@ const SingleProductModal = ({ isOpen, onClose, onSuccess, categories, selectedCa
         </div>
       </div>
 
-      <div className="flex gap-3 mt-5 pt-4 border-t border-gray-100">
+      <Modal.Footer className="flex gap-3">
         <Button variant="outline" size="md" className="flex-1" onClick={handleClose} disabled={loading}>Cancel</Button>
         <Button variant="primary" size="md" className="flex-1" onClick={handleSubmit} loading={loading} icon={CheckCircle}>
           Create &amp; Generate Invite
         </Button>
-      </div>
+      </Modal.Footer>
     </Modal>
   );
 };

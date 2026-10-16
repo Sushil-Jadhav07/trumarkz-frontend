@@ -58,18 +58,18 @@ const ConfirmModal = ({ isOpen, onClose, title, message, confirmLabel, tone = 'r
     }
   };
   return (
-    <Modal isOpen={isOpen} onClose={submitting ? undefined : onClose} title="" size="sm">
+    <Modal isOpen={isOpen} onClose={submitting ? undefined : onClose} title={title} size="sm">
       <div className="space-y-5 pt-2">
         <div className="flex flex-col items-center text-center gap-3">
           <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${tone === 'red' ? 'bg-red-50' : 'bg-amber-50'}`}>
             <AlertTriangle size={22} className={tone === 'red' ? 'text-red-500' : 'text-amber-500'} />
           </div>
           <div>
-            <p className="font-sora font-bold text-brand-dark">{title}</p>
+            
             <p className="text-sm text-gray-500 font-inter mt-1">{message}</p>
           </div>
         </div>
-        <div className="flex gap-3">
+        <Modal.Footer className="flex gap-3">
           <button type="button" onClick={onClose} disabled={submitting} className="flex-1 px-4 py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors font-inter disabled:opacity-50">
             Cancel
           </button>
@@ -81,7 +81,7 @@ const ConfirmModal = ({ isOpen, onClose, title, message, confirmLabel, tone = 'r
           >
             {submitting ? 'Working…' : confirmLabel}
           </button>
-        </div>
+        </Modal.Footer>
       </div>
     </Modal>
   );

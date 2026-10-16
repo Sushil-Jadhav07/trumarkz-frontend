@@ -1,3 +1,4 @@
+import { Modal } from '@/components/ui/Modal';
 import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
@@ -59,94 +60,27 @@ const ForgotPasswordModal = ({ onClose, forgotPassword }) => {
   };
 
   return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      transition={{ duration: 0.18 }}
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
-    >
-      <motion.div
-        initial={{ opacity: 0, scale: 0.92, y: 16 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
-        exit={{ opacity: 0, scale: 0.94, y: 8 }}
-        transition={spring.smooth}
-        className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-7 relative"
-      >
-        <motion.button
-          whileHover={{ scale: 1.08, backgroundColor: '#f3f4f6' }}
-          whileTap={{ scale: 0.92 }}
-          transition={spring.micro}
-          onClick={onClose}
-          className="absolute top-4 right-4 p-1.5 rounded-lg text-gray-400 hover:text-gray-600 cursor-pointer"
-        >
-          <X size={16} />
-        </motion.button>
-        <AnimatePresence mode="wait">
-          {!sent ? (
-            <motion.div
-              key="form"
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -8 }}
-              transition={spring.smooth}
-            >
-              <div className="w-11 h-11 bg-brand-blue/10 rounded-xl flex items-center justify-center mb-4 mx-auto">
-                <Lock size={20} className="text-brand-blue" />
-              </div>
-              <h3 className="font-sora font-bold text-xl text-brand-dark mb-1 text-center">Forgot Password?</h3>
-              <p className="text-sm text-gray-500 font-inter mb-6 leading-relaxed text-center">No worries. Enter your registered email and we'll send you a reset OTP.</p>
-              <form onSubmit={handleSubmit} className="space-y-4">
-                <Input label="Email Address" placeholder="Enter your email" name="email" autoComplete="email" value={email} onChange={e => setEmail(e.target.value)} icon={Mail} />
-                <motion.div whileHover={{ scale: 1.01 }} whileTap={{ scale: 0.98 }} transition={spring.snappy}>
-                  <Button type="submit" variant="primary" size="md" className="w-full" disabled={submitting || !email.trim()}>
-                    {submitting ? 'Sending…' : 'Send Reset OTP'}
-                  </Button>
-                </motion.div>
-              </form>
-            </motion.div>
-          ) : (
-            <motion.div
-              key="success"
-              initial={{ opacity: 0, scale: 0.94, y: 10 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              transition={spring.smooth}
-              className="text-center py-2"
-            >
-              <motion.div
-                initial={{ scale: 0.6, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
-                transition={{ ...spring.snappy, delay: 0.1 }}
-                className="w-14 h-14 bg-green-50 border border-green-100 rounded-2xl flex items-center justify-center mx-auto mb-4"
-              >
-                <CheckCircle size={28} className="text-green-500" />
-              </motion.div>
-              <h3 className="font-sora font-bold text-xl text-brand-dark mb-2">Check Your Email</h3>
-              <p className="text-sm text-gray-500 font-inter mb-5 leading-relaxed">
-                If an account exists for <span className="font-semibold text-brand-dark">{email}</span>, a reset OTP has been sent. It expires in 10 minutes.
-              </p>
-              <div className="space-y-3">
-                <motion.div whileHover={{ scale: 1.01 }} whileTap={{ scale: 0.98 }} transition={spring.snappy}>
-                  <Button variant="primary" size="md" className="w-full" onClick={handleEnterOtp}>
-                    Enter OTP &amp; Reset Password
-                  </Button>
-                </motion.div>
-                <motion.button
-                  type="button"
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.97 }}
-                  transition={spring.micro}
-                  onClick={onClose}
-                  className="w-full text-sm text-gray-500 font-inter hover:text-brand-dark transition-colors"
-                >
-                  Back to Sign In
-                </motion.button>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </motion.div>
-    </motion.div>
+    <Modal isOpen onClose={submitting ? undefined : onClose} title={sent ? 'Check Your Email' : 'Forgot Password?'} size="sm" onSubmit={!sent ? handleSubmit : undefined}>
+      {!sent ? (
+        <div className="space-y-4">
+          <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-xl bg-brand-blue/10"><Lock size={20} className="text-brand-blue" /></div>
+          <p className="text-center text-sm leading-relaxed text-gray-500 font-inter">Enter your registered email and we'll send you a reset OTP.</p>
+          <Input label="Email Address" placeholder="Enter your email" name="email" autoComplete="email" value={email} onChange={e => setEmail(e.target.value)} icon={Mail} />
+          <Modal.Footer>
+            <Button type="submit" variant="primary" size="md" className="w-full" disabled={submitting || !email.trim()}>{submitting ? 'Sending...' : 'Send Reset OTP'}</Button>
+          </Modal.Footer>
+        </div>
+      ) : (
+        <div className="space-y-4 text-center">
+          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl border border-green-100 bg-green-50"><CheckCircle size={28} className="text-green-500" /></div>
+          <p className="text-sm leading-relaxed text-gray-500 font-inter">If an account exists for <span className="font-semibold text-brand-dark">{email}</span>, a reset OTP has been sent. It expires in 10 minutes.</p>
+          <Modal.Footer className="space-y-3">
+            <Button variant="primary" size="md" className="w-full" onClick={handleEnterOtp}>Enter OTP &amp; Reset Password</Button>
+            <button type="button" onClick={onClose} className="w-full text-center text-sm text-gray-500 font-inter hover:text-brand-dark">Back to sign in</button>
+          </Modal.Footer>
+        </div>
+      )}
+    </Modal>
   );
 };
 

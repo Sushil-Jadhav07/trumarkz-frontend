@@ -66,10 +66,10 @@ const EditBatchModal = ({ batch, onClose, onSave }) => {
             className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm font-inter focus:outline-none focus:ring-2 focus:ring-brand-blue/30"
           />
         </div>
-        <div className="flex justify-end gap-2 pt-1 border-t border-gray-100">
+        <Modal.Footer className="flex justify-end gap-2">
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
           <Button variant="primary" disabled={!name.trim()} onClick={() => { onSave(name.trim()); onClose(); }}>Save</Button>
-        </div>
+        </Modal.Footer>
       </div>
     </Modal>
   );
@@ -672,6 +672,10 @@ export const BatchControlCenter = () => {
   // prefer the detail response (batchDetail), which does have it.
   const sdcInfo = batchDetail?.verification_progress?.sdc || selectedBatch.sdcInfo || null;
   const detailRecords = batchDetail?.users || selectedBatch.records || [];
+  // Check the whole batch so pagination and filters do not hide an issue.
+  const showIssuesColumn = detailRecords.some((record) =>
+    Object.values(record.verification_type_status || {}).some((check) => check?.status === 'rejected')
+  );
   const activeWorkflowIndex = WORKFLOW_STEPS.findIndex((item) => item.id === (batchDetail?.status || selectedBatch.status));
 
   // Category — not captured by the list-normaliser today; read defensively
@@ -1064,10 +1068,10 @@ export const BatchControlCenter = () => {
 
         {/* ── Verification Records ─────────────────────────────────────────── */}
           <div id="records-section" className="rounded-2xl border border-gray-100 bg-white overflow-hidden">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-5 py-4 border-b border-gray-100">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-4 py-3 border-b border-gray-100">
               <div>
                 <h4 className="font-sora font-semibold text-brand-dark">Verification Records</h4>
-                <p className="text-xs text-gray-400 font-inter mt-1">View and manage verification status for each individual in this batch.</p>
+                <p className="text-xs text-gray-400 font-inter mt-0.5">View and manage verification status for each individual in this batch.</p>
               </div>
               <div className="flex items-center gap-2">
                 <div className="relative">
@@ -1101,8 +1105,8 @@ export const BatchControlCenter = () => {
             </div>
 
             {/* Search + filters */}
-            <div className="flex flex-col sm:flex-row flex-wrap items-stretch sm:items-center gap-2 px-5 py-3 border-b border-gray-100 bg-gray-50/60">
-              <div className="flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2 flex-1 min-w-[220px]">
+            <div className="flex flex-col sm:flex-row flex-wrap items-stretch sm:items-center gap-2 px-4 py-2 border-b border-gray-100 bg-gray-50/60">
+              <div className="flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-1.5 flex-1 min-w-[220px]">
                 <Search size={14} className="text-gray-400 shrink-0" />
                 <input
                   value={recordSearch}
@@ -1163,10 +1167,22 @@ export const BatchControlCenter = () => {
                   <p className="text-sm text-gray-400 font-inter">{detailRecords.length === 0 ? 'No records found for this batch' : 'No records match the selected filters.'}</p>
                 </div>
               ) : (
-                <table className="w-full min-w-[1300px]">
+                <table className={`w-full table-fixed ${showIssuesColumn ? 'min-w-[1300px]' : 'min-w-[1120px]'}`}>
+                  <colgroup>
+                    <col className="w-10" />
+                    <col className="w-10" />
+                    <col />
+                    <col />
+                    <col />
+                    <col className="w-24" />
+                    <col className="w-36" />
+                    <col className="w-36" />
+                    {showIssuesColumn && <col className="w-44" />}
+                    <col className="w-32" />
+                  </colgroup>
                   <thead className="bg-gray-50">
                     <tr>
-                      <th className="px-4 py-2.5 w-10">
+                      <th className="px-3 py-2">
                         <input
                           type="checkbox"
                           checked={pagedRecords.length > 0 && pagedRecords.every((r) => selectedRecordIds.has(r.id || r.user_id || r.entity_id))}
@@ -1181,15 +1197,15 @@ export const BatchControlCenter = () => {
                           className="accent-brand-blue"
                         />
                       </th>
-                      <th className="px-2 py-2.5 text-left text-[11px] font-semibold uppercase text-gray-500 font-inter">#</th>
-                      <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase text-gray-500 font-inter">Record</th>
-                      <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase text-gray-500 font-inter w-48">Verification</th>
-                      <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase text-gray-500 font-inter w-48">Verifier</th>
-                      <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase text-gray-500 font-inter w-36">Report</th>
-                      <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase text-gray-500 font-inter">Overall</th>
-                      <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase text-gray-500 font-inter">Certificate</th>
-                      <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase text-gray-500 font-inter w-44">Issues</th>
-                      <th className="px-4 py-2.5 text-right text-[11px] font-semibold uppercase text-gray-500 font-inter">Action</th>
+                      <th className="px-2 py-2 text-left text-[11px] font-semibold uppercase text-gray-500 font-inter">#</th>
+                      <th className="px-3 py-2 text-left text-[11px] font-semibold uppercase text-gray-500 font-inter">Record</th>
+                      <th className="px-3 py-2 text-left text-[11px] font-semibold uppercase text-gray-500 font-inter">Verification</th>
+                      <th className="px-3 py-2 text-left text-[11px] font-semibold uppercase text-gray-500 font-inter">Verifier</th>
+                      <th className="px-3 py-2 text-left text-[11px] font-semibold uppercase text-gray-500 font-inter">Report</th>
+                      <th className="px-3 py-2 text-left text-[11px] font-semibold uppercase text-gray-500 font-inter">Overall</th>
+                      <th className="px-3 py-2 text-left text-[11px] font-semibold uppercase text-gray-500 font-inter">Certificate</th>
+                      {showIssuesColumn && <th className="px-3 py-2 text-left text-[11px] font-semibold uppercase text-gray-500 font-inter w-44">Issues</th>}
+                      <th className="px-3 py-2 text-right text-[11px] font-semibold uppercase text-gray-500 font-inter">Action</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
@@ -1198,7 +1214,7 @@ export const BatchControlCenter = () => {
                       const status = statusBadge(record.overall_status_label || record.verification_status);
                       const batchUserId = record.id || record.user_id || record.entity_id;
                       const checkEntries = Object.entries(record.verification_type_status || {});
-                      const rejections = checkEntries.filter(([, v]) => v?.status === 'rejected' && v?.rejection_reason);
+                      const rejections = checkEntries.filter(([, v]) => v?.status === 'rejected');
                       // Certificate — same matchSdcRecord() this page already
                       // uses for the modal's SDC column, keyed by stable
                       // BatchUser/product identity, never by display name.
@@ -1207,7 +1223,7 @@ export const BatchControlCenter = () => {
                       const certBadgeStatus = certMatch ? (certMatch.issued ? 'info' : 'pending') : 'default';
                       return (
                         <tr key={batchUserId} className="hover:bg-gray-50/70 transition-colors align-top">
-                          <td className="px-4 py-3.5">
+                          <td className="px-3 py-2.5">
                             <input
                               type="checkbox"
                               checked={selectedRecordIds.has(batchUserId)}
@@ -1215,27 +1231,34 @@ export const BatchControlCenter = () => {
                               className="accent-brand-blue"
                             />
                           </td>
-                          <td className="px-2 py-3.5 text-sm text-gray-400 font-inter">{index + 1}</td>
-                          <td className="px-4 py-3.5">
-                            <div className="flex items-center gap-3 min-w-0">
-                              <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[11px] font-bold font-inter ${avatarTone(batchUserId)}`}>
+                          <td className="px-2 py-2.5 text-sm text-gray-400 font-inter">{index + 1}</td>
+                          <td className="p-0">
+                            <button
+                              type="button"
+                              onClick={() => setVerificationDetailsRecord(record)}
+                              aria-label={`View details for ${recordTitle(record)}`}
+                              className="group flex w-full min-w-0 items-center gap-2 px-3 py-2.5 text-left hover:bg-blue-50/60 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-brand-blue"
+                            >
+                              <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[11px] font-bold font-inter ${avatarTone(batchUserId)}`}>
                                 {getInitials(recordTitle(record))}
-                              </div>
-                              <div className="min-w-0">
-                                <div className="flex items-center gap-1.5 min-w-0">
-                                  <p className="text-sm font-medium text-brand-dark font-inter truncate">{recordTitle(record)}</p>
+                              </span>
+                              <span className="min-w-0">
+                                <span className="flex items-center gap-1.5 min-w-0">
+                                  <span className="min-w-0 truncate text-sm font-medium text-brand-dark font-inter group-hover:text-brand-blue group-hover:underline">
+                                    {recordTitle(record)}
+                                  </span>
                                   {record.batch_serial && (
                                     <span className="shrink-0 rounded-full bg-blue-50 px-1.5 py-0.5 text-[10px] font-semibold text-brand-blue font-inter" title="Batch serial — use this to match verifier-uploaded report filenames">
                                       {record.batch_serial}
                                     </span>
                                   )}
-                                </div>
-                                <p className="text-xs text-gray-400 font-inter truncate">{record.email || '—'}</p>
-                              </div>
-                            </div>
+                                </span>
+                                <span className="block truncate text-xs text-gray-400 font-inter">{record.email || '—'}</span>
+                              </span>
+                            </button>
                           </td>
                           {/* Verification — one compact line per type: dot + name + status. */}
-                          <td className="px-4 py-3.5">
+                          <td className="px-3 py-2.5">
                             {checkEntries.length === 0 ? (
                               <span className="text-xs text-gray-300 font-inter">—</span>
                             ) : (
@@ -1266,7 +1289,7 @@ export const BatchControlCenter = () => {
                           </td>
                           {/* Verifier — per type, from manual-assignments (exact
                               batch_user_id match), never inferred from name/email. */}
-                          <td className="px-4 py-3.5">
+                          <td className="px-3 py-2.5">
                             {checkEntries.length === 0 ? (
                               <span className="text-xs text-gray-300 font-inter">—</span>
                             ) : (
@@ -1290,7 +1313,7 @@ export const BatchControlCenter = () => {
                               verification_type_status.report_url every "View
                               Report" action already uses; never a raw gs://
                               path treated as directly openable. */}
-                          <td className="px-4 py-3.5">
+                          <td className="px-3 py-2.5">
                             {checkEntries.length === 0 ? (
                               <span className="text-xs text-gray-300 font-inter">—</span>
                             ) : (
@@ -1307,24 +1330,24 @@ export const BatchControlCenter = () => {
                               </div>
                             )}
                           </td>
-                          <td className="px-4 py-3.5">
+                          <td className="px-3 py-2.5">
                             <Badge status={status.variant}>{status.label}</Badge>
                           </td>
-                          <td className="px-4 py-3.5">
+                          <td className="px-3 py-2.5">
                             <Badge status={certBadgeStatus}>{certState}</Badge>
                           </td>
-                          <td className="px-4 py-3.5">
+                          {showIssuesColumn && <td className="px-3 py-2.5">
                             {rejections.length === 0 ? (
                               <span className="text-xs text-gray-300 font-inter">-</span>
                             ) : (
                               <p className="text-xs text-red-500 font-inter leading-snug">
-                                {rejections[0][1].rejection_reason}
+                                {rejections[0][1].rejection_reason || 'Verification rejected'}
                                 {rejections.length > 1 && <span className="text-gray-400"> (+{rejections.length - 1} more)</span>}
                               </p>
                             )}
-                          </td>
-                          <td className="px-4 py-3.5">
-                            <div className="flex items-center justify-end gap-1.5">
+                          </td>}
+                          <td className="px-3 py-2.5">
+                            <div className="flex flex-wrap items-center justify-end gap-1.5">
                               <button
                                 type="button"
                                 onClick={() => setVerificationDetailsRecord(record)}
@@ -1373,6 +1396,7 @@ export const BatchControlCenter = () => {
 
             {!loadingDetail && (
               <TablePagination
+                compact
                 page={recordPage}
                 pageSize={recordPageSize}
                 total={filteredRecords.length}

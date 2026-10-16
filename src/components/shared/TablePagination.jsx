@@ -3,7 +3,7 @@ import { ChevronLeft, ChevronRight } from 'lucide-react';
 
 // "Showing a-b of N" + prev / numbered pages / next + per-page select.
 // Fully controlled: the parent owns page/pageSize and slices its own rows.
-export const TablePagination = ({ page, pageSize, total, onPageChange, onPageSizeChange, pageSizes = [10, 25, 50], noun = 'record' }) => {
+export const TablePagination = ({ page, pageSize, total, onPageChange, onPageSizeChange, pageSizes = [10, 25, 50], noun = 'record', compact = false }) => {
   if (total <= 0) return null;
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
@@ -19,7 +19,7 @@ export const TablePagination = ({ page, pageSize, total, onPageChange, onPageSiz
   })();
 
   return (
-    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-5 py-3 border-t border-gray-100">
+    <div className={`flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-t border-gray-100 ${compact ? 'px-4 py-2' : 'px-5 py-3'}`}>
       <p className="text-xs text-gray-400 font-inter">
         Showing {start + 1}-{Math.min(start + pageSize, total)} of {total} {noun}{total === 1 ? '' : 's'}
       </p>

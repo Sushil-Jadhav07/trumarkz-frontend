@@ -109,7 +109,7 @@ const ActionModal = ({ isOpen, onClose, product, action, onSuccess }) => {
           />
         </div>
 
-        <div className="flex gap-3 pt-1">
+        <Modal.Footer className="flex gap-3">
           <button
             type="button"
             onClick={onClose}
@@ -129,7 +129,7 @@ const ActionModal = ({ isOpen, onClose, product, action, onSuccess }) => {
               : isReject ? <><XCircle size={13} /> Reject</> : <><CheckCircle size={13} /> Approve</>
             }
           </button>
-        </div>
+        </Modal.Footer>
       </div>
     </Modal>
   );

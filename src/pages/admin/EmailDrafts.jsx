@@ -129,8 +129,8 @@ const DraftModal = ({ isOpen, onClose, verificationType, draft, onSuccess }) => 
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={submitting ? undefined : onClose} title={isEdit ? 'Edit Email Draft' : 'Create Email Draft'} size="lg">
-      <form onSubmit={handleSubmit} className="space-y-4">
+    <Modal isOpen={isOpen} onClose={submitting ? undefined : onClose} title={isEdit ? 'Edit Email Draft' : 'Create Email Draft'} size="lg" onSubmit={handleSubmit}>
+      <div className="space-y-4">
         <div className="px-3 py-2 rounded-xl bg-blue-50 border border-blue-100 font-inter text-xs text-brand-blue">
           Verification type: <span className="font-semibold">{verificationType}</span>
         </div>
@@ -160,7 +160,7 @@ const DraftModal = ({ isOpen, onClose, verificationType, draft, onSuccess }) => 
           </p>
         </div>
 
-        <div className="flex gap-3 pt-1">
+        <Modal.Footer className="flex gap-3">
           <button
             type="button"
             onClick={onClose}
@@ -177,8 +177,8 @@ const DraftModal = ({ isOpen, onClose, verificationType, draft, onSuccess }) => 
             {submitting ? <RefreshCw size={14} className="animate-spin" /> : <Save size={14} />}
             {submitting ? 'Saving…' : (isEdit ? 'Save Changes' : 'Create Draft')}
           </button>
-        </div>
-      </form>
+        </Modal.Footer>
+      </div>
     </Modal>
   );
 };
@@ -202,7 +202,7 @@ const DeleteModal = ({ isOpen, onClose, draft, onSuccess }) => {
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={submitting ? undefined : onClose} title="" size="sm">
+    <Modal isOpen={isOpen} onClose={submitting ? undefined : onClose} title="Delete Draft?" size="sm">
       {draft && (
         <div className="space-y-5 pt-2">
           <div className="flex flex-col items-center text-center gap-3">
@@ -210,13 +210,13 @@ const DeleteModal = ({ isOpen, onClose, draft, onSuccess }) => {
               <AlertTriangle size={22} className="text-red-500" />
             </div>
             <div>
-              <p className="text-base font-semibold text-brand-dark font-sora">Delete Draft?</p>
+              
               <p className="text-sm text-gray-500 font-inter mt-1 leading-5">
                 "<span className="font-medium text-brand-dark">{draft.subject}</span>" will be permanently deleted.
               </p>
             </div>
           </div>
-          <div className="flex gap-3">
+          <Modal.Footer className="flex gap-3">
             <button type="button" onClick={onClose} disabled={submitting}
               className="flex-1 px-4 py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors font-inter disabled:opacity-50">
               Cancel
@@ -226,7 +226,7 @@ const DeleteModal = ({ isOpen, onClose, draft, onSuccess }) => {
               {submitting ? <RefreshCw size={14} className="animate-spin" /> : <Trash2 size={14} />}
               {submitting ? 'Deleting…' : 'Delete'}
             </button>
-          </div>
+          </Modal.Footer>
         </div>
       )}
     </Modal>

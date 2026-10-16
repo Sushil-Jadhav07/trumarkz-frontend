@@ -14,6 +14,10 @@ export const Input = ({
   className = '',
   icon: Icon,
   name,
+  // Opt-in smaller variant for tight layouts (e.g. a wide multi-column admin
+  // form) — every existing caller is unaffected since this defaults to false
+  // and keeps the original size/spacing exactly as before.
+  dense = false,
   ...props
 }) => {
   const [showPassword, setShowPassword] = useState(false);
@@ -25,7 +29,7 @@ export const Input = ({
   return (
     <div className={clsx('w-full', className)}>
       {label && (
-        <label className="block text-sm font-medium text-brand-dark font-inter mb-1.5">
+        <label className={clsx('block font-medium text-brand-dark font-inter', dense ? 'text-xs mb-1' : 'text-sm mb-1.5')}>
           {label}
         </label>
       )}
@@ -45,7 +49,8 @@ export const Input = ({
           disabled={disabled}
           placeholder={placeholder}
           className={clsx(
-            'w-full rounded-xl border-2 px-4 py-3 font-inter text-sm transition-all duration-200 outline-none',
+            'w-full rounded-xl border-2 font-inter transition-all duration-200 outline-none',
+            dense ? 'px-3 py-2 text-xs' : 'px-4 py-3 text-sm',
             Icon && 'pl-10',
             isPassword && 'pr-10',
             success && 'border-green-500 pr-10',

@@ -23,6 +23,20 @@ import {
 import toast from 'react-hot-toast';
 
 
+// Gmail's own multi-colour mark — no icon pack in this codebase ships it
+// (lucide's Mail is a generic outline envelope), so it's inlined here once
+// and reused wherever a "this goes out by email" action wants the real logo
+// instead of a generic icon.
+const GmailIcon = ({ className }) => (
+  <svg viewBox="0 0 48 48" className={className} aria-hidden="true">
+    <path fill="#4caf50" d="M45,16.2l-5,2.75l-5,4.75L35,40h7c1.657,0,3-1.343,3-3V16.2z" />
+    <path fill="#1e88e5" d="M3,16.2l3.614,1.71L13,23.7V40H6c-1.657,0-3-1.343-3-3V16.2z" />
+    <polygon fill="#e53935" points="35,11.2 24,19.45 13,11.2 12,17 13,23.7 24,31.95 35,23.7 36,17" />
+    <path fill="#c62828" d="M3,12.298V16.2l10,7.5V11.2L9.876,8.859C9.132,8.301,8.228,8,7.298,8h0 C4.924,8,3,9.924,3,12.298z" />
+    <path fill="#fbc02d" d="M45,12.298V16.2l-10,7.5V11.2l3.124-2.341C38.868,8.301,39.772,8,40.702,8h0 C43.076,8,45,9.924,45,12.298z" />
+  </svg>
+);
+
 const MANUAL_UPLOAD_LINK_PLACEHOLDER = '__TRUMARKZ_UPLOAD_LINK__';
 
 const buildHtmlBody = (name, uploadUrl) => `<!DOCTYPE html>
@@ -793,8 +807,8 @@ export const SmartSendModal = ({ isOpen, onClose, onSent, batch }) => {
   // `sidePanel`, docked beside the main dialog. Doubles as the editor for
   // either one specific row or the shared default, never both at once.
   const templateDrawer = (editingRow || isEditingDefault) && (
-    <div className="flex h-full flex-col">
-      <div className="flex items-start justify-between gap-3 border-b border-gray-100 px-5 py-4">
+    <div className="flex min-h-0 h-full flex-col">
+      <div className="flex shrink-0 items-start justify-between gap-3 border-b border-gray-100 px-5 py-4">
         <div className="min-w-0">
           <h4 className="font-sora text-base font-semibold text-brand-dark">
             {editingRow ? 'Customize Email Template' : 'Edit Default Template'}
@@ -810,7 +824,7 @@ export const SmartSendModal = ({ isOpen, onClose, onSent, batch }) => {
           <X size={18} />
         </button>
       </div>
-      <div className="flex-1 space-y-4 overflow-y-auto px-5 py-4">
+      <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain px-5 py-4">
         <div className="flex items-start gap-2 rounded-xl border border-blue-100 bg-blue-50/60 px-3 py-2.5">
           <Info size={13} className="mt-0.5 shrink-0 text-brand-blue" />
           <p className="text-xs text-blue-700 font-inter leading-relaxed">The Excel file and secure upload link are automatically appended by the system.</p>
@@ -904,8 +918,8 @@ export const SmartSendModal = ({ isOpen, onClose, onSent, batch }) => {
             <div className="mb-3 flex items-center justify-between gap-2">
               <p className="text-sm font-semibold text-brand-dark font-inter">Assigned Verifiers ({flatRows.length})</p>
               <button type="button" onClick={() => setEditingKey('DEFAULT')}
-                className="flex items-center gap-1.5 text-xs font-semibold text-brand-blue font-inter hover:underline">
-                <Mail size={12} /> Edit Default Template
+                className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm font-semibold text-brand-blue font-inter transition-colors hover:bg-blue-50/60">
+                <GmailIcon className="h-4 w-4 shrink-0" /> Edit Default Template
               </button>
             </div>
 
@@ -987,7 +1001,7 @@ export const SmartSendModal = ({ isOpen, onClose, onSent, batch }) => {
 
         {/* Footer */}
         {!loading && verificationTypes.length > 0 && (
-          <div className="flex flex-col gap-3 pt-1 border-t border-gray-100 sm:flex-row sm:items-center sm:justify-between">
+          <Modal.Footer className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <label className="flex items-center gap-2.5 cursor-pointer select-none group">
               <input type="checkbox" checked={saveDefaultAsDraft} onChange={(e) => setSaveDefaultAsDraft(e.target.checked)}
                 className="w-4 h-4 rounded border-gray-300 accent-brand-blue cursor-pointer" />
@@ -1007,7 +1021,7 @@ export const SmartSendModal = ({ isOpen, onClose, onSent, batch }) => {
                 {sending ? 'Sending…' : canSend ? `Smart Send (${totalAssigned} verifier${totalAssigned !== 1 ? 's' : ''})` : 'Assign all users first'}
               </Button>
             </div>
-          </div>
+          </Modal.Footer>
         )}
       </div>
     </Modal>
@@ -1138,7 +1152,7 @@ export const DeleteBatchModal = ({ batch, onClose, onDeleted }) => {
           />
         </div>
 
-        <div className="flex justify-end gap-2 pt-1">
+        <Modal.Footer className="flex justify-end gap-2">
           <Button variant="ghost" size="sm" onClick={onClose} disabled={deleting}>
             Cancel
           </Button>
@@ -1149,7 +1163,7 @@ export const DeleteBatchModal = ({ batch, onClose, onDeleted }) => {
           >
             Delete Permanently
           </Button>
-        </div>
+        </Modal.Footer>
       </div>
     </Modal>
   );
@@ -1206,12 +1220,12 @@ export const SendRejectedListModal = ({ batch, onClose }) => {
             <p className="text-sm text-gray-600 font-inter">
               Generate the rejected verification list for this batch now?
             </p>
-            <div className="flex justify-end gap-2 pt-1 border-t border-gray-100">
+            <Modal.Footer className="flex justify-end gap-2">
               <Button variant="ghost" onClick={onClose} disabled={sending}>Cancel</Button>
               <Button variant="primary" icon={sending ? RefreshCw : Send} loading={sending} onClick={handleSend}>
                 Send Rejected List
               </Button>
-            </div>
+            </Modal.Footer>
           </>
         ) : (
           <>
@@ -1252,7 +1266,7 @@ export const SendRejectedListModal = ({ batch, onClose }) => {
               </div>
             )}
 
-            <Button onClick={onClose} className="w-full">Done</Button>
+            <Modal.Footer><Button onClick={onClose} className="w-full">Done</Button></Modal.Footer>
           </>
         )}
       </div>
@@ -1389,12 +1403,12 @@ export const ResendRejectedModal = ({ batch, records = [], prefill, onClose, onS
           <p className="text-xs text-gray-500 font-inter">
             The request still exists — clicking "Send for Re-verification" again will retry it as a reminder rather than creating a duplicate.
           </p>
-          <div className="flex justify-end gap-2 border-t border-gray-100 pt-3">
+          <Modal.Footer className="flex justify-end gap-2">
             <Button variant="ghost" onClick={onClose}>Close</Button>
             <Button variant="primary" icon={sending ? RefreshCw : Send} loading={sending} onClick={handleSend}>
               Retry Send
             </Button>
-          </div>
+          </Modal.Footer>
         </div>
       </Modal>
     );
@@ -1419,7 +1433,7 @@ export const ResendRejectedModal = ({ batch, records = [], prefill, onClose, onS
           <p className="text-xs text-gray-500 font-inter">
             The verifier will receive a new verification link by email. The original rejected request's own link/history is untouched — it will keep showing "Rejected" permanently; only the new link reflects the fresh re-verification.
           </p>
-          <Button onClick={onClose} className="w-full">Done</Button>
+          <Modal.Footer><Button onClick={onClose} className="w-full">Done</Button></Modal.Footer>
         </div>
       </Modal>
     );
@@ -1497,7 +1511,7 @@ export const ResendRejectedModal = ({ batch, records = [], prefill, onClose, onS
           </>
         )}
 
-        <div className="flex justify-end gap-2 border-t border-gray-100 pt-3">
+        <Modal.Footer className="flex justify-end gap-2">
           <Button variant="ghost" onClick={onClose} disabled={sending}>Cancel</Button>
           <Button
             variant="primary"
@@ -1508,7 +1522,7 @@ export const ResendRejectedModal = ({ batch, records = [], prefill, onClose, onS
           >
             Send for Re-verification
           </Button>
-        </div>
+        </Modal.Footer>
       </div>
     </Modal>
   );

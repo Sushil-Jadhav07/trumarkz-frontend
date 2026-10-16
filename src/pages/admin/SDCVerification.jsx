@@ -613,12 +613,12 @@ export const GenerateSDCModal = ({ batch, onClose, onGenerated, liveStatus, poll
             <p className="text-xs text-gray-500 font-inter">
               Approval alone doesn't generate anything — click below to generate using the exact same selection the organization approved.
             </p>
-            <div className="flex gap-3">
+            <Modal.Footer className="flex gap-3">
               <Button loading={submitting} onClick={handleGenerateApproved}>
                 <Sparkles size={14} /> Generate Now
               </Button>
               <Button variant="ghost" onClick={onClose}>Close</Button>
-            </div>
+            </Modal.Footer>
           </div>
         </Modal>
       );
@@ -639,10 +639,10 @@ export const GenerateSDCModal = ({ batch, onClose, onGenerated, liveStatus, poll
                 )}
               </div>
             </div>
-            <div className="flex gap-3">
+            <Modal.Footer className="flex gap-3">
               <Button variant="secondary" onClick={handleAdjustSelection}>Adjust Selection</Button>
               <Button variant="ghost" onClick={onClose}>Close</Button>
-            </div>
+            </Modal.Footer>
           </div>
         </Modal>
       );
@@ -681,12 +681,12 @@ export const GenerateSDCModal = ({ batch, onClose, onGenerated, liveStatus, poll
           <p className="text-xs text-gray-400 font-inter">
             The organization must approve this exact selection before SDC generation can continue.
           </p>
-          <div className="flex gap-3">
+          <Modal.Footer className="flex gap-3">
             <Button variant="secondary" onClick={handleAdjustSelection}>Adjust Selection</Button>
             <Button variant="outline" loading={approvalRefreshing} onClick={refreshApprovalStatus}>
               <RefreshCw size={14} /> Refresh Status
             </Button>
-          </div>
+          </Modal.Footer>
         </div>
       </Modal>
     );
@@ -761,7 +761,7 @@ export const GenerateSDCModal = ({ batch, onClose, onGenerated, liveStatus, poll
               </p>
             </motion.div>
 
-            <motion.div
+            <Modal.Footer><motion.div
               initial={{ opacity: 0, y: 4 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.28, duration: 0.3 }}
@@ -773,7 +773,7 @@ export const GenerateSDCModal = ({ batch, onClose, onGenerated, liveStatus, poll
                 </Button>
               )}
               <Button onClick={onClose}>Done</Button>
-            </motion.div>
+            </motion.div></Modal.Footer>
           </motion.div>
         </Modal>
       );
@@ -882,15 +882,15 @@ export const GenerateSDCModal = ({ batch, onClose, onGenerated, liveStatus, poll
             )}
           </div>
 
-          <Button onClick={onClose} className="w-full">Done</Button>
+          <Modal.Footer><Button onClick={onClose} className="w-full">Done</Button></Modal.Footer>
         </div>
       </Modal>
     );
   }
 
   return (
-    <Modal isOpen onClose={onClose} title="Generate SDC" size="lg">
-      <form onSubmit={handleSubmit} className="space-y-4">
+    <Modal isOpen onClose={onClose} title="Generate SDC" size="lg" onSubmit={handleSubmit}>
+      <div className="space-y-4">
         <p className="text-xs text-gray-500 font-inter">
           Select the records to generate digital credentials for in <span className="font-semibold text-brand-dark">{batch.name}</span> via
           Dhiway Studio — the org, space, and schema all resolve automatically.
@@ -992,13 +992,13 @@ export const GenerateSDCModal = ({ batch, onClose, onGenerated, liveStatus, poll
           </p>
         </div>
 
-        <div className="sticky bottom-0 flex gap-3 bg-white pt-2">
+        <Modal.Footer className="flex gap-3">
           <Button type="submit" loading={submitting} disabled={selectedIds.size === 0}>
             <Sparkles size={14} /> Generate Selected ({selectedIds.size})
           </Button>
           <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
-        </div>
-      </form>
+        </Modal.Footer>
+      </div>
     </Modal>
   );
 };
@@ -1059,14 +1059,14 @@ const RecordCertModal = ({ record, sdcMatch, instanceKey, onClose }) => {
         </div>
 
         {sdcMatch?.issued ? (
-          <div className="flex gap-3 pt-2">
+          <Modal.Footer className="flex flex-wrap gap-3">
             <Button variant="secondary" size="sm" loading={loading} onClick={() => openCertificate('pdf')}>
               <FileText size={14} /> Download PDF
             </Button>
             <Button variant="outline" size="sm" loading={loading} onClick={() => openCertificate('verify')}>
               <QrCode size={14} /> Verify Certificate
             </Button>
-          </div>
+          </Modal.Footer>
         ) : sdcMatch ? (
           <p className="text-xs text-gray-400 font-inter">
             This record's draft was created on Dhiway but hasn't been issued yet — refresh certificates again shortly.
@@ -1163,9 +1163,9 @@ export const CertificateDetailModal = ({ record, sdcMatch, instanceKey, onClose 
           {!sdcMatch.edited && <Badge status="default">Original</Badge>}
         </div>
 
-        <Button variant="primary" className="w-full" loading={downloading} onClick={handleDownload}>
+        <Modal.Footer><Button variant="primary" className="w-full" loading={downloading} onClick={handleDownload}>
           <FileText size={14} /> Download Certificate
-        </Button>
+        </Button></Modal.Footer>
 
         <div>
           <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1 font-inter">Identity</p>

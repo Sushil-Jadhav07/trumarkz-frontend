@@ -540,7 +540,7 @@ const ReviewOcrModal = ({ isOpen, ocrResult, sourceEntries = {}, onClose, onDone
           </div>
         )}
 
-        <div className="flex flex-wrap justify-end gap-3 border-t border-slate-100 pt-4">
+        <Modal.Footer className="flex flex-wrap justify-end gap-3">
           {finalPreview ? (
             <>
               <Button variant="outline" onClick={() => { setFinalPreview(false); setConfirmedIds(new Set()); }}>Back to Review</Button>
@@ -551,7 +551,7 @@ const ReviewOcrModal = ({ isOpen, ocrResult, sourceEntries = {}, onClose, onDone
             Confirm All &amp; Preview
           </Button>
           )}
-        </div>
+        </Modal.Footer>
       </div>
     </Modal>
   );

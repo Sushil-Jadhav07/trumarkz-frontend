@@ -1,3 +1,4 @@
+import { Modal } from '@/components/ui/Modal';
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AuthLayout } from '@/components/layout/AuthLayout';
@@ -268,33 +269,7 @@ export const CreateSuperAdmin = () => {
       {/* Confirmation modal */}
       <AnimatePresence>
         {confirmOpen && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 px-4"
-          >
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 12 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 12 }}
-              transition={{ type: 'spring', stiffness: 320, damping: 28 }}
-              className="bg-white rounded-2xl shadow-xl p-6 w-full max-w-md"
-            >
-              <div className="flex items-start justify-between mb-4">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-red-50 flex items-center justify-center">
-                    <ShieldCheck size={20} className="text-red-500" />
-                  </div>
-                  <h2 className="font-sora font-bold text-brand-dark">Confirm Creation</h2>
-                </div>
-                <button
-                  onClick={() => setConfirmOpen(false)}
-                  className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors"
-                >
-                  <X size={16} />
-                </button>
-              </div>
+          <Modal isOpen={confirmOpen} onClose={() => setConfirmOpen(false)} title="Confirm Creation" size="md">
 
               <p className="text-sm text-gray-600 font-inter mb-3">
                 You are about to create a new <strong>Super Admin</strong> account:
@@ -308,16 +283,15 @@ export const CreateSuperAdmin = () => {
                 with the intended recipient only.
               </p>
 
-              <div className="flex gap-3">
+              <Modal.Footer className="flex gap-3">
                 <Button variant="outline" className="flex-1" onClick={() => setConfirmOpen(false)}>
                   Cancel
                 </Button>
                 <Button variant="primary" className="flex-1" icon={ShieldCheck} onClick={handleConfirm}>
                   Yes, Create Account
                 </Button>
-              </div>
-            </motion.div>
-          </motion.div>
+              </Modal.Footer>
+          </Modal>
         )}
       </AnimatePresence>
     </AuthLayout>

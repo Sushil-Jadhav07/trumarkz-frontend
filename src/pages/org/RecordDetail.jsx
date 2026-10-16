@@ -33,7 +33,7 @@ const DeleteDocumentModal = ({ doc, deleting, onClose, onConfirm }) => (
             <span className="font-medium capitalize">{readable(doc.document_label)}</span> will be permanently deleted. This cannot be undone.
           </p>
         </div>
-        <div className="flex gap-3">
+        <Modal.Footer className="flex gap-3">
           <button
             type="button"
             onClick={onClose}
@@ -51,7 +51,7 @@ const DeleteDocumentModal = ({ doc, deleting, onClose, onConfirm }) => (
             {deleting ? <RefreshCw size={13} className="animate-spin" /> : <Trash2 size={13} />}
             {deleting ? 'Deleting…' : 'Delete'}
           </button>
-        </div>
+        </Modal.Footer>
       </div>
     )}
   </Modal>

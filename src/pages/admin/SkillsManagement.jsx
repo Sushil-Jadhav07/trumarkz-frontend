@@ -496,7 +496,7 @@ export const SkillsManagement = () => {
             onChange={(e) => setReason(e.target.value)}
           />
 
-          <div className="flex gap-3">
+          <Modal.Footer className="flex gap-3">
             <Button
               variant="danger"
               size="lg"
@@ -517,7 +517,7 @@ export const SkillsManagement = () => {
             >
               {processing ? 'Processing...' : 'Approve'}
             </Button>
-          </div>
+          </Modal.Footer>
         </div>
       </Modal>
 
@@ -906,7 +906,7 @@ export const SkillsManagement = () => {
             type="email"
           />
 
-          <Button
+          <Modal.Footer><Button
             variant="primary"
             size="lg"
             className="w-full"
@@ -915,7 +915,7 @@ export const SkillsManagement = () => {
             disabled={processing}
           >
             {processing ? 'Sending...' : 'Send Verification Request'}
-          </Button>
+          </Button></Modal.Footer>
         </div>
       </Modal>
     </AuthLayout>

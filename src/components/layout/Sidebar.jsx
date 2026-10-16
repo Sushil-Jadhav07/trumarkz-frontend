@@ -50,7 +50,9 @@ export const Sidebar = ({ collapsed, onToggle, mobileOpen = false, onMobileClose
       return [
         { path: '/admin/dashboard', label: 'Dashboard', icon: LayoutDashboard },
         { path: '/admin/batch-monitor', label: 'Batch Monitor', icon: Layers },
-        { path: '/admin/sdc-verification', label: 'SDC Verification', icon: ShieldCheck },
+        // Hidden from the sidebar for now (still reachable at the route
+        // directly) — re-add this entry to bring it back.
+        // { path: '/admin/sdc-verification', label: 'SDC Verification', icon: ShieldCheck },
         { path: '/admin/user-list', label: 'User List', icon: UserSearch },
         { path: '/admin/organizations', label: 'Organizations', icon: Briefcase },
         { path: '/admin/email-drafts', label: 'Email Drafts', icon: Mail },

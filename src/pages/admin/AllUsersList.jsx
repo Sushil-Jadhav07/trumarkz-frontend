@@ -322,8 +322,8 @@ const CreateUserModal = ({ isOpen, onClose, onSuccess }) => {
   const isOrg = form.user_type === 'organization';
 
   return (
-    <Modal isOpen={isOpen} onClose={handleClose} title="Create User" size="lg">
-      <form onSubmit={handleSubmit} className="space-y-4">
+    <Modal isOpen={isOpen} onClose={handleClose} title="Create User" size="lg" onSubmit={handleSubmit}>
+      <div className="space-y-4">
         {/* User Type */}
         <div>
           <label className="block text-sm font-medium text-brand-dark font-inter mb-1.5">
@@ -470,7 +470,7 @@ const CreateUserModal = ({ isOpen, onClose, onSuccess }) => {
           The account will be created as email verified and active — no OTP flow required.
         </p>
 
-        <div className="flex gap-3 pt-1">
+        <Modal.Footer className="flex gap-3">
           <button
             type="button"
             onClick={handleClose}
@@ -486,8 +486,8 @@ const CreateUserModal = ({ isOpen, onClose, onSuccess }) => {
           >
             {submitting ? 'Creating…' : 'Create User'}
           </button>
-        </div>
-      </form>
+        </Modal.Footer>
+      </div>
     </Modal>
   );
 };
@@ -592,51 +592,56 @@ const EditUserModal = ({ isOpen, onClose, user, onSuccess }) => {
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Edit User" size="lg">
+    <Modal isOpen={isOpen} onClose={onClose} title="Edit User" size="7xl" containerClassName="w-full max-w-7xl" onSubmit={handleSubmit}>
       {user && (
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <div className="space-y-4">
           {/* User summary */}
-          <div className="flex items-center gap-3 px-3 py-2.5 bg-brand-bg rounded-xl">
-            <div className="w-9 h-9 rounded-full bg-brand-blue/10 flex items-center justify-center shrink-0 text-sm font-bold text-brand-blue font-sora uppercase">
+          <div className="flex items-center gap-2.5 px-3 py-2 bg-brand-bg rounded-xl">
+            <div className="w-7 h-7 rounded-full bg-brand-blue/10 flex items-center justify-center shrink-0 text-xs font-bold text-brand-blue font-sora uppercase">
               {user.full_name?.[0] || user.organization_name?.[0] || user.email?.[0] || '?'}
             </div>
             <div className="min-w-0 flex-1">
-              <p className="text-sm font-semibold text-brand-dark font-inter truncate">
+              <p className="text-xs font-semibold text-brand-dark font-inter truncate">
                 {user.full_name || user.organization_name || '—'}
               </p>
-              <p className="text-xs text-gray-400 font-inter truncate">{user.email}</p>
+              <p className="text-[11px] text-gray-400 font-inter truncate">{user.email}</p>
             </div>
             <UserTypeBadge type={user.user_type} />
           </div>
 
-          {/* Name field (conditional by type) */}
-          {isOrg ? (
+          {/* Name + Phone — side by side now that the modal is wide enough,
+              instead of two full-width stacked rows. */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {isOrg ? (
+              <Input
+                dense
+                label="Organization Name"
+                value={form.organization_name}
+                onChange={set('organization_name')}
+                placeholder="Acme Corp"
+              />
+            ) : (
+              <Input
+                dense
+                label="Full Name"
+                value={form.full_name}
+                onChange={set('full_name')}
+                placeholder="John Doe"
+              />
+            )}
             <Input
-              label="Organization Name"
-              value={form.organization_name}
-              onChange={set('organization_name')}
-              placeholder="Acme Corp"
+              dense
+              label="Phone Number"
+              value={form.phone_number}
+              onChange={set('phone_number')}
+              placeholder="+91 98765 43210"
             />
-          ) : (
-            <Input
-              label="Full Name"
-              value={form.full_name}
-              onChange={set('full_name')}
-              placeholder="John Doe"
-            />
-          )}
-
-          <Input
-            label="Phone Number"
-            value={form.phone_number}
-            onChange={set('phone_number')}
-            placeholder="+91 98765 43210"
-          />
+          </div>
 
           {isOrg && (
             <>
               <div>
-                <label className="block text-sm font-medium text-brand-dark font-inter mb-1.5">Service Type</label>
+                <label className="block text-xs font-medium text-brand-dark font-inter mb-1.5">Service Type</label>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   {SERVICE_TYPE_OPTIONS.map(({ value, label, icon: Icon }) => {
                     const selected = form.service_type === value;
@@ -646,28 +651,31 @@ const EditUserModal = ({ isOpen, onClose, user, onSuccess }) => {
                         type="button"
                         disabled={submitting}
                         onClick={() => setForm((f) => ({ ...f, service_type: value }))}
-                        className={`flex items-center gap-2 rounded-lg border-2 px-3 py-2 text-left transition-all duration-200 disabled:opacity-50 ${
+                        className={`flex items-center gap-1.5 rounded-lg border-2 px-2.5 py-1.5 text-left transition-all duration-200 disabled:opacity-50 ${
                           selected ? 'border-brand-blue bg-brand-blue/5' : 'border-gray-200 hover:border-gray-300'
                         }`}
                       >
-                        <Icon size={14} className={selected ? 'text-brand-blue' : 'text-gray-400'} />
-                        <span className="text-xs font-medium font-inter text-brand-dark">{label}</span>
+                        <Icon size={12} className={selected ? 'text-brand-blue' : 'text-gray-400'} />
+                        <span className="text-[11px] font-medium font-inter text-brand-dark">{label}</span>
                       </button>
                     );
                   })}
                 </div>
               </div>
 
-              <Input
-                label="Industry Type"
-                placeholder="e.g. Healthcare"
-                value={form.industry_type}
-                onChange={set('industry_type')}
-              />
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <Input label="GSTIN" value={form.gstin} onChange={set('gstin')} placeholder="27ABCDE1234F1Z5" />
+              {/* Industry Type / GSTIN / Business Reg. No. — three across
+                  instead of two stacked rows, now that there's room. */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <Input
+                  dense
+                  label="Industry Type"
+                  placeholder="e.g. Healthcare"
+                  value={form.industry_type}
+                  onChange={set('industry_type')}
+                />
+                <Input dense label="GSTIN" value={form.gstin} onChange={set('gstin')} placeholder="27ABCDE1234F1Z5" />
+                <Input
+                  dense
                   label="Business Reg. No."
                   value={form.business_reg_number}
                   onChange={set('business_reg_number')}
@@ -676,14 +684,16 @@ const EditUserModal = ({ isOpen, onClose, user, onSuccess }) => {
               </div>
 
               <div className="space-y-2">
-                <label className="block text-sm font-medium text-brand-dark font-inter">Registered Address</label>
-                <Input placeholder="Address Line 1" value={form.address_line1} onChange={set('address_line1')} />
-                <Input placeholder="Address Line 2" value={form.address_line2} onChange={set('address_line2')} />
-                <Input placeholder="Address Line 3" value={form.address_line3} onChange={set('address_line3')} />
+                <label className="block text-xs font-medium text-brand-dark font-inter">Registered Address</label>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <Input dense placeholder="Address Line 1" value={form.address_line1} onChange={set('address_line1')} />
+                  <Input dense placeholder="Address Line 2" value={form.address_line2} onChange={set('address_line2')} />
+                  <Input dense placeholder="Address Line 3" value={form.address_line3} onChange={set('address_line3')} />
+                </div>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-brand-dark font-inter mb-1.5">Use Cases</label>
+                <label className="block text-xs font-medium text-brand-dark font-inter mb-1.5">Use Cases</label>
                 <div className="flex flex-wrap gap-2">
                   {USE_CASE_OPTIONS.map(({ key, label }) => {
                     const selected = Boolean(form.use_cases[key]);
@@ -693,7 +703,7 @@ const EditUserModal = ({ isOpen, onClose, user, onSuccess }) => {
                         type="button"
                         disabled={submitting}
                         onClick={() => toggleUseCase(key)}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold font-inter border transition-colors disabled:opacity-50 ${
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold font-inter border transition-colors disabled:opacity-50 ${
                           selected ? 'border-brand-blue bg-brand-blue/5 text-brand-blue' : 'border-gray-200 text-gray-600 hover:bg-gray-50'
                         }`}
                       >
@@ -705,7 +715,7 @@ const EditUserModal = ({ isOpen, onClose, user, onSuccess }) => {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-brand-dark font-inter mb-1.5">Dhiway Spaces</label>
+                <label className="block text-xs font-medium text-brand-dark font-inter mb-1.5">Dhiway Spaces</label>
                 <DhiwaysDetailsEditor
                   value={form.dhiways_details}
                   onChange={(rows) => setForm((f) => ({ ...f, dhiways_details: rows }))}
@@ -730,7 +740,7 @@ const EditUserModal = ({ isOpen, onClose, user, onSuccess }) => {
           )}
 
           {/* Status toggles */}
-          <div className="space-y-3 p-4 bg-brand-bg rounded-xl">
+          <div className="space-y-2.5 p-3 bg-brand-bg rounded-xl">
             <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide font-inter mb-1">
               Account Status
             </p>
@@ -749,7 +759,7 @@ const EditUserModal = ({ isOpen, onClose, user, onSuccess }) => {
             />
           </div>
 
-          <div className="flex gap-3 pt-1">
+          <Modal.Footer className="flex gap-3">
             <button
               type="button"
               onClick={onClose}
@@ -765,8 +775,8 @@ const EditUserModal = ({ isOpen, onClose, user, onSuccess }) => {
             >
               {submitting ? 'Saving…' : 'Save Changes'}
             </button>
-          </div>
-        </form>
+          </Modal.Footer>
+        </div>
       )}
     </Modal>
   );
@@ -826,9 +836,9 @@ const EditSuperAdminModal = ({ isOpen, onClose, user, onSuccess }) => {
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Edit Superadmin" size="lg">
+    <Modal isOpen={isOpen} onClose={onClose} title="Edit Superadmin" size="lg" onSubmit={handleSubmit}>
       {user && (
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <div className="space-y-4">
           <div className="flex items-center gap-3 px-3 py-2.5 bg-brand-bg rounded-xl">
             <div className="w-9 h-9 rounded-full bg-purple-50 flex items-center justify-center shrink-0 text-sm font-bold text-purple-600 font-sora uppercase">
               {user.full_name?.[0] || user.email?.[0] || '?'}
@@ -864,7 +874,7 @@ const EditSuperAdminModal = ({ isOpen, onClose, user, onSuccess }) => {
             />
           </div>
 
-          <div className="flex gap-3 pt-1">
+          <Modal.Footer className="flex gap-3">
             <button
               type="button"
               onClick={onClose}
@@ -880,8 +890,8 @@ const EditSuperAdminModal = ({ isOpen, onClose, user, onSuccess }) => {
             >
               {submitting ? 'Saving…' : 'Save Changes'}
             </button>
-          </div>
-        </form>
+          </Modal.Footer>
+        </div>
       )}
     </Modal>
   );
@@ -907,7 +917,7 @@ const UnverifyGstModal = ({ isOpen, onClose, user, onSuccess }) => {
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={submitting ? undefined : onClose} title="" size="sm">
+    <Modal isOpen={isOpen} onClose={submitting ? undefined : onClose} title="Revoke GST Verification?" size="sm">
       {user && (
         <div className="space-y-5 pt-2">
           <div className="flex flex-col items-center text-center gap-3">
@@ -915,7 +925,7 @@ const UnverifyGstModal = ({ isOpen, onClose, user, onSuccess }) => {
               <ShieldOff size={22} className="text-amber-500" />
             </div>
             <div>
-              <p className="text-base font-semibold text-brand-dark font-sora">Revoke GST Verification?</p>
+              
               <p className="text-sm text-gray-500 font-inter mt-1">
                 <span className="font-medium text-brand-dark">
                   {user.organization_name || user.full_name || user.email}
@@ -925,7 +935,7 @@ const UnverifyGstModal = ({ isOpen, onClose, user, onSuccess }) => {
             </div>
           </div>
 
-          <div className="flex gap-3">
+          <Modal.Footer className="flex gap-3">
             <button
               type="button"
               onClick={onClose}
@@ -942,7 +952,7 @@ const UnverifyGstModal = ({ isOpen, onClose, user, onSuccess }) => {
             >
               {submitting ? 'Revoking…' : 'Revoke'}
             </button>
-          </div>
+          </Modal.Footer>
         </div>
       )}
     </Modal>
@@ -969,7 +979,7 @@ const DeactivateModal = ({ isOpen, onClose, user, onSuccess }) => {
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={submitting ? undefined : onClose} title="" size="sm">
+    <Modal isOpen={isOpen} onClose={submitting ? undefined : onClose} title="Deactivate User?" size="sm">
       {user && (
         <div className="space-y-5 pt-2">
           <div className="flex flex-col items-center text-center gap-3">
@@ -977,7 +987,7 @@ const DeactivateModal = ({ isOpen, onClose, user, onSuccess }) => {
               <AlertTriangle size={22} className="text-red-500" />
             </div>
             <div>
-              <p className="text-base font-semibold text-brand-dark font-sora">Deactivate User?</p>
+              
               <p className="text-sm text-gray-500 font-inter mt-1">
                 <span className="font-medium text-brand-dark">
                   {user.full_name || user.organization_name || user.email}
@@ -987,7 +997,7 @@ const DeactivateModal = ({ isOpen, onClose, user, onSuccess }) => {
             </div>
           </div>
 
-          <div className="flex gap-3">
+          <Modal.Footer className="flex gap-3">
             <button
               type="button"
               onClick={onClose}
@@ -1004,7 +1014,7 @@ const DeactivateModal = ({ isOpen, onClose, user, onSuccess }) => {
             >
               {submitting ? 'Deactivating…' : 'Deactivate'}
             </button>
-          </div>
+          </Modal.Footer>
         </div>
       )}
     </Modal>
@@ -1041,7 +1051,7 @@ const PermanentDeleteModal = ({ isOpen, onClose, user, onSuccess }) => {
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={submitting ? undefined : onClose} title="" size="sm">
+    <Modal isOpen={isOpen} onClose={submitting ? undefined : onClose} title="Permanently Delete User?" size="sm">
       {user && (
         <div className="space-y-5 pt-2">
           <div className="flex flex-col items-center text-center gap-3">
@@ -1049,7 +1059,7 @@ const PermanentDeleteModal = ({ isOpen, onClose, user, onSuccess }) => {
               <Trash2 size={22} className="text-red-500" />
             </div>
             <div>
-              <p className="text-base font-semibold text-brand-dark font-sora">Permanently Delete User?</p>
+              
               <p className="text-sm text-gray-500 font-inter mt-1">
                 This will permanently remove{' '}
                 <span className="font-medium text-brand-dark">
@@ -1073,7 +1083,7 @@ const PermanentDeleteModal = ({ isOpen, onClose, user, onSuccess }) => {
             />
           </div>
 
-          <div className="flex gap-3">
+          <Modal.Footer className="flex gap-3">
             <button
               type="button"
               onClick={onClose}
@@ -1090,7 +1100,7 @@ const PermanentDeleteModal = ({ isOpen, onClose, user, onSuccess }) => {
             >
               {submitting ? 'Deleting…' : 'Delete permanently'}
             </button>
-          </div>
+          </Modal.Footer>
         </div>
       )}
     </Modal>
