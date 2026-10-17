@@ -1,15 +1,16 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { AuthLayout } from '@/components/layout/AuthLayout';
-import { PageHeader } from '@/components/shared/PageHeader';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
+import { CustomSelect } from '@/components/ui/CustomSelect';
 import { Modal } from '@/components/ui/Modal';
+import { EmailDraftRecipients } from '@/components/shared/EmailDraftRecipients';
 import { verificationAPI, getApiError } from '@/services/api';
 import {
-  Mail, Plus, Pencil, Trash2, RefreshCw, FileText,
-  ChevronDown, AlertTriangle, Save, X, History, Eye, Search,
+  Plus, Pencil, Trash2, RefreshCw, FileText,
+  AlertTriangle, Save, History, Eye, Search,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -22,57 +23,13 @@ const formatSentAt = (v) => {
 };
 
 // ── Type selector dropdown ─────────────────────────────────────────────────────
-const TypeSelector = ({ value, onChange, types, loading }) => {
-  const [open, setOpen] = useState(false);
-  const ref = React.useRef(null);
-
-  useEffect(() => {
-    const handle = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
-    document.addEventListener('mousedown', handle);
-    return () => document.removeEventListener('mousedown', handle);
-  }, []);
-
-  const selected = types.find((t) => t.name === value);
-
-  return (
-    <div ref={ref} className="relative">
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        disabled={loading}
-        className={`w-full flex items-center justify-between gap-3 px-4 py-3 rounded-xl border-2 transition-all font-inter text-sm bg-white ${open ? 'border-brand-blue ring-4 ring-brand-blue/10' : 'border-gray-200 hover:border-gray-300'} disabled:opacity-60`}
-      >
-        <span className={value ? 'text-brand-dark font-medium' : 'text-gray-400'}>
-          {loading ? 'Loading types…' : (selected?.name || 'Select verification type…')}
-        </span>
-        {loading
-          ? <RefreshCw size={14} className="text-gray-400 animate-spin" />
-          : <ChevronDown size={16} className={`text-gray-400 transition-transform ${open ? 'rotate-180' : ''}`} />
-        }
-      </button>
-      {open && !loading && (
-        <motion.div
-          initial={{ opacity: 0, y: -6 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="absolute z-30 top-full mt-1.5 left-0 right-0 bg-white border border-gray-200 rounded-xl shadow-lg overflow-hidden max-h-52 overflow-y-auto"
-        >
-          {types.length === 0 ? (
-            <p className="px-4 py-3 text-sm text-gray-400 font-inter">No manual verification types found</p>
-          ) : types.map((t) => (
-            <button
-              key={t.id || t.name}
-              type="button"
-              onClick={() => { onChange(t.name); setOpen(false); }}
-              className={`w-full text-left px-4 py-2.5 font-inter text-sm transition-colors ${t.name === value ? 'bg-brand-blue/5 text-brand-blue font-medium' : 'text-brand-dark hover:bg-gray-50'}`}
-            >
-              {t.name}
-            </button>
-          ))}
-        </motion.div>
-      )}
-    </div>
-  );
-};
+const TypeSelector = ({ value, onChange, types, loading }) => (
+  <CustomSelect value={value} onChange={onChange}
+    options={types.map((type) => ({ value: type.name, label: type.name }))}
+    placeholder={loading ? 'Loading verification types…' : 'Choose verification type'}
+    disabled={loading} ariaLabel="Verification type" searchable searchPlaceholder="Search verification types"
+    className="[&>button]:min-h-11 [&>button]:rounded-xl [&>button]:px-3.5" />
+);
 
 // ── Draft form modal ───────────────────────────────────────────────────────────
 const DraftModal = ({ isOpen, onClose, verificationType, draft, onSuccess }) => {
@@ -239,17 +196,16 @@ const DraftCard = ({ draft, index, onEdit, onDelete }) => (
     initial={{ opacity: 0, y: 10 }}
     animate={{ opacity: 1, y: 0 }}
     transition={{ delay: index * 0.05 }}
-    className="relative rounded-2xl border border-blue-100 bg-white p-5 shadow-[0_8px_24px_-16px_rgba(37,99,235,0.18)] hover:shadow-[0_16px_32px_-20px_rgba(37,99,235,0.25)] transition-shadow overflow-hidden"
+    className="group rounded-xl border border-gray-200 bg-white p-4 transition-colors hover:border-blue-200"
   >
-    <div className="absolute inset-x-0 top-0 h-[3px] bg-brand-blue/60 rounded-t-2xl" />
     <div className="flex items-start justify-between gap-3">
       <div className="flex items-start gap-3 min-w-0">
         <div className="w-9 h-9 rounded-xl bg-blue-50 flex items-center justify-center shrink-0 mt-0.5">
           <FileText size={16} className="text-brand-blue" />
         </div>
         <div className="min-w-0">
-          <p className="font-semibold text-brand-dark font-inter text-sm truncate">{draft.subject}</p>
-          <p className="text-xs text-gray-400 font-inter mt-1 line-clamp-2 leading-5">{draft.body}</p>
+          <p className="font-semibold text-brand-dark font-inter text-sm break-words leading-6">{draft.subject}</p>
+          <p className="text-sm text-gray-500 font-inter mt-1 line-clamp-3 leading-6 whitespace-pre-line">{draft.body}</p>
         </div>
       </div>
       <div className="flex items-center gap-1 shrink-0">
@@ -257,7 +213,7 @@ const DraftCard = ({ draft, index, onEdit, onDelete }) => (
           type="button"
           onClick={() => onEdit(draft)}
           className="p-1.5 rounded-lg text-gray-400 hover:text-brand-blue hover:bg-blue-50 transition-colors"
-          title="Edit draft"
+          title="Edit draft" aria-label={`Edit draft: ${draft.subject}`}
         >
           <Pencil size={14} />
         </button>
@@ -265,14 +221,14 @@ const DraftCard = ({ draft, index, onEdit, onDelete }) => (
           type="button"
           onClick={() => onDelete(draft)}
           className="p-1.5 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors"
-          title="Delete draft"
+          title="Delete draft" aria-label={`Delete draft: ${draft.subject}`}
         >
           <Trash2 size={14} />
         </button>
       </div>
     </div>
     {draft.created_at && (
-      <p className="mt-3 text-[11px] text-gray-300 font-inter font-mono">
+      <p className="mt-4 border-t border-gray-100 pt-3 text-xs text-gray-500 font-inter tabular-nums">
         Created {new Date(draft.created_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
       </p>
     )}
@@ -284,7 +240,7 @@ const HistoryDetailModal = ({ row, onClose }) => (
   <Modal isOpen={!!row} onClose={onClose} title="Sent Email" size="lg">
     {row && (
       <div className="space-y-4">
-        <div className="grid grid-cols-2 gap-3 text-sm">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
           <div>
             <p className="text-[10px] font-bold uppercase tracking-wide text-gray-400 font-inter">Organization</p>
             <p className="font-inter text-brand-dark mt-0.5">{row.organization_name || '—'}</p>
@@ -356,14 +312,14 @@ const EmailHistoryPanel = () => {
 
   return (
     <>
-      <Card className="p-5 border border-blue-100 mb-6">
+      <Card className="p-5 sm:p-6 border-gray-200 shadow-none mb-4">
         <div className="flex items-center gap-3 mb-4">
           <div className="w-8 h-8 rounded-xl bg-blue-50 flex items-center justify-center">
             <Search size={15} className="text-brand-blue" />
           </div>
           <div>
-            <p className="font-semibold text-brand-dark font-inter text-sm">Filter Send History</p>
-            <p className="text-xs text-gray-400 font-inter">Superadmin can filter by organization; leave blank to see every org</p>
+            <p className="font-semibold text-brand-dark font-inter text-sm">Search sent emails</p>
+            <p className="text-xs text-gray-400 font-inter">Filter by organization, batch, or verification type. Leave fields blank to include all.</p>
           </div>
         </div>
         <div className="grid gap-3 sm:grid-cols-3">
@@ -400,22 +356,22 @@ const EmailHistoryPanel = () => {
       </Card>
 
       {loading ? (
-        <div className="flex items-center justify-center py-16 gap-3 text-brand-blue">
+        <div className="flex items-center justify-center rounded-xl border border-gray-200 bg-white py-10 gap-3 text-brand-blue">
           <RefreshCw size={20} className="animate-spin" />
           <span className="font-inter text-sm">Loading history…</span>
         </div>
       ) : rows.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-16 text-center">
+        <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-gray-200 bg-white px-5 py-10 text-center">
           <div className="w-12 h-12 rounded-2xl bg-gray-100 flex items-center justify-center mb-3">
             <History size={20} className="text-gray-400" />
           </div>
           <p className="font-sora font-semibold text-brand-dark">No sends found</p>
           <p className="text-sm text-gray-400 font-inter mt-1">
-            Only successfully delivered emails show up here — try widening or clearing the filters above.
+            Only successfully sent emails appear here — try widening or clearing the filters above.
           </p>
         </div>
       ) : (
-        <div className="rounded-2xl border border-gray-100 bg-white overflow-hidden">
+        <div className="rounded-2xl border border-gray-200 bg-white overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full min-w-[860px]">
               <thead className="bg-gray-50">
@@ -509,139 +465,61 @@ export const EmailDrafts = () => {
 
   return (
     <AuthLayout title="Email Drafts">
-      <PageHeader
-        title="Email Drafts"
-        subtitle={activeTab === 'templates' ? 'Manage saved email templates for manual verification requests' : 'Actual email dispatch logs — only successfully delivered sends appear here'}
-        action={
-          activeTab === 'templates' && selectedType && (
-            <div className="flex items-center gap-2">
-              <Button
-                variant="primary"
-                size="sm"
-                icon={Plus}
-                onClick={() => setCreateOpen(true)}
-              >
-                New Draft
-              </Button>
-              <button
-                type="button"
-                onClick={refresh}
-                disabled={loading}
-                className="flex items-center gap-2 px-3 py-2 rounded-xl border border-gray-200 text-sm text-gray-600 hover:bg-gray-50 transition-colors font-inter disabled:opacity-50"
-              >
-                <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
-                Refresh
+      <div className="mx-auto max-w-[1440px] space-y-5 font-inter">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <p className="mb-1 text-xs font-medium text-gray-500">Verification communications</p>
+            <h2 className="font-sora text-2xl font-semibold tracking-tight text-brand-dark">Email workspace</h2>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-gray-500">Manage reusable templates, review batch recipients, and track sent emails.</p>
+          </div>
+          <nav aria-label="Email workspace" className="flex shrink-0 items-center gap-1 rounded-xl border border-gray-200 bg-white p-1">
+            {[
+              { key: 'templates', label: 'Templates', icon: FileText },
+              { key: 'history', label: 'Send History', icon: History },
+            ].map((tab) => (
+              <button key={tab.key} type="button" aria-current={activeTab === tab.key ? 'page' : undefined}
+                onClick={() => setActiveTab(tab.key)}
+                className={`flex items-center gap-2 rounded-lg px-3.5 py-2.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40 ${activeTab === tab.key ? 'bg-blue-50 text-brand-blue' : 'text-gray-500 hover:bg-gray-50 hover:text-brand-dark'}`}>
+                <tab.icon size={16} />{tab.label}
               </button>
-            </div>
-          )
-        }
-      />
+            ))}
+          </nav>
+        </div>
 
-      {/* Templates vs Send History — two distinct data sources: the reusable
-          draft library (email_drafts) vs actual dispatch logs
-          (manual_verification_requests). Keeping them as tabs on one page
-          mirrors how closely related they are without conflating them. */}
-      <div className="mb-6 flex items-center gap-1 rounded-xl border border-gray-100 bg-gray-50 p-1 w-fit">
-        {[
-          { key: 'templates', label: 'Templates', icon: FileText },
-          { key: 'history', label: 'Send History', icon: History },
-        ].map((tab) => (
-          <button
-            key={tab.key}
-            type="button"
-            onClick={() => setActiveTab(tab.key)}
-            className={`flex items-center gap-1.5 rounded-lg px-3.5 py-2 font-inter text-sm font-medium transition-colors ${
-              activeTab === tab.key ? 'bg-white text-brand-blue shadow-sm' : 'text-gray-500 hover:text-brand-dark'
-            }`}
-          >
-            <tab.icon size={14} /> {tab.label}
-          </button>
-        ))}
-      </div>
+        {activeTab === 'history' ? <EmailHistoryPanel /> : (
+          <>
+            <EmailDraftRecipients verificationType={selectedType} verificationSelector={
+              <TypeSelector value={selectedType} onChange={setSelectedType} types={verificationTypes} loading={typesLoading} />
+            } />
 
-      {activeTab === 'history' ? (
-        <EmailHistoryPanel />
-      ) : (
-      <>
-      {/* Verification type selector */}
-      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2 }}>
-        <Card className="p-5 border border-blue-100 mb-6">
-          <div className="flex items-center gap-3 mb-3">
-            <div className="w-8 h-8 rounded-xl bg-blue-50 flex items-center justify-center">
-              <Mail size={15} className="text-brand-blue" />
-            </div>
-            <div>
-              <p className="font-semibold text-brand-dark font-inter text-sm">Select Verification Type</p>
-              <p className="text-xs text-gray-400 font-inter">Drafts are organised per verification type</p>
-            </div>
-          </div>
-          <div className="max-w-sm">
-            <TypeSelector
-              value={selectedType}
-              onChange={(v) => { setSelectedType(v); }}
-              types={verificationTypes}
-              loading={typesLoading}
-            />
-          </div>
-        </Card>
-      </motion.div>
-
-      {/* Drafts list */}
-      <AnimatePresence mode="wait">
-        {!selectedType ? (
-          <motion.div key="empty-select" initial={{ opacity: 0 }} animate={{ opacity: 1 }}
-            className="flex flex-col items-center justify-center py-20 text-center">
-            <div className="w-14 h-14 rounded-2xl bg-blue-50 flex items-center justify-center mb-4">
-              <Mail size={24} className="text-brand-blue" />
-            </div>
-            <p className="font-sora font-semibold text-brand-dark">Select a verification type</p>
-            <p className="text-sm text-gray-400 font-inter mt-1">Choose a type above to view and manage its email drafts</p>
-          </motion.div>
-        ) : loading ? (
-          <motion.div key="loading" initial={{ opacity: 0 }} animate={{ opacity: 1 }}
-            className="flex items-center justify-center py-16 gap-3 text-brand-blue">
-            <RefreshCw size={20} className="animate-spin" />
-            <span className="font-inter text-sm">Loading drafts…</span>
-          </motion.div>
-        ) : drafts.length === 0 ? (
-          <motion.div key="empty-drafts" initial={{ opacity: 0 }} animate={{ opacity: 1 }}
-            className="flex flex-col items-center justify-center py-16 text-center">
-            <div className="w-12 h-12 rounded-2xl bg-gray-100 flex items-center justify-center mb-3">
-              <FileText size={20} className="text-gray-400" />
-            </div>
-            <p className="font-sora font-semibold text-brand-dark">No drafts yet</p>
-            <p className="text-sm text-gray-400 font-inter mt-1 mb-4">
-              No email drafts for <span className="font-medium">{selectedType}</span>
-            </p>
-            <Button variant="primary" size="sm" icon={Plus} onClick={() => setCreateOpen(true)}>
-              Create First Draft
-            </Button>
-          </motion.div>
-        ) : (
-          <motion.div key="drafts-list" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-            <div className="flex items-center justify-between mb-4">
-              <p className="text-sm text-gray-400 font-inter">
-                <span className="font-semibold text-brand-dark">{drafts.length}</span>{' '}
-                draft{drafts.length !== 1 ? 's' : ''} for{' '}
-                <span className="text-brand-blue font-medium">{selectedType}</span>
-              </p>
-            </div>
-            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-              {drafts.map((draft, i) => (
-                <DraftCard
-                  key={draft.id}
-                  draft={draft}
-                  index={i}
-                  onEdit={(d) => setEditModal({ open: true, draft: d })}
-                  onDelete={(d) => setDeleteModal({ open: true, draft: d })}
-                />
-              ))}
-            </div>
-          </motion.div>
+            <section aria-label="Saved email templates" className="overflow-hidden rounded-2xl border border-gray-200 bg-white">
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 px-5 py-4 sm:px-6">
+                <div>
+                  <div className="flex items-center gap-2"><h3 className="text-base font-semibold text-brand-dark">Saved templates</h3>{selectedType && !loading && <span className="rounded-md bg-gray-100 px-2 py-0.5 text-xs font-medium tabular-nums text-gray-600">{drafts.length}</span>}</div>
+                  <p className="mt-1 text-xs leading-5 text-gray-500">Reusable across batches for {selectedType || 'each verification type'}.</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  {selectedType && <button type="button" aria-label="Refresh templates" title="Refresh templates" onClick={refresh} disabled={loading}
+                    className="rounded-lg border border-gray-200 p-2.5 text-gray-500 transition-colors hover:bg-gray-50 disabled:opacity-50"><RefreshCw size={16} className={loading ? 'animate-spin' : ''} /></button>}
+                  <Button variant="primary" size="sm" icon={Plus} onClick={() => setCreateOpen(true)} disabled={!selectedType}>New Draft</Button>
+                </div>
+              </div>
+              {!selectedType ? (
+                <div className="flex items-start gap-3 px-5 py-6 sm:px-6">
+                  <FileText size={20} className="mt-0.5 shrink-0 text-gray-400" />
+                  <div><p className="text-sm font-medium text-gray-700">Your template library</p><p className="mt-1 text-sm leading-6 text-gray-500">Choose a verification type above to view or create its email drafts. No batch selection is needed.</p></div>
+                </div>
+              ) : loading ? (
+                <div role="status" className="grid gap-4 p-5 sm:grid-cols-2 sm:p-6" aria-label="Loading templates">{[1,2].map((key) => <div key={key} className="space-y-3 rounded-xl border border-gray-100 p-4 animate-pulse"><div className="h-4 w-2/3 rounded bg-gray-100" /><div className="h-3 rounded bg-gray-50" /><div className="h-3 w-4/5 rounded bg-gray-50" /></div>)}</div>
+              ) : drafts.length === 0 ? (
+                <div className="flex flex-wrap items-center justify-between gap-4 px-5 py-7 sm:px-6"><div><p className="text-sm font-medium text-gray-700">No templates for this type yet</p><p className="mt-1 text-sm text-gray-500">Save a draft to reuse for future verification requests.</p></div><button type="button" onClick={() => setCreateOpen(true)} className="text-sm font-semibold text-brand-blue hover:underline">Create your first draft</button></div>
+              ) : (
+                <div className="grid gap-4 p-5 sm:p-6 xl:grid-cols-2">{drafts.map((draft, index) => <DraftCard key={draft.id} draft={draft} index={index} onEdit={(item) => setEditModal({ open: true, draft: item })} onDelete={(item) => setDeleteModal({ open: true, draft: item })} />)}</div>
+              )}
+            </section>
+          </>
         )}
-      </AnimatePresence>
-      </>
-      )}
+      </div>
 
       {/* Modals */}
       <DraftModal

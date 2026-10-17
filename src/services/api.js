@@ -861,6 +861,13 @@ export const verificationAPI = {
   getEmailDraftsByType: (verificationType) =>
     verificationApi.get(`/verification/email-drafts/${encodeURIComponent(verificationType)}`),
 
+  // Read-only recipients for one batch/type; independent of saved templates.
+  getEmailDraftRecipients: (verificationType, batchId, { signal } = {}) =>
+    verificationApi.get(`/verification/email-drafts/${encodeURIComponent(verificationType)}/recipients`, {
+      params: { batch_id: batchId },
+      signal,
+    }),
+
   updateEmailDraft: (draftId, payload) =>
     verificationApi.put(`/verification/email-drafts/${draftId}`, cleanObject({
       subject: payload.subject,

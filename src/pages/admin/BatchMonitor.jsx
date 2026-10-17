@@ -16,6 +16,7 @@ import { verificationAPI, verifiersAPI, sdcAPI, adminAPI, getApiError, triggerBl
 import { GenerateSDCModal } from '@/pages/admin/SDCVerification';
 import { TablePagination } from '@/components/shared/TablePagination';
 import { normalizeDhiwayDetails, resolveDhiwaySpaceId } from '@/utils/dhiway';
+import { pendingManualUsers } from '@/utils/pendingManualVerifications';
 import {
   AlertCircle, AlertTriangle, ArrowRight, Building2, Calendar, CheckCircle, ChevronDown, ChevronLeft, ChevronRight, Clock, Download, Eye, FileText, Info,
   Layers, Mail, MoreVertical, Package, Plus, RefreshCw, Save, Search, Send, ShieldCheck, Sparkles, Trash2, User, Users, X, XCircle, Zap,
@@ -508,6 +509,9 @@ const VerifierRow = ({ index, row, typeLabel, allVerifiers, batchTotal, countBef
 // ── Smart Send Modal ─────────────────────────────────────────────────────────
 export const SmartSendModal = ({ isOpen, onClose, onSent, batch }) => {
   const [verificationTypes, setVerificationTypes] = useState([]);
+  const [batchRecords, setBatchRecords] = useState([]);
+  const [loadError, setLoadError] = useState(null);
+  const [reloadAssignments, setReloadAssignments] = useState(0);
   const [verifiersByType,   setVerifiersByType]    = useState({}); // { [verification_name]: verifier[] }
   const [loading,           setLoading]           = useState(false);
   // assignments: { [type_name]: [{ _key, verifier_id, email_subject, email_body, customized, count: '' }] }
@@ -542,15 +546,18 @@ export const SmartSendModal = ({ isOpen, onClose, onSent, batch }) => {
   const defaultBody = (typeName) =>
     `Hi,\n\nPlease find the attached Excel file with the candidates assigned to you for ${slugToLabel(typeName)}.\n\nComplete the verification and upload your report using the secure link provided.\n\nRegards,\nTruMarkZ Admin`;
 
-  // Derive batch users from the already-loaded batch.records — confirmed via
+  // Derive batch users from fresh batch details — confirmed via
   // the actual GET /verification/batches/{id} response that each user object
   // is keyed by `user_id`, not `id` (that field name only appears elsewhere,
   // e.g. the bulk-upload response's `entity_id`) — check all three so this
   // doesn't silently send `null` again if the shape varies by caller.
-  const batchUsers = (batch?.records || []).map((r) => ({
+  const batchUsers = batchRecords.map((r) => ({
     id: r.id || r.user_id || r.entity_id,
     name: r.full_name || r.product_name || r.email || r.id || r.user_id || r.entity_id,
   }));
+  const pendingUsersByType = useMemo(() => Object.fromEntries(verificationTypes.map((type) =>
+    [type.verification_name, pendingManualUsers(batchRecords, type.verification_name)]
+  )), [verificationTypes, batchRecords]);
 
   // The template preview defaults to the batch's first needed verification
   // type — the only unambiguous single choice when one shared template can
@@ -568,7 +575,11 @@ export const SmartSendModal = ({ isOpen, onClose, onSent, batch }) => {
 
   useEffect(() => {
     if (!isOpen || !batch?.id) return;
+    let active = true;
     setAssignments({});
+    setVerificationTypes([]);
+    setBatchRecords([]);
+    setLoadError(null);
     setVerifiersByType({});
     setSaveDefaultAsDraft(false);
     setDefaultTemplate({ subject: '', body: '' });
@@ -578,11 +589,15 @@ export const SmartSendModal = ({ isOpen, onClose, onSent, batch }) => {
     // /verification/batches/{id}/third-party-verifiers is the purpose-built
     // endpoint for "which verification types in this batch need a third
     // party" — confirmed by the Manual Verification API docs, not a stale
-    // endpoint. (batch.verification_types is the batch's *overall* type
-    // list, which can include automatic types and doesn't tell us which
-    // manual types actually have a pending third-party need.)
-    verificationAPI.getThirdPartyVerifiers(batch.id)
-      .then(async ({ data }) => {
+    // endpoint. Its type list does not carry user status, so intersect it
+    // with fresh per-user checks before offering assignments.
+    Promise.all([verificationAPI.getThirdPartyVerifiers(batch.id), verificationAPI.getBatchDetails(batch.id)])
+      .then(async ([{ data }, { data: details }]) => {
+        if (!active) return;
+        if (!Array.isArray(details?.users) || details.users.some((user) => !user.verification_type_status || typeof user.verification_type_status !== 'object')) {
+          throw new Error('Could not confirm per-user verification statuses. Refresh and try again.');
+        }
+        setBatchRecords(details.users);
         const raw = data?.third_party_verifiers || [];
         const typeMap = {};
         raw.forEach((v) => {
@@ -599,7 +614,7 @@ export const SmartSendModal = ({ isOpen, onClose, onSent, batch }) => {
             };
           }
         });
-        const types = Object.values(typeMap);
+        const types = Object.values(typeMap).filter((type) => pendingManualUsers(details.users, type.verification_name).length > 0);
         setVerificationTypes(types);
         if (types.length > 0) {
           setDefaultTemplate({ subject: defaultSubject(types[0].verification_name), body: defaultBody(types[0].verification_name) });
@@ -623,11 +638,12 @@ export const SmartSendModal = ({ isOpen, onClose, onSent, batch }) => {
               .catch(() => [t.verification_name, []])
           )
         );
-        setVerifiersByType(Object.fromEntries(entries));
+        if (active) setVerifiersByType(Object.fromEntries(entries));
       })
-      .catch(() => toast.error('Failed to load verification data'))
-      .finally(() => setLoading(false));
-  }, [isOpen, batch?.id]);
+      .catch((err) => { if (active) setLoadError(getApiError(err, 'Failed to load verification data')); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [isOpen, batch?.id, reloadAssignments]);
 
   const addVerifier = (typeName) => {
     setAssignments((prev) => ({
@@ -654,16 +670,51 @@ export const SmartSendModal = ({ isOpen, onClose, onSent, batch }) => {
 
   const typeRows = (typeName) => assignments[typeName] || [];
 
-  // Coverage: per type, sum of counts of active (verifier-assigned) rows vs batch total
+  // Eligibility comes from each type's verifier list, not its display label.
+  const sharedVerifiers = verificationTypes.length === 0 ? [] :
+    (verifiersByType[verificationTypes[0].verification_name] || []).filter((verifier) =>
+      verifier.id && verificationTypes.every((type) =>
+        (verifiersByType[type.verification_name] || []).some((candidate) => candidate.id === verifier.id)
+      )
+    );
+  const selectedVerifierIds = [...new Set(verificationTypes.flatMap((type) =>
+    typeRows(type.verification_name).map((row) => row.verifier_id).filter(Boolean)
+  ))];
+  const sharedVerifierId = selectedVerifierIds.length === 1 ? selectedVerifierIds[0] : '';
+  const selectedSharedVerifier = Object.values(verifiersByType).flat().find((verifier) => verifier.id === sharedVerifierId);
+  const sharedVerifierEligible = sharedVerifiers.some((verifier) => verifier.id === sharedVerifierId);
+  const alreadyAppliedToAll = sharedVerifierId && verificationTypes.every((type) => {
+    const rows = typeRows(type.verification_name);
+    return rows.length === 1 && rows[0].verifier_id === sharedVerifierId && Number(rows[0].count) === pendingUsersByType[type.verification_name].length;
+  });
+
+  const applySharedVerifier = () => {
+    if (loading || sending || batchUsers.length === 0 || !sharedVerifiers.some((verifier) => verifier.id === sharedVerifierId)) return;
+    setAssignments((previous) => Object.fromEntries(verificationTypes.map((type) => {
+      const rows = previous[type.verification_name] || [];
+      // Keep that verifier's customized template, or the type's first row.
+      const row = rows.find((entry) => entry.verifier_id === sharedVerifierId) || rows[0];
+      return [type.verification_name, [{
+        ...row,
+        _key: row?._key || `${type.verification_name}-shared`,
+        verifier_id: sharedVerifierId,
+        count: String(pendingUsersByType[type.verification_name].length),
+      }]];
+    })));
+    setEditingKey(null);
+    toast.success(`Verifier assigned to all ${verificationTypes.length} checks. Review the assignments before sending.`);
+  };
+
+  // Each type covers only the users whose own check is still pending.
   const typesCoverage = verificationTypes.map((t) => {
     const activeRows = typeRows(t.verification_name).filter((r) => r.verifier_id);
     const covered = activeRows.reduce((s, r) => s + (parseInt(r.count) || 0), 0);
-    return { typeName: t.verification_name, covered, total: batchUsers.length, hasVerifiers: activeRows.length > 0 };
+    return { typeName: t.verification_name, covered, total: pendingUsersByType[t.verification_name].length, hasVerifiers: activeRows.length > 0 };
   });
 
   // Flattened, numbered card list for the left column — countBefore/available
   // still have to be computed per-type (each verification type independently
-  // needs full batch coverage), so this is derived per-type first and then
+  // needs its own pending-user coverage), so derive per-type first and then
   // flattened purely for display/numbering.
   const flatRows = verificationTypes.flatMap((t) => {
     const rows = typeRows(t.verification_name);
@@ -683,7 +734,7 @@ export const SmartSendModal = ({ isOpen, onClose, onSent, batch }) => {
 
   const activeTypes  = typesCoverage.filter((t) => t.hasVerifiers);
   const hasOverflow  = activeTypes.some((t) => t.covered > t.total);
-  const allCovered   = batchUsers.length === 0 || (activeTypes.length > 0 && activeTypes.every((t) => t.covered === t.total));
+  const allCovered   = typesCoverage.length > 0 && typesCoverage.every((t) => t.covered === t.total);
   // Only rows that will actually receive an email — a verifier picked with 0
   // users assigned isn't really "sending" anything yet.
   const totalAssigned = flatRows.filter((r) => r.verifier_id && (parseInt(r.count) || 0) > 0).length;
@@ -734,12 +785,12 @@ export const SmartSendModal = ({ isOpen, onClose, onSent, batch }) => {
 
   const handleSend = async () => {
     if (!allCovered || hasOverflow) {
-      toast.error('User counts must add up exactly to the total batch size for each verification type');
+      toast.error('Assign every pending user exactly once for each verification type');
       return;
     }
-    const batchUserIds = batchUsers.map((u) => u.id);
     const verification_assignments = verificationTypes
       .map((t) => {
+        const batchUserIds = pendingUsersByType[t.verification_name].map((user) => user.id);
         let offset = 0;
         const verifiers = typeRows(t.verification_name)
           .filter((v) => v.verifier_id && parseInt(v.count) > 0)
@@ -760,9 +811,29 @@ export const SmartSendModal = ({ isOpen, onClose, onSent, batch }) => {
       toast.error('Assign at least one verifier to a verification type');
       return;
     }
+    if (verification_assignments.length !== verificationTypes.length || verification_assignments.some((type) =>
+      type.verifiers.reduce((total, verifier) => total + verifier.user_ids.length, 0) !== pendingUsersByType[type.verification_type_name].length
+    )) {
+      toast.error('Add a subject and message for every assigned verifier before sending.');
+      return;
+    }
 
     setSending(true);
     try {
+      const { data: latest } = await verificationAPI.getBatchDetails(batch.id);
+      if (!Array.isArray(latest?.users) || latest.users.some((user) => !user.verification_type_status || typeof user.verification_type_status !== 'object')) {
+        throw new Error('Could not confirm the latest verification statuses. No emails were sent.');
+      }
+      const statusesUnchanged = verification_assignments.every((type) => {
+        const eligibleIds = new Set(pendingManualUsers(latest.users, type.verification_type_name).map((user) => user.id));
+        const assignedIds = type.verifiers.flatMap((verifier) => verifier.user_ids);
+        return assignedIds.length === eligibleIds.size && assignedIds.every((id) => eligibleIds.has(id));
+      });
+      if (!statusesUnchanged) {
+        toast.error('Verification statuses changed. Review the refreshed pending assignments before sending.');
+        setReloadAssignments((value) => value + 1);
+        return;
+      }
       const { data } = await verificationAPI.smartSendManualVerification({ batch_id: batch.id, verification_assignments });
       if (saveDefaultAsDraft && primaryTypeName && defaultTemplate.subject.trim() && defaultTemplate.body.trim()) {
         await verificationAPI.createEmailDraft({ verification_type: primaryTypeName, subject: defaultTemplate.subject, body: defaultTemplate.body }).catch(() => {});
@@ -834,7 +905,7 @@ export const SmartSendModal = ({ isOpen, onClose, onSent, batch }) => {
           <input
             value={editingSubject}
             onChange={(e) => editingRow
-              ? updateVerifier(editingRow.typeName, editingRow._key, { email_subject: e.target.value, customized: true })
+              ? updateVerifier(editingRow.typeName, editingRow._key, { email_subject: e.target.value, email_body: editingBody, customized: true })
               : (setDefaultTemplate((p) => ({ ...p, subject: e.target.value })), setDefaultTemplateTouched(true))}
             className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm font-inter focus:outline-none focus:ring-2 focus:ring-brand-blue/30"
           />
@@ -845,7 +916,7 @@ export const SmartSendModal = ({ isOpen, onClose, onSent, batch }) => {
             rows={12}
             value={editingBody}
             onChange={(e) => editingRow
-              ? updateVerifier(editingRow.typeName, editingRow._key, { email_body: e.target.value, customized: true })
+              ? updateVerifier(editingRow.typeName, editingRow._key, { email_body: e.target.value, email_subject: editingSubject, customized: true })
               : (setDefaultTemplate((p) => ({ ...p, body: e.target.value })), setDefaultTemplateTouched(true))}
             className="w-full resize-none rounded-xl border border-gray-200 px-3 py-2 text-sm font-inter focus:outline-none focus:ring-2 focus:ring-brand-blue/30"
           />
@@ -899,8 +970,7 @@ export const SmartSendModal = ({ isOpen, onClose, onSent, batch }) => {
         <div className="flex items-start gap-2 rounded-xl border border-amber-100 bg-amber-50 px-3 py-2.5">
           <Info size={13} className="text-amber-500 mt-0.5 shrink-0" />
           <p className="text-xs text-amber-700 font-inter leading-relaxed">
-            Manually assign <strong>each batch user</strong> to a verifier. Each verifier receives an Excel of their assigned users + a secure upload link.{' '}
-            <strong>All {batchUsers.length} users must be assigned</strong> — no user can be left out or assigned twice.
+            Assign <strong>each pending verification</strong> to a verifier. Completed checks are excluded. Each verifier receives an Excel of their assigned users and a secure upload link. Assign every pending user exactly once for each check.
           </p>
         </div>
 
@@ -909,18 +979,32 @@ export const SmartSendModal = ({ isOpen, onClose, onSent, batch }) => {
             <RefreshCw size={22} className="animate-spin text-brand-blue" />
             <p className="text-sm text-gray-400 font-inter">Loading verification types & verifiers…</p>
           </div>
+        ) : loadError ? (
+          <div role="alert" className="space-y-3 rounded-xl border border-red-100 bg-red-50 p-4 text-sm text-red-700 font-inter"><p>{loadError}</p><button type="button" onClick={() => setReloadAssignments((value) => value + 1)} className="font-semibold underline">Try again</button></div>
         ) : verificationTypes.length === 0 ? (
           <div className="py-10 text-center">
-            <p className="text-sm text-gray-400 font-inter">No manual verification types found for this batch.</p>
+            <p className="text-sm text-gray-500 font-inter">No pending manual verifications remain for this batch.</p>
           </div>
         ) : (
           <div className="min-w-0">
-            <div className="mb-3 flex items-center justify-between gap-2">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
               <p className="text-sm font-semibold text-brand-dark font-inter">Assigned Verifiers ({flatRows.length})</p>
+              <div className="flex flex-wrap items-center gap-2">
+              {verificationTypes.length > 1 && sharedVerifierId && !alreadyAppliedToAll && (
+                <button type="button" onClick={applySharedVerifier}
+                  disabled={!sharedVerifierEligible || sending || batchUsers.length === 0}
+                  title={sharedVerifierEligible
+                    ? `Assign ${selectedSharedVerifier?.name || selectedSharedVerifier?.email || 'the selected verifier'} to all pending users for every remaining check, replacing current splits`
+                    : 'This verifier does not support every check in this batch'}
+                  className="flex items-center gap-1.5 rounded-lg bg-brand-blue px-3 py-1.5 text-sm font-semibold text-white font-inter transition-colors hover:bg-brand-blue-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40 disabled:cursor-not-allowed disabled:opacity-50">
+                  <Users size={15} /> Apply to all checks
+                </button>
+              )}
               <button type="button" onClick={() => setEditingKey('DEFAULT')}
                 className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm font-semibold text-brand-blue font-inter transition-colors hover:bg-blue-50/60">
                 <GmailIcon className="h-4 w-4 shrink-0" /> Edit Default Template
               </button>
+              </div>
             </div>
 
             {/* Table — grouped by verification type (a thin label row per
@@ -958,7 +1042,7 @@ export const SmartSendModal = ({ isOpen, onClose, onSent, batch }) => {
                                 row={flatRow}
                                 typeLabel={t.label}
                                 allVerifiers={verifiersByType[t.verification_name] || []}
-                                batchTotal={batchUsers.length}
+                                batchTotal={pendingUsersByType[t.verification_name].length}
                                 countBefore={flatRow.countBefore}
                                 canRemove={flatRow.canRemove}
                                 isEditing={editingKey === row._key}
@@ -987,7 +1071,7 @@ export const SmartSendModal = ({ isOpen, onClose, onSent, batch }) => {
               <div className="mt-3 flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2">
                 <Info size={12} className="text-amber-500 shrink-0" />
                 <p className="text-xs text-amber-700 font-inter">
-                  {activeTypes.filter((t) => t.covered !== t.total).map((t) => {
+                  {typesCoverage.filter((t) => t.covered !== t.total).map((t) => {
                     const diff = t.total - t.covered;
                     return diff > 0
                       ? `${slugToLabel(t.typeName)}: ${diff} user${diff !== 1 ? 's' : ''} unassigned`
@@ -1000,7 +1084,7 @@ export const SmartSendModal = ({ isOpen, onClose, onSent, batch }) => {
         )}
 
         {/* Footer */}
-        {!loading && verificationTypes.length > 0 && (
+        {!loading && !loadError && verificationTypes.length > 0 && (
           <Modal.Footer className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <label className="flex items-center gap-2.5 cursor-pointer select-none group">
               <input type="checkbox" checked={saveDefaultAsDraft} onChange={(e) => setSaveDefaultAsDraft(e.target.checked)}
