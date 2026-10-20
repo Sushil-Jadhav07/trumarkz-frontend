@@ -327,6 +327,7 @@ const BatchDetailShell = ({ asPage, isOpen, onClose, title, children }) => (
 // ── Batch Detail Modal ────────────────────────────────────────────────────────
 const BatchDetailModal = ({ batchId, batchName, onClose, asPage = false, onLoaded }) => {
   const [detail,  setDetail]  = useState(null);
+  const [batchUnavailable, setBatchUnavailable] = useState(false);
   const [loading, setLoading] = useState(true);
   const [sdcByRecordId, setSdcByRecordId] = useState({});
   const [certsLoading, setCertsLoading] = useState(false);
@@ -610,6 +611,7 @@ const BatchDetailModal = ({ batchId, batchName, onClose, asPage = false, onLoade
   useEffect(() => {
     if (!batchId) return;
     setLoading(true);
+    setBatchUnavailable(false);
     setDetail(null);
     setSdcByRecordId({});
     setSdcStatus(null);
@@ -628,7 +630,10 @@ const BatchDetailModal = ({ batchId, batchName, onClose, asPage = false, onLoade
           refreshCertificates(normalised.records, normalised.batchType, normalised.verificationProgress?.sdc?.pid_by_user_id);
         }
       })
-      .catch((err) => toast.error(getApiError(err, 'Failed to load batch details')))
+      .catch((err) => {
+        if (err.response?.status === 404) setBatchUnavailable(true);
+        else toast.error(getApiError(err, 'Failed to load batch details'));
+      })
       .finally(() => setLoading(false));
     // Cancel any in-flight poll (see refreshCertificates) when the batch
     // changes or this modal unmounts, so a stale poll from a previous
@@ -705,6 +710,13 @@ const BatchDetailModal = ({ batchId, batchName, onClose, asPage = false, onLoade
             <RefreshCw size={20} className="animate-spin text-brand-blue" />
           </div>
           <p className="font-inter text-sm text-gray-400">Loading batch details…</p>
+        </div>
+      ) : batchUnavailable ? (
+        <div role="status" className="flex flex-col items-center justify-center gap-3 rounded-xl border border-gray-200 bg-white px-5 py-12 text-center">
+          <XCircle size={28} className="text-gray-400" />
+          <h2 className="font-sora text-xl font-semibold text-brand-dark">Batch No Longer Available</h2>
+          <p className="text-sm text-gray-500 font-inter">This batch was deleted or is no longer available to your account.</p>
+          <Button variant="outline" size="sm" onClick={onClose}>Back to Batch Status</Button>
         </div>
       ) : !detail ? (
         <div className="flex flex-col items-center justify-center gap-3 py-12">

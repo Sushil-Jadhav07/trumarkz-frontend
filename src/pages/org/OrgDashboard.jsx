@@ -5,6 +5,7 @@ import { AuthLayout } from '@/components/layout/AuthLayout';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
+import { ConsentBadge } from '@/components/shared/ConsentBadge';
 import { ProgressBar } from '@/components/ui/ProgressBar';
 import { useAuth } from '@/context/AuthContext';
 import { authAPI, verificationAPI, getApiError } from '@/services/api';
@@ -166,6 +167,7 @@ export const OrgDashboard = () => {
     .map((item) => {
       const meta = statusMeta[item.overall_status_label || item.verification_status] || statusMeta.pending;
       return {
+        consentRecord: item,
         action: meta.action,
         detail: item.full_name || item.email || 'Verification record',
         time: formatDateTime(item.updated_at || item.created_at),
@@ -311,6 +313,7 @@ export const OrgDashboard = () => {
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-brand-dark font-inter">{activity.action}</p>
                       <p className="text-xs text-gray-500 font-inter truncate">{activity.detail}</p>
+                      <ConsentBadge record={activity.consentRecord} />
                     </div>
                     <span className="text-xs text-gray-400 font-inter shrink-0">{activity.time}</span>
                   </div>

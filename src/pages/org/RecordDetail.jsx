@@ -6,6 +6,7 @@ import { PageHeader } from '@/components/shared/PageHeader';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
+import { ConsentBadge } from '@/components/shared/ConsentBadge';
 import { Modal } from '@/components/ui/Modal';
 import { verificationAPI, getApiError } from '@/services/api';
 import {
@@ -229,6 +230,7 @@ export const RecordDetail = () => {
               <div className="flex items-center gap-2 mt-1 flex-wrap">
                 <Badge status="default">{recordTypeLabel}</Badge>
                 <StatusBadge status={record.overall_status_label || record.verification_status} />
+                <ConsentBadge record={record} showDeadline />
                 {record.verified_at && (
                   <span className="text-xs text-gray-400 font-inter">{formatDate(record.verified_at)}</span>
                 )}

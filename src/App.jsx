@@ -35,6 +35,7 @@ import AuthCallback from '@/pages/public/AuthCallback';
 import AuthError from '@/pages/public/AuthError';
 import GoogleCallback from '@/pages/public/GoogleCallback';
 import DocumentUpload from '@/pages/public/DocumentUpload';
+import ConsentRequest from '@/pages/public/ConsentRequest';
 import OrgRegistration from '@/pages/org/OrgRegistration';
 import IndividualRegistration from '@/pages/individual/IndividualRegistration';
 import OTPVerification from '@/pages/org/OTPVerification';
@@ -156,6 +157,7 @@ const AnimatedRoutes = () => {
           <Route path="/auth/google/callback" element={<GoogleCallback />} />
           <Route path="/upload" element={<DocumentUpload />} />
           <Route path="/verification/manual/upload/:token" element={<DocumentUpload />} />
+          <Route path="/verification/consent/:token" element={<ConsentRequest />} />
           <Route path="/skills/verify/upload/:token" element={<SkillVerifierUpload />} />
           <Route path="/privacy-policy" element={<PrivacyPolicy />} />
           <Route path="/terms-of-service" element={<TermsOfService />} />

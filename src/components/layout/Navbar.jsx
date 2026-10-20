@@ -2,14 +2,14 @@ import React from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { Logo } from '@/components/ui/Logo';
-import { Bell, Menu, ChevronDown, LogOut, User, Wallet } from 'lucide-react';
+import { NotificationBell } from '@/components/shared/NotificationBell';
+import { Menu, ChevronDown, LogOut, User, Wallet } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
-export const Navbar = ({ onMenuToggle, title, notificationCount = 5 }) => {
+export const Navbar = ({ onMenuToggle, title }) => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const [showDropdown, setShowDropdown] = React.useState(false);
-  const [showNotifications, setShowNotifications] = React.useState(false);
 
   const handleLogout = () => {
     logout();
@@ -39,46 +39,7 @@ export const Navbar = ({ onMenuToggle, title, notificationCount = 5 }) => {
         </div>
 
         <div className="flex items-center gap-3">
-          <div className="relative">
-            <button
-              onClick={() => setShowNotifications(!showNotifications)}
-              className="p-2.5 rounded-xl hover:bg-gray-100 text-gray-500 hover:text-brand-dark transition-colors relative"
-            >
-              <Bell size={20} />
-              {notificationCount > 0 && (
-                <span className="absolute top-1.5 right-1.5 w-4 h-4 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center">
-                  {notificationCount}
-                </span>
-              )}
-            </button>
-            <AnimatePresence>
-              {showNotifications && (
-                <motion.div
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: 10 }}
-                  className="absolute right-0 mt-2 w-80 bg-white rounded-xl shadow-xl border border-gray-100 overflow-hidden"
-                >
-                  <div className="p-4 border-b border-gray-100">
-                    <h4 className="font-sora font-semibold text-sm">Notifications</h4>
-                  </div>
-                  <div className="max-h-64 overflow-y-auto">
-                    {[1, 2, 3].map(i => (
-                      <div key={i} className="p-3 hover:bg-gray-50 border-b border-gray-50 cursor-pointer">
-                        <p className="text-sm text-brand-dark font-inter">Batch verification completed</p>
-                        <p className="text-xs text-gray-400 mt-0.5">{i} hour ago</p>
-                      </div>
-                    ))}
-                  </div>
-                  <div className="p-3 text-center">
-                    <button className="text-sm text-brand-blue font-medium font-inter hover:underline">
-                      View All
-                    </button>
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
+          <NotificationBell />
 
           <div className="relative">
             <button

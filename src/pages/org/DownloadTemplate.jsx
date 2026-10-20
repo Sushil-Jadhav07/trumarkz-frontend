@@ -831,6 +831,10 @@ export const DownloadTemplate = () => {
   const inputRef  = useRef(null);
   const { selectedIndustry, selectedPermission, selectedVerifications, setBatchData, setSelectedHumanTemplate } = useApp();
 
+  const baseFields = useMemo(() => BASE_FIELDS.map((field) => field.key === 'email'
+    ? { ...field, required: selectedPermission === 'private' }
+    : field), [selectedPermission]);
+
   const [excelFile,      setExcelFile]      = useState(null);
   const [customFields,   setCustomFields]   = useState([]);
   const [fieldInput,     setFieldInput]     = useState('');
@@ -883,7 +887,7 @@ export const DownloadTemplate = () => {
   // Required fields (full_name, dob, gender, nationality) can't be toggled
   // off — see BASE_FIELDS.
   const toggleBase = (key) => {
-    const field = BASE_FIELDS.find((f) => f.key === key);
+    const field = baseFields.find((f) => f.key === key);
     if (field?.required) return;
     setBaseToggles((prev) => ({ ...prev, [key]: !prev[key] }));
   };
@@ -891,10 +895,10 @@ export const DownloadTemplate = () => {
   const selectedVerificationTypes = getVerificationApiTypes(selectedVerifications);
   const templateHeaders = useMemo(
     () => [
-      ...BASE_FIELDS.filter((f) => f.required || baseToggles[f.key]).map((f) => f.key),
+      ...baseFields.filter((f) => f.required || baseToggles[f.key]).map((f) => f.key),
       ...customFields,
     ],
-    [baseToggles, customFields]
+    [baseFields, baseToggles, customFields]
   );
 
   const handleAddField = () => {
@@ -936,7 +940,8 @@ export const DownloadTemplate = () => {
       // further through Costing/Preview.
       // Only block on the fields PATCH /verification/batch-users/{user_id}
       // actually requires (full_name, dob, gender, nationality — see
-      // BASE_FIELDS). Everything else in templateHeaders (email,
+      // baseFields). Email is additionally required in Permission Required
+      // Human batches. Other selected template fields (
       // phone_number, aadhar_number, pan_number, license_no, and any custom
       // fields the org added) is optional — their absence from the uploaded
       // file is fine and must never block Continue. This used to check the
@@ -946,7 +951,7 @@ export const DownloadTemplate = () => {
       // "DOB (YYYY-MM-DD)" sanitizes to "dob_yyyy_mm_dd") — match by prefix,
       // not exact equality, so those still count as present.
       const uploadedHeaders = (Array.isArray(rows[0]) ? rows[0] : []).map(sanitizeKey).filter(Boolean);
-      const requiredHeaders = BASE_FIELDS.filter((f) => f.required).map((f) => f.key);
+      const requiredHeaders = baseFields.filter((f) => f.required).map((f) => f.key);
       const missingHeaders = requiredHeaders.filter(
         (h) => !uploadedHeaders.some((u) => u === h || u.startsWith(`${h}_`))
       );
@@ -1227,7 +1232,7 @@ export const DownloadTemplate = () => {
               Base Fields
             </p>
             <div className="grid grid-cols-2 gap-2">
-              {BASE_FIELDS.map((field) => (
+              {baseFields.map((field) => (
                 <div
                   key={field.key}
                   className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2"

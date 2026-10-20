@@ -3,6 +3,7 @@ import { CheckCircle, Clock, FileDown, Eye, RefreshCw, XCircle } from 'lucide-re
 import { Modal } from '@/components/ui/Modal';
 import { Badge } from '@/components/ui/Badge';
 import { RecordDocuments } from '@/components/shared/RecordDocuments';
+import { ConsentBadge } from '@/components/shared/ConsentBadge';
 
 const getInitials = (name) => {
   const parts = String(name || '').trim().split(/\s+/).filter(Boolean);
@@ -293,6 +294,7 @@ export const VerificationDetailsModal = ({
           </div>
           {overallMeta && <Badge status={overallMeta.badge}>{overallMeta.label}</Badge>}
         </div>
+        <ConsentBadge record={record} showDeadline />
 
         <div>
           <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-gray-400 font-inter">

@@ -7,7 +7,7 @@ import { AuthLayout } from '@/components/layout/AuthLayout';
 import { PageHeader } from '@/components/shared/PageHeader';
 import { Button } from '@/components/ui/Button';
 import { StepWizard } from '@/components/ui/StepWizard';
-import { ArrowRight, Globe2, Fingerprint } from 'lucide-react';
+import { ArrowRight, Check, Globe2, Fingerprint } from 'lucide-react';
 import toast from 'react-hot-toast';
 import clsx from 'clsx';
 
@@ -16,15 +16,17 @@ const options = [
     id: 'public',
     icon: Globe2,
     title: 'Open Search',
-    subtitle: 'Public searchable registry access',
-    description: 'Anyone can search and view this credential without asking the worker.',
+    subtitle: 'Public registry access',
+    description: 'Let anyone search and view these credentials without requesting permission from the person.',
+    details: ['No permission request before verification', 'Email is optional for bulk uploads'],
   },
   {
     id: 'private',
     icon: Fingerprint,
     title: 'Permission Required',
-    subtitle: 'Consent-based access before search',
-    description: 'The worker must approve access before anyone can search this credential.',
+    subtitle: 'Consent before verification',
+    description: 'Each person reviews an emailed permission request before their Human verification can continue.',
+    details: ['A valid email is required for each person', 'The request shows the response deadline'],
   }
 ];
 
@@ -55,7 +57,7 @@ export const PermissionSettings = () => {
           subtitle="Choose how these credentials can be searched and viewed."
         />
 
-        <div className="grid gap-4 md:grid-cols-2">
+        <div role="group" aria-label="Credential permission settings" className="grid gap-4 md:grid-cols-2 lg:gap-5">
           {options.map((option, index) => {
             const isSelected = selectedPermission === option.id;
             const Icon = option.icon;
@@ -64,37 +66,40 @@ export const PermissionSettings = () => {
               <motion.button
                 key={option.id}
                 type="button"
+                aria-pressed={isSelected}
+                aria-describedby={`permission-${option.id}-description`}
                 initial={{ opacity: 0, y: 16 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: index * 0.08 }}
                 onClick={() => setSelectedPermission(option.id)}
                 className={clsx(
-                  'flex min-h-[160px] flex-col rounded-2xl border p-4 text-left transition-all',
+                  'group flex h-full flex-col rounded-2xl border p-5 text-left transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue focus-visible:ring-offset-4 focus-visible:ring-offset-brand-bg sm:p-6',
                   isSelected
-                    ? 'border-brand-blue bg-brand-blue/[0.05] shadow-[0_16px_30px_-28px_rgba(37,99,235,0.55)]'
-                    : 'border-slate-200 bg-white hover:border-blue-200 hover:bg-blue-50/20'
+                    ? 'border-brand-blue bg-blue-50/40 ring-1 ring-inset ring-brand-blue/10'
+                    : 'border-slate-200 bg-white hover:border-blue-300 hover:bg-slate-50/50'
                 )}
               >
-                <div className="mb-4 flex items-start justify-between gap-3">
+                <div className="flex items-start gap-3.5">
                   <div className={clsx(
-                    'flex h-10 w-10 items-center justify-center rounded-xl',
-                    isSelected ? 'bg-brand-blue text-white' : 'bg-slate-100 text-slate-500'
+                    'flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl transition-colors',
+                    isSelected ? 'bg-brand-blue text-white' : 'bg-slate-100 text-slate-500 group-hover:bg-blue-50 group-hover:text-brand-blue'
                   )}>
-                    <Icon size={18} strokeWidth={2.2} />
+                    <Icon size={23} strokeWidth={1.8} />
                   </div>
-
+                  <div className="min-w-0 flex-1 pt-0.5">
+                    <h3 className="font-sora text-base font-semibold leading-6 tracking-tight text-brand-dark sm:text-lg">{option.title}</h3>
+                    <p className="mt-1 font-inter text-xs leading-5 text-slate-500">{option.subtitle}</p>
+                  </div>
                   <div className={clsx(
-                    'flex h-6 w-6 items-center justify-center rounded-full border-2',
-                    isSelected ? 'border-brand-blue bg-brand-blue' : 'border-slate-300 bg-white'
-                  )}>
-                    {isSelected && <div className="h-2 w-2 rounded-full bg-white" />}
+                    'mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border transition-colors',
+                    isSelected ? 'border-brand-blue bg-brand-blue text-white' : 'border-slate-300 bg-white group-hover:border-blue-300'
+                  )} aria-hidden="true">
+                    {isSelected && <Check size={14} strokeWidth={2.5} />}
                   </div>
                 </div>
-
-                <div className="flex-1">
-                  <h3 className="font-sora text-lg font-semibold text-brand-dark">{option.title}</h3>
-                  <p className="mt-1.5 font-inter text-xs font-medium text-brand-blue/70">{option.subtitle}</p>
-                  <p className="mt-3 max-w-[34ch] font-inter text-sm leading-6 text-slate-600">{option.description}</p>
+                <p id={`permission-${option.id}-description`} className="mt-5 flex-1 font-inter text-sm leading-6 text-slate-600">{option.description}</p>
+                <div className={clsx('mt-5 space-y-2.5 border-t pt-4', isSelected ? 'border-blue-100' : 'border-slate-100')}>
+                  {option.details.map((detail) => <div key={detail} className="flex items-start gap-2.5 font-inter text-xs leading-5 text-slate-600"><Check size={14} strokeWidth={2} className={clsx('mt-0.5 shrink-0', isSelected ? 'text-brand-blue' : 'text-slate-400')} /><span>{detail}</span></div>)}
                 </div>
               </motion.button>
             );

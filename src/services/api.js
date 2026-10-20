@@ -42,6 +42,9 @@ const isPublicManualVerificationEndpoint = (url = '') =>
   url.includes('/verification/manual/upload/') ||
   url.includes('/verification/manual/verify/');
 
+const isPublicConsentEndpoint = (url = '') =>
+  /^\/verification\/consent\/[^/?]+(?:\/decision)?(?:\?|$)/.test(url);
+
 const clearAuthStorage = () => {
   localStorage.removeItem('access_token');
   localStorage.removeItem('user_id');
@@ -116,7 +119,7 @@ api.interceptors.response.use(
     // interceptor so only a REAL authenticated-request 401 triggers this.
     if (error.response?.status === 401 && !isPublicAuthEndpoint(error.config?.url)) {
       clearAuthStorage();
-      if (window.location.pathname !== '/login') window.location.replace('/login');
+      if (window.location.pathname !== '/login' && !window.location.pathname.startsWith('/verification/consent/')) window.location.replace('/login');
     }
     return Promise.reject(error);
   }
@@ -128,7 +131,7 @@ verificationApi.interceptors.request.use(
     const isPublicUpload =
       config.url?.includes('/verification/upload/photo') ||
       config.url?.includes('/verification/upload/document') ||
-      isPublicManualVerificationEndpoint(config.url);
+      isPublicManualVerificationEndpoint(config.url) || isPublicConsentEndpoint(config.url);
 
     if (token && !isPublicUpload) {
       config.headers.Authorization = `Bearer ${token}`;
@@ -144,10 +147,10 @@ verificationApi.interceptors.request.use(
 verificationApi.interceptors.response.use(
   (response) => response,
   (error) => {
-    const isPublicRoute = isPublicManualVerificationEndpoint(error.config?.url);
+    const isPublicRoute = isPublicManualVerificationEndpoint(error.config?.url) || isPublicConsentEndpoint(error.config?.url);
     if (error.response?.status === 401 && !isPublicRoute) {
       clearAuthStorage();
-      if (window.location.pathname !== '/login') window.location.replace('/login');
+      if (window.location.pathname !== '/login' && !window.location.pathname.startsWith('/verification/consent/')) window.location.replace('/login');
     }
     return Promise.reject(error);
   }
@@ -379,6 +382,16 @@ export const adminAPI = {
 };
 
 export const verificationAPI = {
+  getConsentInfo: (token, { signal } = {}) =>
+    verificationApi.get(`/verification/consent/${encodeURIComponent(token)}`, { signal }),
+  submitConsentDecision: (token, decision) =>
+    verificationApi.post(`/verification/consent/${encodeURIComponent(token)}/decision`, { decision }),
+
+  getNotifications: ({ unreadOnly = false, limit = 50, offset = 0 } = {}) =>
+    verificationApi.get('/verification/notifications', { params: { unread_only: unreadOnly, limit, offset } }),
+  markNotificationRead: (notificationId) =>
+    verificationApi.post(`/verification/notifications/${encodeURIComponent(notificationId)}/read`),
+  markAllNotificationsRead: () => verificationApi.post('/verification/notifications/read-all'),
   getIndustryTypes: () => verificationApi.get('/verification/industry-types'),
 
   uploadSingleHuman: (data) =>
