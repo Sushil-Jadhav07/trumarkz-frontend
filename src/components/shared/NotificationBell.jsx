@@ -1,3 +1,4 @@
+import { LoadingSkeleton } from '@/components/shared/LoadingSkeleton';
 import { useEffect, useId, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Bell, RefreshCw, X } from 'lucide-react';
@@ -31,7 +32,7 @@ export const NotificationBell = () => {
       <div className="flex items-center justify-between gap-2 border-b border-gray-100 px-4 py-3"><h2 className="text-sm font-semibold text-brand-dark">Notifications</h2><div className="flex items-center gap-3"><button type="button" onClick={markAllRead} disabled={busy || !unreadCountKnown || unreadCount === 0} className="text-xs font-medium text-brand-blue disabled:opacity-40">Mark all as read</button><button type="button" aria-label="Close notifications" onClick={() => { setOpen(false); trigger.current?.focus(); }} className="rounded p-1 text-gray-400 hover:bg-gray-50"><X size={15} /></button></div></div>
       <div className="max-h-80 overflow-y-auto" aria-busy={feed.loading}>
         {notificationActionError && <p role="alert" className="px-4 py-3 text-xs leading-5 text-red-600">{notificationActionError}</p>}
-        {feed.loading && feed.items.length === 0 ? <p role="status" className="flex items-center justify-center gap-2 p-6 text-sm text-gray-500"><RefreshCw size={15} className="animate-spin" />Loading notifications…</p>
+        {feed.loading && feed.items.length === 0 ? <LoadingSkeleton variant="list" rows={3} label="Loading notifications" className="px-4" />
           : feed.error ? <div role="alert" className="p-4 text-sm leading-6 text-gray-600">{feed.error}<button type="button" onClick={fetchNotifications} className="mt-2 block font-medium text-brand-blue">Try again</button></div>
           : feed.items.length === 0 ? <p className="p-8 text-center text-sm text-gray-500">No notifications yet.</p>
           : <div className="divide-y divide-gray-100">{feed.items.slice(0, 6).map((item) => <NotificationItem key={item.id} item={item} onRead={markNotificationRead} disabled={busy} />)}</div>}

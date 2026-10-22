@@ -1,3 +1,4 @@
+import { LoadingSkeleton } from '@/components/shared/LoadingSkeleton';
 import React, { useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
@@ -101,10 +102,7 @@ export const ReportsList = () => {
         </div>
 
         {loading ? (
-          <div className="flex flex-col items-center justify-center gap-3 py-16">
-            <RefreshCw size={24} className="animate-spin text-brand-blue" />
-            <p className="font-inter text-sm text-gray-400">Loading reports…</p>
-          </div>
+          <LoadingSkeleton variant="cards" label="Loading reports" rows={6}/>
         ) : filtered.length === 0 ? (
           <Card className="p-12 text-center">
             <FileText size={32} className="text-gray-200 mx-auto mb-3" />

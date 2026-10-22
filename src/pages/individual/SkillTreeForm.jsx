@@ -1,3 +1,4 @@
+import { LoadingSkeleton } from '@/components/shared/LoadingSkeleton';
 import React, { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate, useSearchParams } from 'react-router-dom';
@@ -172,9 +173,7 @@ export const SkillTreeForm = () => {
   if (loadingSkill) {
     return (
       <AuthLayout title={`Edit ${config.label}`}>
-        <div className="flex items-center justify-center py-20">
-          <Loader2 size={28} className="animate-spin text-brand-blue" />
-        </div>
+        <LoadingSkeleton variant="form" />
       </AuthLayout>
     );
   }

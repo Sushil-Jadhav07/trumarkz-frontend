@@ -118,9 +118,9 @@ export const SelectProductSector = () => {
         />
 
         {loading ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mt-2">
+          <div role="status" aria-busy="true" aria-label="Loading product sectors" className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mt-2">
             {[0, 1, 2, 3].map((i) => (
-              <div key={i} className="h-48 rounded-2xl bg-slate-100 animate-pulse" />
+              <div key={i} className="h-48 rounded-2xl bg-slate-100 motion-safe:animate-pulse" />
             ))}
           </div>
         ) : (

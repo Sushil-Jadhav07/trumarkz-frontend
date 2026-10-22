@@ -297,9 +297,9 @@ export const UsersGrouped = () => {
 
       {/* Content */}
       {loading ? (
-        <div className="space-y-3">
+        <div role="status" aria-busy="true" aria-label="Loading user groups" className="space-y-3">
           {[1, 2, 3].map((i) => (
-            <Card key={i} className="p-5 animate-pulse">
+            <Card key={i} className="p-5 motion-safe:animate-pulse">
               <div className="flex items-center gap-3">
                 <div className="w-9 h-9 rounded-xl bg-gray-100" />
                 <div className="space-y-2 flex-1">

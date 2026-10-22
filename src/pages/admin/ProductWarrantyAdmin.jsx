@@ -1,3 +1,4 @@
+import { LoadingSkeleton } from '@/components/shared/LoadingSkeleton';
 import React, { useState, useEffect, useCallback } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -340,11 +341,7 @@ export const ProductWarrantyAdmin = () => {
       {/* Results */}
       <AnimatePresence mode="wait">
         {loading ? (
-          <motion.div key="loading" initial={{ opacity: 0 }} animate={{ opacity: 1 }}
-            className="flex items-center justify-center py-16 gap-3 text-brand-blue">
-            <RefreshCw size={20} className="animate-spin" />
-            <span className="font-inter text-sm">Loading warranty batch…</span>
-          </motion.div>
+          <motion.div key="loading" initial={{ opacity: 0 }} animate={{ opacity: 1 }}><LoadingSkeleton variant="detail" label="Loading warranty batch" /></motion.div>
         ) : data ? (
           <motion.div key="data" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
             {/* Summary */}

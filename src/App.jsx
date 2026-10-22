@@ -4,8 +4,7 @@ import { Navigate, Routes, Route, useLocation } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import toast, { Toaster } from 'react-hot-toast';
 import { AuthProvider, useAuth } from '@/context/AuthContext';
-import { Logo } from '@/components/ui/Logo';
-import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
+import { LoadingSkeleton } from '@/components/shared/LoadingSkeleton';
 
 const AuthLoadingScreen = () => (
   <motion.div
@@ -13,18 +12,9 @@ const AuthLoadingScreen = () => (
     animate={{ opacity: 1 }}
     exit={{ opacity: 0 }}
     transition={{ duration: 0.25 }}
-    className="fixed inset-0 bg-brand-bg flex items-center justify-center"
+    className="fixed inset-0 overflow-y-auto bg-brand-bg"
   >
-    <motion.div
-      initial={{ opacity: 0, y: 12, scale: 0.96 }}
-      animate={{ opacity: 1, y: 0, scale: 1 }}
-      transition={{ type: 'spring', stiffness: 300, damping: 28, delay: 0.08 }}
-      className="flex flex-col items-center gap-5"
-    >
-      <Logo size="lg" />
-      <LoadingSpinner size="md" />
-      <p className="text-sm text-gray-400 font-inter tracking-wide">Loading your workspace…</p>
-    </motion.div>
+    <LoadingSkeleton variant="workspace" label="Loading your workspace" />
   </motion.div>
 );
 import { AppProvider } from '@/context/AppContext';
@@ -157,6 +147,7 @@ const AnimatedRoutes = () => {
           <Route path="/auth/google/callback" element={<GoogleCallback />} />
           <Route path="/upload" element={<DocumentUpload />} />
           <Route path="/verification/manual/upload/:token" element={<DocumentUpload />} />
+          <Route path="/consent/:token" element={<ConsentRequest />} />
           <Route path="/verification/consent/:token" element={<ConsentRequest />} />
           <Route path="/skills/verify/upload/:token" element={<SkillVerifierUpload />} />
           <Route path="/privacy-policy" element={<PrivacyPolicy />} />

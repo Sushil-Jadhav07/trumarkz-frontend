@@ -106,7 +106,7 @@ export const EmailDraftRecipients = ({ verificationType, verificationSelector })
       {batchesError ? (
         <div role="alert" className="mx-5 mb-5 flex items-start gap-2 rounded-xl border border-red-100 bg-red-50 p-4 text-sm leading-6 text-red-700 sm:mx-6"><AlertTriangle size={16} className="mt-1 shrink-0" />{batchesError}</div>
       ) : batchesLoading || loading ? (
-        <div role="status" aria-label={batchesLoading ? 'Loading batches' : 'Loading recipients'} className="space-y-3 px-5 pb-6 sm:px-6">{[1,2,3].map((key) => <div key={key} className="flex animate-pulse items-center gap-4 rounded-lg bg-gray-50 p-3"><div className="h-8 w-8 rounded-lg bg-gray-200/60" /><div className="h-3 w-1/3 rounded bg-gray-200/60" /><div className="ml-auto h-3 w-1/5 rounded bg-gray-200/60" /></div>)}</div>
+        <div role="status" aria-label={batchesLoading ? 'Loading batches' : 'Loading recipients'} className="space-y-3 px-5 pb-6 sm:px-6">{[1,2,3].map((key) => <div key={key} className="flex motion-safe:animate-pulse items-center gap-4 rounded-lg bg-gray-50 p-3"><div className="h-8 w-8 rounded-lg bg-gray-200/60" /><div className="h-3 w-1/3 rounded bg-gray-200/60" /><div className="ml-auto h-3 w-1/5 rounded bg-gray-200/60" /></div>)}</div>
       ) : batches.length === 0 || !batchId || !verificationType ? (
         <div className="mx-5 mb-5 flex flex-col items-start gap-3 rounded-xl border border-dashed border-gray-200 bg-gray-50/70 p-5 sm:mx-6 sm:flex-row sm:items-center">
           <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-400"><Users size={21} strokeWidth={1.6} /></div>

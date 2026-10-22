@@ -1,13 +1,10 @@
 import React from 'react';
-import { motion } from 'framer-motion';
 
 export const SkeletonLoader = ({ width = '100%', height = '20px', circle = false, className = '' }) => {
   return (
-    <motion.div
-      initial={{ opacity: 0.5 }}
-      animate={{ opacity: [0.5, 1, 0.5] }}
-      transition={{ duration: 1.5, repeat: Infinity, ease: 'easeInOut' }}
-      className={`bg-gray-200 ${circle ? 'rounded-full' : 'rounded-lg'} ${className}`}
+    <div
+      aria-hidden="true"
+      className={`max-w-full shrink-0 motion-safe:animate-pulse bg-slate-200/80 ${circle ? 'rounded-full' : 'rounded-lg'} ${className}`}
       style={{ width, height }}
     />
   );

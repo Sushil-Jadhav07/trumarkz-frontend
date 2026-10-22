@@ -1,10 +1,10 @@
+import { LoadingSkeleton } from '@/components/shared/LoadingSkeleton';
 import React, { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { AuthLayout } from '@/components/layout/AuthLayout';
 import { PageHeader } from '@/components/shared/PageHeader';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
-import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
 import { skillsAPI, getApiError } from '@/services/api';
 import toast from 'react-hot-toast';
 import { Layers, CheckCircle, Clock, XCircle, FileText } from 'lucide-react';
@@ -52,9 +52,7 @@ export const AllSkills = () => {
   if (loading) {
     return (
       <AuthLayout title="All Skills">
-        <div className="flex items-center justify-center py-20">
-          <LoadingSpinner size="lg" />
-        </div>
+        <LoadingSkeleton variant="table" columns={6} label="Loading skills" />
       </AuthLayout>
     );
   }

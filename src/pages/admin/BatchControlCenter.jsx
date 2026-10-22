@@ -1,3 +1,4 @@
+import { LoadingSkeleton } from '@/components/shared/LoadingSkeleton';
 import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import * as XLSX from 'xlsx';
@@ -642,10 +643,7 @@ export const BatchControlCenter = () => {
   if (!selectedBatch) {
     return (
       <AuthLayout title="Batch Control Center">
-        <div className="flex items-center justify-center py-24 gap-2">
-          <RefreshCw size={18} className="animate-spin text-brand-blue" />
-          <p className="text-sm text-gray-400 font-inter">Loading batch…</p>
-        </div>
+        <LoadingSkeleton variant="dashboard" label="Loading batch" />
       </AuthLayout>
     );
   }
@@ -1158,10 +1156,7 @@ export const BatchControlCenter = () => {
 
             <div className="overflow-x-auto">
               {loadingDetail ? (
-                <div className="flex items-center justify-center py-10 gap-2">
-                  <RefreshCw size={16} className="animate-spin text-brand-blue" />
-                  <p className="text-sm text-gray-400 font-inter">Loading records…</p>
-                </div>
+                <LoadingSkeleton variant="table" label="Loading records" columns={7}/>
               ) : filteredRecords.length === 0 ? (
                 <div className="py-10 text-center">
                   <p className="text-sm text-gray-400 font-inter">{detailRecords.length === 0 ? 'No records found for this batch' : 'No records match the selected filters.'}</p>

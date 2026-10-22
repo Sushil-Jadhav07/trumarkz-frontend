@@ -195,9 +195,9 @@ export const OrganizationList = () => {
               </div>
 
               {loading && (
-                <div className="divide-y divide-gray-50">
+                <div role="status" aria-busy="true" aria-label="Loading organizations" className="divide-y divide-gray-50">
                   {Array.from({ length: 6 }).map((_, i) => (
-                    <div key={i} className={`grid ${GRID} gap-3 px-5 py-4 animate-pulse items-center`}>
+                    <div key={i} className={`grid ${GRID} gap-3 px-5 py-4 motion-safe:animate-pulse items-center`}>
                       <div className="h-3.5 bg-gray-100 rounded w-32" />
                       <div className="h-3.5 bg-gray-100 rounded w-16" />
                       <div className="h-3.5 bg-gray-100 rounded w-20" />

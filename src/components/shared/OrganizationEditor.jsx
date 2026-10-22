@@ -1,3 +1,4 @@
+import { LoadingSkeleton } from '@/components/shared/LoadingSkeleton';
 import { useEffect, useState } from 'react';
 import { RefreshCw, AlertTriangle } from 'lucide-react';
 import { Input } from '@/components/ui/Input';
@@ -102,9 +103,7 @@ export const OrganizationEditor = ({ onClose, orgId, onSuccess }) => {
   return (
     <div className="rounded-2xl border border-gray-100 bg-white p-5 sm:p-7">
       {loading ? (
-        <div className="flex items-center justify-center py-12 gap-2 text-gray-400 font-inter text-sm">
-          <RefreshCw size={16} className="animate-spin" /> Loading…
-        </div>
+        <LoadingSkeleton variant="form" label="Loading organization form" />
       ) : loadError ? (
         <div className="flex flex-col items-center justify-center py-12 text-center gap-2">
           <AlertTriangle size={24} className="text-red-400" />

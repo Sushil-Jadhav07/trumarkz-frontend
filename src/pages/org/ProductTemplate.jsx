@@ -1,3 +1,4 @@
+import { LoadingSkeleton } from '@/components/shared/LoadingSkeleton';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as XLSX from 'xlsx';
 import { useNavigate } from 'react-router-dom';
@@ -586,10 +587,7 @@ export const ProductTemplate = () => {
                         </p>
                       </div>
                     ) : warrantyReserving ? (
-                      <div className="flex flex-1 items-center justify-center gap-2 text-brand-blue">
-                        <RefreshCw size={18} className="animate-spin" />
-                        <span className="font-inter text-sm">Loading records…</span>
-                      </div>
+                      <LoadingSkeleton variant="table" label="Loading records" rows={3} columns={4}/>
                     ) : !warrantyReservation ? (
                       <div className="flex flex-1 flex-col items-center justify-center gap-3 text-center">
                         <p className="max-w-xs font-inter text-xs text-red-600">Couldn't process this file — documents can't be submitted yet.</p>

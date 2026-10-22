@@ -1,3 +1,4 @@
+import { LoadingSkeleton } from '@/components/shared/LoadingSkeleton';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -975,10 +976,7 @@ export const SmartSendModal = ({ isOpen, onClose, onSent, batch }) => {
         </div>
 
         {loading ? (
-          <div className="flex flex-col items-center justify-center py-10 gap-3">
-            <RefreshCw size={22} className="animate-spin text-brand-blue" />
-            <p className="text-sm text-gray-400 font-inter">Loading verification types & verifiers…</p>
-          </div>
+          <LoadingSkeleton variant="form" label="Loading verification types & verifiers" />
         ) : loadError ? (
           <div role="alert" className="space-y-3 rounded-xl border border-red-100 bg-red-50 p-4 text-sm text-red-700 font-inter"><p>{loadError}</p><button type="button" onClick={() => setReloadAssignments((value) => value + 1)} className="font-semibold underline">Try again</button></div>
         ) : verificationTypes.length === 0 ? (
@@ -1579,9 +1577,7 @@ export const ResendRejectedModal = ({ batch, records = [], prefill, onClose, onS
             <div>
               <label className="mb-1.5 block text-xs font-medium text-gray-500 font-inter">Verifier</label>
               {verifiersLoading ? (
-                <div className="flex items-center gap-2 text-xs text-gray-400 font-inter">
-                  <RefreshCw size={12} className="animate-spin" /> Loading verifiers…
-                </div>
+                <LoadingSkeleton variant="list" rows={2} label="Loading verifiers" className="px-3" />
               ) : (
                 <CustomSelect
                   className="w-full"
@@ -1909,12 +1905,7 @@ const WarrantyDetailModal = ({ batchId, batchName, orgId, spaceId, onClose, asPa
     <>
     <WarrantyShell asPage={asPage} isOpen={!!batchId} onClose={onClose} title={batchName ? `${batchName} — Warranty Status` : "Warranty Status"}>
       {loading ? (
-        <div className="flex flex-col items-center justify-center gap-3 py-16">
-          <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-brand-blue/10 bg-brand-blue/5">
-            <RefreshCw size={20} className="animate-spin text-brand-blue" />
-          </div>
-          <p className="font-inter text-sm text-gray-400">Loading warranty status…</p>
-        </div>
+        <LoadingSkeleton variant="detail" label="Loading warranty status" />
       ) : !data ? (
         <div className="flex flex-col items-center justify-center gap-3 py-12">
           <div className="flex h-12 w-12 items-center justify-center rounded-xl border border-red-100 bg-red-50">
@@ -2479,10 +2470,7 @@ export const WarrantyControlCenter = () => {
   if (!batch) {
     return (
       <AuthLayout title="Batch Monitor">
-        <div className="flex items-center justify-center py-24 gap-2">
-          <RefreshCw size={18} className="animate-spin text-brand-blue" />
-          <p className="text-sm text-gray-400 font-inter">Loading batch…</p>
-        </div>
+        <LoadingSkeleton variant="dashboard" label="Loading batch" />
       </AuthLayout>
     );
   }
@@ -2898,10 +2886,7 @@ export const BatchMonitor = () => {
 
       {/* Batch Table */}
       {loading ? (
-        <Card className="p-10 flex flex-col items-center justify-center gap-3">
-          <RefreshCw size={24} className="animate-spin text-brand-blue" />
-          <p className="text-sm text-gray-400 font-inter">Loading batches...</p>
-        </Card>
+        <LoadingSkeleton variant="table" label="Loading batches" columns={7}/>
       ) : visibleBatches.length === 0 ? (
         <Card className="p-10 text-center">
           <p className="text-sm text-gray-400 font-inter">

@@ -1,4 +1,5 @@
 import { Modal } from '@/components/ui/Modal';
+import { SkeletonTableRows } from '@/components/shared/LoadingSkeleton';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AuthLayout } from '@/components/layout/AuthLayout';
@@ -293,7 +294,7 @@ export const PromoteSuperAdmin = () => {
               </thead>
               <tbody className="divide-y divide-gray-100 bg-white">
                 {usersLoading ? (
-                  <tr><td colSpan={6} className="py-10 text-center text-sm text-gray-400 font-inter">Loading users…</td></tr>
+                  <SkeletonTableRows columns={6} label="Loading users" />
                 ) : pagedUsers.length === 0 ? (
                   <tr><td colSpan={6} className="py-10 text-center text-sm text-gray-400 font-inter">No users found</td></tr>
                 ) : (

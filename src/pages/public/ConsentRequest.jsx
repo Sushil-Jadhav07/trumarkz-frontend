@@ -1,3 +1,4 @@
+import { LoadingSkeleton } from '@/components/shared/LoadingSkeleton';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { CheckCircle, Clock, RefreshCw, ShieldCheck, XCircle } from 'lucide-react';
@@ -94,7 +95,7 @@ export const ConsentRequest = () => {
     <header className="border-b border-gray-100 bg-white"><div className="mx-auto flex max-w-5xl items-center justify-between gap-3 px-5 py-5"><Logo size="md" /><span className="flex items-center gap-1.5 text-xs font-medium text-gray-500"><ShieldCheck size={15} className="shrink-0" /><span className="hidden sm:inline">Secure permission request</span><span className="sm:hidden">Secure request</span></span></div></header>
     <main className="mx-auto max-w-xl px-4 py-8 sm:py-14">
       <section className="rounded-2xl border border-gray-200 bg-white p-6 sm:p-8" aria-live="polite" aria-busy={phase === 'loading' || Boolean(submitting)}>
-        {phase === 'loading' ? <div role="status" className="flex items-center justify-center gap-2 py-12 text-sm text-gray-500"><RefreshCw size={18} className="animate-spin" />Loading permission request…</div>
+        {phase === 'loading' ? <LoadingSkeleton variant="consent" label="Loading permission request" />
           : phase === 'invalid' ? <><XCircle size={28} className="mb-4 text-gray-400" /><h1 className="font-sora text-xl font-semibold">Verification Request Not Found</h1><p className="mt-3 text-sm leading-6 text-gray-500">This consent link is invalid or no longer available.</p></>
           : phase === 'error' ? <><h1 className="font-sora text-xl font-semibold">Unable to load request</h1><p role="alert" className="mt-3 text-sm leading-6 text-gray-500">We could not load your permission request. Please check your connection and try again.</p><button type="button" onClick={load} className="mt-5 rounded-lg bg-brand-blue px-4 py-2 text-sm font-medium text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-blue">Try again</button></>
           : <>

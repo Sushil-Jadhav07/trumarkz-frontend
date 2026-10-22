@@ -1,6 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { consentDisplay, humanConsentMeta, formatConsentDeadline } from './consent.js';
+import { consentDisplay, humanConsentMeta, formatConsentDeadline, isConsentPage } from './consent.js';
+
+test('email and original consent pages stay public while unrelated pages keep session handling', () => {
+  for (const path of ['/consent/test-token_123', '/consent/test-token_123/', '/verification/consent/test-token_123', '/verification/consent/test-token_123/']) {
+    assert.equal(isConsentPage(path), true, path);
+  }
+  for (const path of ['/org/dashboard', '/admin/batch-monitor', '/consent', '/consent/', '/verification/consent/', '/consent/token/other', '/consent-notice/token']) {
+    assert.equal(isConsentPage(path), false, path);
+  }
+});
 
 test('only a server-confirmed pending and unexpired request offers decisions', () => {
   assert.equal(consentDisplay({ consent_status: 'pending', expired: false }), 'pending');

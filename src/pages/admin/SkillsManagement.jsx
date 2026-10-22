@@ -1,3 +1,4 @@
+import { LoadingSkeleton } from '@/components/shared/LoadingSkeleton';
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AuthLayout } from '@/components/layout/AuthLayout';
@@ -7,7 +8,6 @@ import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
 import { Input } from '@/components/ui/Input';
-import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
 import { skillsAPI, getApiError } from '@/services/api';
 import toast from 'react-hot-toast';
 import {
@@ -373,9 +373,7 @@ export const SkillsManagement = () => {
           </div>
 
           {loading ? (
-            <div className="flex items-center justify-center py-16">
-              <LoadingSpinner size="md" />
-            </div>
+            <LoadingSkeleton variant="table" />
           ) : skills.length === 0 ? (
             <div className="p-10 text-center">
               <CheckCircle size={40} className="mx-auto mb-3 text-green-500" />
@@ -820,9 +818,7 @@ export const SkillsManagement = () => {
           </div>
 
           {individualSkillsLoading ? (
-            <div className="flex items-center justify-center py-12">
-              <LoadingSpinner size="md" />
-            </div>
+            <LoadingSkeleton variant="table" />
           ) : individualSkills.length === 0 ? (
             <div className="py-10 text-center">
               <LayoutList size={36} className="mx-auto mb-3 text-gray-300" />

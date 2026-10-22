@@ -1,3 +1,4 @@
+import { LoadingSkeleton } from '@/components/shared/LoadingSkeleton';
 import React, { useEffect, useState, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
@@ -102,10 +103,7 @@ export const SelectVerifications = () => {
           </div>
 
           {loading ? (
-            <div className="flex flex-col items-center justify-center py-16 gap-3">
-              <RefreshCw size={24} className="animate-spin text-brand-blue" />
-              <p className="text-sm text-gray-400 font-inter">Loading verification types…</p>
-            </div>
+            <LoadingSkeleton variant="choices" label="Loading verification types" rows={6}/>
           ) : verificationTypes.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 gap-2">
               <Shield size={32} className="text-gray-200" />

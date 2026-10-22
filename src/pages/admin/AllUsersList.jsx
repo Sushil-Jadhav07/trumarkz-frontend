@@ -1342,9 +1342,9 @@ export const AllUsersList = () => {
 
               {/* Skeleton */}
               {loading && (
-                <div className="divide-y divide-gray-50">
+                <div role="status" aria-busy="true" aria-label="Loading users" className="divide-y divide-gray-50">
                   {Array.from({ length: 8 }).map((_, i) => (
-                    <div key={i} className={`grid ${GRID} gap-3 px-5 py-4 animate-pulse items-center`}>
+                    <div key={i} className={`grid ${GRID} gap-3 px-5 py-4 motion-safe:animate-pulse items-center`}>
                       <div className="flex items-center gap-2.5">
                         <div className="w-7 h-7 rounded-full bg-gray-100 shrink-0" />
                         <div className="h-3.5 bg-gray-100 rounded w-24" />

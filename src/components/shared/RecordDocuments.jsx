@@ -1,4 +1,6 @@
 import React, { useEffect, useState } from 'react';
+import { LoadingSkeleton } from '@/components/shared/LoadingSkeleton';
+import { SkeletonLoader } from '@/components/ui/SkeletonLoader';
 import { Download, Eye, FileText, RefreshCw } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { verificationAPI, getApiError, triggerBlobDownload } from '@/services/api';
@@ -65,10 +67,12 @@ const DocumentRow = ({ document, index }) => {
           </a>
         ) : isPdf ? (
           <iframe src={preview.url} title={`${label} PDF preview`} className="h-28 w-full rounded-lg border-0 sm:h-36" />
+        ) : previewLoading ? (
+          <div role="status" className="h-28 sm:h-36"><span className="sr-only">Loading document preview</span><SkeletonLoader height="100%" /></div>
         ) : (
           <div className="flex h-28 flex-col items-center justify-center gap-1.5 text-gray-400 sm:h-36">
-            {previewLoading ? <RefreshCw size={18} className="animate-spin" /> : <FileText size={20} />}
-            <span className="text-xs font-inter">{previewLoading ? 'Loading preview…' : previewError ? 'Preview unavailable — try View' : 'Document preview'}</span>
+            <FileText size={20} />
+            <span className="text-xs font-inter">{previewError ? 'Preview unavailable — try View' : 'Document preview'}</span>
           </div>
         )}
       </div>
@@ -137,7 +141,7 @@ export const RecordDocuments = ({ record }) => {
         <h4 className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 font-inter">Additional &amp; Uploaded Documents{!loading && ` (${documents.length})`}</h4>
         <button type="button" onClick={() => setRevision((prev) => prev + 1)} disabled={loading} className="flex items-center gap-1 text-xs text-brand-blue font-inter disabled:opacity-50"><RefreshCw size={12} className={loading ? 'animate-spin' : ''} /> Refresh</button>
       </div>
-      {loading && <p className="py-4 text-center text-xs text-gray-400 font-inter">Loading documents…</p>}
+      {loading && <LoadingSkeleton variant="document" label="Loading documents" />}
           {error && <p role="alert" className="rounded-lg bg-amber-50 p-3 text-xs text-amber-700 font-inter">{error}</p>}
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {documents.map((document, index) => <DocumentRow key={document.id || `${document.document_url}-${index}`} document={document} index={index} />)}

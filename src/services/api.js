@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { getDocumentViewCandidates } from '@/utils/recordDocuments';
+import { isConsentPage } from '@/utils/consent';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
 const VERIFICATION_BASE_URL = import.meta.env.VITE_VERIFICATION_API_URL || API_BASE_URL;
@@ -119,7 +120,7 @@ api.interceptors.response.use(
     // interceptor so only a REAL authenticated-request 401 triggers this.
     if (error.response?.status === 401 && !isPublicAuthEndpoint(error.config?.url)) {
       clearAuthStorage();
-      if (window.location.pathname !== '/login' && !window.location.pathname.startsWith('/verification/consent/')) window.location.replace('/login');
+      if (window.location.pathname !== '/login' && !isConsentPage(window.location.pathname)) window.location.replace('/login');
     }
     return Promise.reject(error);
   }
@@ -150,7 +151,7 @@ verificationApi.interceptors.response.use(
     const isPublicRoute = isPublicManualVerificationEndpoint(error.config?.url) || isPublicConsentEndpoint(error.config?.url);
     if (error.response?.status === 401 && !isPublicRoute) {
       clearAuthStorage();
-      if (window.location.pathname !== '/login' && !window.location.pathname.startsWith('/verification/consent/')) window.location.replace('/login');
+      if (window.location.pathname !== '/login' && !isConsentPage(window.location.pathname)) window.location.replace('/login');
     }
     return Promise.reject(error);
   }

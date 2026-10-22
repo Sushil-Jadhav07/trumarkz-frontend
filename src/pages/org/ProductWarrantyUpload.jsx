@@ -1,3 +1,4 @@
+import { LoadingSkeleton } from '@/components/shared/LoadingSkeleton';
 import React, { useState, useCallback, useEffect } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
@@ -155,10 +156,7 @@ const StatusViewer = ({ batchId }) => {
       </div>
 
       {loading ? (
-        <div className="flex items-center justify-center py-10 gap-2 text-brand-blue">
-          <RefreshCw size={18} className="animate-spin" />
-          <span className="text-sm font-inter">Loading status…</span>
-        </div>
+        <LoadingSkeleton variant="detail" label="Loading status" />
       ) : (
         <>
           {summary && <SummaryTiles summary={summary} />}

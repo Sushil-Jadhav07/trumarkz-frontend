@@ -2,6 +2,7 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import { useOrganizationNotifications } from '@/hooks/useOrganizationNotifications';
+import { isConsentPage } from '@/utils/consent';
 
 const AppContext = createContext(null);
 const STORAGE_KEY = 'trumarkz_app_state';
@@ -19,7 +20,7 @@ export const AppProvider = ({ children }) => {
   const persistedState = readStoredState();
   const { user, role, isAuthenticated } = useAuth();
   const { pathname } = useLocation();
-  const notificationState = useOrganizationNotifications(isAuthenticated && role === 'organization' && user?.id && !pathname.startsWith('/verification/consent/') ? `${user.id}:${user.organizationId || ''}` : null);
+  const notificationState = useOrganizationNotifications(isAuthenticated && role === 'organization' && user?.id && !isConsentPage(pathname) ? `${user.id}:${user.organizationId || ''}` : null);
 
   const [batchEntityType, setBatchEntityType]   = useState(persistedState.batchEntityType ?? 'human');
   const [selectedIndustry, setSelectedIndustry] = useState(persistedState.selectedIndustry ?? null);

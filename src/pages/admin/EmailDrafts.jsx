@@ -1,3 +1,4 @@
+import { LoadingSkeleton } from '@/components/shared/LoadingSkeleton';
 import React, { useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { AuthLayout } from '@/components/layout/AuthLayout';
@@ -356,10 +357,7 @@ const EmailHistoryPanel = () => {
       </Card>
 
       {loading ? (
-        <div className="flex items-center justify-center rounded-xl border border-gray-200 bg-white py-10 gap-3 text-brand-blue">
-          <RefreshCw size={20} className="animate-spin" />
-          <span className="font-inter text-sm">Loading history…</span>
-        </div>
+        <LoadingSkeleton variant="table" label="Loading history" columns={6}/>
       ) : rows.length === 0 ? (
         <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-gray-200 bg-white px-5 py-10 text-center">
           <div className="w-12 h-12 rounded-2xl bg-gray-100 flex items-center justify-center mb-3">
@@ -510,7 +508,7 @@ export const EmailDrafts = () => {
                   <div><p className="text-sm font-medium text-gray-700">Your template library</p><p className="mt-1 text-sm leading-6 text-gray-500">Choose a verification type above to view or create its email drafts. No batch selection is needed.</p></div>
                 </div>
               ) : loading ? (
-                <div role="status" className="grid gap-4 p-5 sm:grid-cols-2 sm:p-6" aria-label="Loading templates">{[1,2].map((key) => <div key={key} className="space-y-3 rounded-xl border border-gray-100 p-4 animate-pulse"><div className="h-4 w-2/3 rounded bg-gray-100" /><div className="h-3 rounded bg-gray-50" /><div className="h-3 w-4/5 rounded bg-gray-50" /></div>)}</div>
+                <div role="status" className="grid gap-4 p-5 sm:grid-cols-2 sm:p-6" aria-label="Loading templates">{[1,2].map((key) => <div key={key} className="space-y-3 rounded-xl border border-gray-100 p-4 motion-safe:animate-pulse"><div className="h-4 w-2/3 rounded bg-gray-100" /><div className="h-3 rounded bg-gray-50" /><div className="h-3 w-4/5 rounded bg-gray-50" /></div>)}</div>
               ) : drafts.length === 0 ? (
                 <div className="flex flex-wrap items-center justify-between gap-4 px-5 py-7 sm:px-6"><div><p className="text-sm font-medium text-gray-700">No templates for this type yet</p><p className="mt-1 text-sm text-gray-500">Save a draft to reuse for future verification requests.</p></div><button type="button" onClick={() => setCreateOpen(true)} className="text-sm font-semibold text-brand-blue hover:underline">Create your first draft</button></div>
               ) : (

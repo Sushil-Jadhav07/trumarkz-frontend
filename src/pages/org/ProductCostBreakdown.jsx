@@ -1,3 +1,4 @@
+import { LoadingSkeleton } from '@/components/shared/LoadingSkeleton';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowRight, CheckCircle, CheckSquare, Package, ReceiptText, RefreshCw } from 'lucide-react';
@@ -315,10 +316,7 @@ export const ProductCostBreakdown = () => {
 
             <div className="mt-5 space-y-3">
               {typesLoading ? (
-                <div className="flex items-center justify-center py-8 gap-2 text-slate-400">
-                  <RefreshCw size={16} className="animate-spin" />
-                  <span className="text-sm font-inter">Loading cost details…</span>
-                </div>
+                <LoadingSkeleton variant="list" label="Loading cost details" rows={3}/>
               ) : selectedChecks.length === 0 ? (
                 <p className="py-6 text-center text-sm text-slate-400 font-inter">
                   No verification checks selected. Go back and select checks.

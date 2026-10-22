@@ -1,3 +1,4 @@
+import { LoadingSkeleton } from '@/components/shared/LoadingSkeleton';
 import React, { useState, useEffect, useCallback, useRef, forwardRef, useImperativeHandle } from 'react';
 import { motion } from 'framer-motion';
 import { AuthLayout } from '@/components/layout/AuthLayout';
@@ -462,10 +463,7 @@ const VerifierDirectory = forwardRef((props, ref) => {
 
       {/* Table */}
       {loading ? (
-        <Card className="p-10 flex flex-col items-center justify-center gap-3">
-          <RefreshCw size={24} className="animate-spin text-brand-blue" />
-          <p className="text-sm text-gray-400 font-inter">Loading verifiers...</p>
-        </Card>
+        <LoadingSkeleton variant="table" label="Loading verifiers" columns={6}/>
       ) : filtered.length === 0 ? (
         <Card className="p-10 text-center">
           <Users size={32} className="text-gray-200 mx-auto mb-3" />
@@ -977,10 +975,7 @@ const VerificationTypes = forwardRef((props, ref) => {
 
       {/* Table */}
       {loading ? (
-        <Card className="p-10 flex flex-col items-center justify-center gap-3">
-          <RefreshCw size={24} className="animate-spin text-brand-blue" />
-          <p className="text-sm text-gray-400 font-inter">Loading verification types...</p>
-        </Card>
+        <LoadingSkeleton variant="table" label="Loading verification types" columns={5}/>
       ) : types.length === 0 ? (
         <Card className="p-10 text-center">
           <ShieldCheck size={32} className="text-gray-200 mx-auto mb-3" />

@@ -1,3 +1,4 @@
+import { LoadingSkeleton } from '@/components/shared/LoadingSkeleton';
 import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -61,10 +62,7 @@ const DraftPicker = ({ verificationType, value, onChange }) => {
           className="absolute z-30 top-full mt-1.5 left-0 right-0 bg-white border border-gray-200 rounded-xl shadow-lg overflow-hidden"
         >
           {loading ? (
-            <div className="flex items-center justify-center gap-2 py-4 text-brand-blue text-xs font-inter">
-              <RefreshCw size={12} className="animate-spin" />
-              Loading drafts…
-            </div>
+            <LoadingSkeleton variant="list" rows={2} label="Loading drafts" className="px-3" />
           ) : drafts.length === 0 ? (
             <div className="py-4 px-4 text-center text-xs text-gray-400 font-inter">
               No saved drafts for this verification type
@@ -328,11 +326,7 @@ export const SendManualVerification = () => {
 
       <AnimatePresence mode="wait">
         {loading ? (
-          <motion.div key="loading" initial={{ opacity: 0 }} animate={{ opacity: 1 }}
-            className="flex items-center justify-center py-16 gap-3 text-brand-blue">
-            <RefreshCw size={20} className="animate-spin" />
-            <span className="font-inter text-sm">Loading verifiers…</span>
-          </motion.div>
+          <motion.div key="loading" initial={{ opacity: 0 }} animate={{ opacity: 1 }}><LoadingSkeleton variant="form" label="Loading verifiers" /></motion.div>
         ) : sent ? (
           <motion.div key="success" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
             <Card className="border border-emerald-100 p-6">

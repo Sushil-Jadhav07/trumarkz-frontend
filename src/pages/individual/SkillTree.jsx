@@ -1,3 +1,4 @@
+import { LoadingSkeleton } from '@/components/shared/LoadingSkeleton';
 import React, { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
@@ -9,7 +10,6 @@ import { Badge } from '@/components/ui/Badge';
 import { Modal } from '@/components/ui/Modal';
 import { FileUpload } from '@/components/ui/FileUpload';
 import { Input } from '@/components/ui/Input';
-import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
 import { skillsAPI, getApiError } from '@/services/api';
 import toast from 'react-hot-toast';
 import {
@@ -168,9 +168,7 @@ export const SkillTree = () => {
   if (loading) {
     return (
       <AuthLayout title="My Skill Tree">
-        <div className="flex items-center justify-center py-20">
-          <LoadingSpinner size="lg" />
-        </div>
+        <LoadingSkeleton variant="detail" />
       </AuthLayout>
     );
   }

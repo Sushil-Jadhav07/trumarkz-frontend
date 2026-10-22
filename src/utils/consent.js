@@ -1,3 +1,7 @@
+// Email links use /consent/:token; retain the original public page URL too.
+export const isConsentPage = (pathname = '') =>
+  /^\/(?:verification\/)?consent\/[^/]+\/?$/.test(pathname);
+
 export const consentDisplay = (info) => {
   if (info?.consent_status === 'accepted') return 'accepted';
   if (info?.expired === true) return 'expired';

@@ -1,3 +1,4 @@
+import { LoadingSkeleton } from '@/components/shared/LoadingSkeleton';
 import React, { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -156,10 +157,7 @@ export const RecordDetail = () => {
   if (loading) {
     return (
       <AuthLayout title="Record Detail">
-        <div className="flex flex-col items-center justify-center py-20 gap-3">
-          <RefreshCw size={28} className="animate-spin text-brand-blue" />
-          <p className="text-sm text-gray-400 font-inter">Loading record...</p>
-        </div>
+        <LoadingSkeleton variant="detail" label="Loading record" className="rounded-xl bg-white p-5 sm:p-7"/>
       </AuthLayout>
     );
   }

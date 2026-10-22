@@ -1,3 +1,4 @@
+import { LoadingSkeleton } from '@/components/shared/LoadingSkeleton';
 import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -1189,7 +1190,7 @@ export const CreateBatch = () => {
           />
 
           {categoriesLoading ? (
-            <Card className="p-10 text-center text-sm text-gray-400 font-inter">Loading product sectors...</Card>
+            <LoadingSkeleton variant="cards" rows={3} label="Loading product sectors" />
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-5">
               {productSectors.map((sector, index) => (
@@ -1492,7 +1493,7 @@ export const CreateBatch = () => {
           {isHuman
             ? <HumanBulkPanel onResult={() => {}} selectedIndustry={selectedIndustry} selectedVerifications={selectedVerifications} selectedPermission={selectedPermission} />
             : (categoriesLoading
-              ? <div className="py-10 text-center text-sm text-gray-400 font-inter">Loading categories…</div>
+              ? <LoadingSkeleton variant="form" label="Loading categories" />
               : <ProductBulkPanel categories={categories} onResult={() => {}} selectedCategory={selectedProductSector} selectedService={activeProductService} selectedPermission={selectedPermission} />
             )
           }

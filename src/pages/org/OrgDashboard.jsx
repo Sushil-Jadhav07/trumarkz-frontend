@@ -1,4 +1,6 @@
 import React, { useState, useEffect } from 'react';
+import { LoadingSkeleton } from '@/components/shared/LoadingSkeleton';
+import { SkeletonLoader } from '@/components/ui/SkeletonLoader';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { AuthLayout } from '@/components/layout/AuthLayout';
@@ -94,6 +96,8 @@ export const OrgDashboard = () => {
   const { user } = useAuth();
   const [loading, setLoading] = useState(false);
   const [verificationData, setVerificationData] = useState(null);
+  const [dataLoading, setDataLoading] = useState(true);
+  const [batchesLoading, setBatchesLoading] = useState(true);
   const [statsSummary, setStatsSummary] = useState({ total: '-', pending: '-', verified: '-', failed: '-' });
   const [organizationIndustry, setOrganizationIndustry] = useState(() => normalizeIndustryValue(user?.industryType));
   const [batchList, setBatchList] = useState([]);
@@ -114,7 +118,8 @@ export const OrgDashboard = () => {
       })
       .catch((err) => {
         if (isMounted) toast.error(getApiError(err, 'Failed to load dashboard data'));
-      });
+      })
+      .finally(() => { if (isMounted) setDataLoading(false); });
 
     return () => { isMounted = false; };
   }, []);
@@ -129,7 +134,8 @@ export const OrgDashboard = () => {
       })
       .catch(() => {
         // Active Batches card just shows its own empty state below.
-      });
+      })
+      .finally(() => { if (isMounted) setBatchesLoading(false); });
 
     return () => { isMounted = false; };
   }, []);
@@ -265,7 +271,7 @@ export const OrgDashboard = () => {
                     {stat.color === 'green' ? 'Live' : stat.color === 'orange' ? 'Active' : 'Running'}
                   </Badge>
                 </div>
-                <p className="font-sora font-bold text-2xl text-brand-dark">{stat.value}</p>
+                {dataLoading ? <div role="status" aria-label={`Loading ${stat.label}`} className="py-1"><SkeletonLoader width="64px" height="24px" /></div> : <p className="font-sora font-bold text-2xl text-brand-dark">{stat.value}</p>}
                 <p className="text-sm text-gray-500 font-inter">{stat.label}</p>
               </Card>
             </motion.div>
@@ -299,7 +305,7 @@ export const OrgDashboard = () => {
           <Card className="p-5">
             <h3 className="font-sora font-semibold text-lg text-brand-dark mb-4">Recent Activity</h3>
             <div className="space-y-3">
-              {recentActivity.length === 0 ? (
+              {dataLoading ? <LoadingSkeleton variant="list" label="Loading recent activity" /> : recentActivity.length === 0 ? (
                 <div className="p-8 text-center">
                   <p className="text-sm text-gray-400 font-inter">No verification activity yet</p>
                 </div>
@@ -324,7 +330,7 @@ export const OrgDashboard = () => {
 
           <Card className="p-5">
             <h3 className="font-sora font-semibold text-lg text-brand-dark mb-4">Active Batches</h3>
-            {activeBatches.length === 0 ? (
+            {batchesLoading ? <LoadingSkeleton variant="list" rows={3} label="Loading active batches" /> : activeBatches.length === 0 ? (
               <div className="p-8 text-center">
                 <p className="text-sm text-gray-400 font-inter mb-3">No batches found</p>
                 <Button variant="outline" size="sm" onClick={() => navigate('/org/create-batch')}>

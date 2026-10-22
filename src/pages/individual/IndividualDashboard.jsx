@@ -1,3 +1,4 @@
+import { LoadingSkeleton } from '@/components/shared/LoadingSkeleton';
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
@@ -6,7 +7,6 @@ import { PageHeader } from '@/components/shared/PageHeader';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
-import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
 import { skillsAPI, getApiError } from '@/services/api';
 import toast from 'react-hot-toast';
 import { GitBranch, Award, Share2, ArrowRight, CheckCircle, Clock, Code2, Heart, GraduationCap, FolderKanban } from 'lucide-react';
@@ -70,9 +70,7 @@ export const IndividualDashboard = () => {
   if (loading) {
     return (
       <AuthLayout title="My Dashboard">
-        <div className="flex items-center justify-center py-20">
-          <LoadingSpinner size="lg" />
-        </div>
+        <LoadingSkeleton variant="dashboard" />
       </AuthLayout>
     );
   }

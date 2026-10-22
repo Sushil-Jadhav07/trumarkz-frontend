@@ -1,3 +1,4 @@
+import { LoadingSkeleton } from '@/components/shared/LoadingSkeleton';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
@@ -705,12 +706,7 @@ const BatchDetailModal = ({ batchId, batchName, onClose, asPage = false, onLoade
     <>
     <BatchDetailShell asPage={asPage} isOpen={!!batchId} onClose={onClose} title={`${batchName || detail?.name || 'Batch'} — Details`}>
       {loading ? (
-        <div className="flex flex-col items-center justify-center gap-3 py-16">
-          <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-brand-blue/10 bg-brand-blue/5">
-            <RefreshCw size={20} className="animate-spin text-brand-blue" />
-          </div>
-          <p className="font-inter text-sm text-gray-400">Loading batch details…</p>
-        </div>
+        <LoadingSkeleton variant="dashboard" label="Loading batch details" />
       ) : batchUnavailable ? (
         <div role="status" className="flex flex-col items-center justify-center gap-3 rounded-xl border border-gray-200 bg-white px-5 py-12 text-center">
           <XCircle size={28} className="text-gray-400" />
@@ -1478,9 +1474,7 @@ const BatchDetailModal = ({ batchId, batchName, onClose, asPage = false, onLoade
       <Modal isOpen onClose={() => setShowApprovalHistory(false)} title="Approval History" size="md">
         <div className="max-h-96 space-y-2 overflow-y-auto thin-scrollbar">
           {sdcApprovalsLoading ? (
-            <div className="flex items-center justify-center gap-2 py-8 text-xs text-gray-400 font-inter">
-              <RefreshCw size={14} className="animate-spin" /> Loading…
-            </div>
+            <LoadingSkeleton variant="list" rows={2} label="Loading approval history" className="px-3" />
           ) : sdcApprovals.length === 0 ? (
             <p className="py-6 text-center text-xs text-gray-400 font-inter">No approval requests yet.</p>
           ) : (
@@ -1665,12 +1659,7 @@ const WarrantyDetailModal = ({ batchId, batchName, onClose, asPage = false }) =>
   return (
     <BatchDetailShell asPage={asPage} isOpen={!!batchId} onClose={onClose} title={`${batchName} — Warranty Status`}>
       {loading ? (
-        <div className="flex flex-col items-center justify-center gap-3 py-16">
-          <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-brand-blue/10 bg-brand-blue/5">
-            <RefreshCw size={20} className="animate-spin text-brand-blue" />
-          </div>
-          <p className="font-inter text-sm text-gray-400">Loading warranty status…</p>
-        </div>
+        <LoadingSkeleton variant="detail" label="Loading warranty status" />
       ) : !data ? (
         <div className="flex flex-col items-center justify-center gap-3 py-12">
           <div className="flex h-12 w-12 items-center justify-center rounded-xl border border-red-100 bg-red-50">
@@ -2111,10 +2100,7 @@ export const BatchStatus = () => {
           </div>
 
           {loading && (
-            <div className="flex flex-col items-center justify-center gap-3 p-16">
-              <RefreshCw size={24} className="animate-spin text-brand-blue" />
-              <p className="font-inter text-sm text-gray-400">Loading batches…</p>
-            </div>
+            <LoadingSkeleton variant="table" label="Loading batches" columns={6}/>
           )}
 
           {!loading && paged.length === 0 && (

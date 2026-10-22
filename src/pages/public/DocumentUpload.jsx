@@ -1,3 +1,4 @@
+import { LoadingSkeleton } from '@/components/shared/LoadingSkeleton';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
@@ -307,8 +308,8 @@ export const DocumentUpload = () => {
     if (bulkSubmitting) return;
     const fileTargets = stagedIds;
     const decisionTargets = decisionIds;
-    if (fileTargets.length === 0 && decisionTargets.length === 0) {
-      toast.error('Attach a report or make a decision first');
+    if (decisionTargets.length === 0) {
+      toast.error('Approve or reject at least one record before submitting reports');
       return;
     }
     setBulkSubmitting(true);
@@ -406,9 +407,7 @@ export const DocumentUpload = () => {
   if (pageState === null) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50 p-6">
-        <div className="flex items-center gap-2 text-gray-400 font-inter text-sm">
-          <RefreshCw size={16} className="animate-spin" /> Loading verification request…
-        </div>
+        <LoadingSkeleton variant="detail" label="Loading verification request" className="max-w-4xl rounded-2xl bg-white p-5 sm:p-8" />
       </div>
     );
   }
@@ -843,18 +842,18 @@ export const DocumentUpload = () => {
             <button
               type="button"
               onClick={handleSubmitReports}
-              disabled={bulkSubmitting || (stagedIds.length === 0 && decisionIds.length === 0)}
+              disabled={bulkSubmitting || decisionIds.length === 0}
               className="w-full flex items-center justify-center gap-2 rounded-xl bg-brand-blue py-3 text-sm font-semibold text-white font-inter hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed"
             >
               {bulkSubmitting ? <RefreshCw size={14} className="animate-spin" /> : <Upload size={14} />}
               {bulkSubmitting
                 ? 'Submitting…'
-                : stagedIds.length > 0 || decisionIds.length > 0
-                  ? `Submit Reports (${stagedIds.length + decisionIds.length})`
+                : decisionIds.length > 0
+                  ? `Submit Reports (${decisionIds.length})`
                   : 'Submit Reports'}
             </button>
             <p className="text-[11px] text-gray-400 font-inter text-center -mt-2">
-              Upload a file and/or approve or reject each record — nothing is sent until you submit.
+              Approve or reject at least one record to enable submission. Files and decisions are sent together when you submit.
             </p>
 
             <div className="rounded-2xl bg-white border border-gray-100 shadow-sm p-5 flex items-start gap-3">

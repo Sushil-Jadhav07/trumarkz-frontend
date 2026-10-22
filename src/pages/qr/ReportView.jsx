@@ -1,3 +1,4 @@
+import { LoadingSkeleton } from '@/components/shared/LoadingSkeleton';
 import React, { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -59,10 +60,7 @@ export const ReportView = () => {
         <PageHeader title={title} subtitle={`Certificate ID: ${id}`} />
 
         {loading ? (
-          <div className="flex flex-col items-center justify-center gap-3 py-16">
-            <RefreshCw size={24} className="animate-spin text-brand-blue" />
-            <p className="font-inter text-sm text-gray-400">Loading certificate…</p>
-          </div>
+          <LoadingSkeleton variant="detail" label="Loading certificate" />
         ) : !record ? (
           <Card className="p-12 text-center">
             <XCircle size={28} className="text-red-300 mx-auto mb-3" />

@@ -1,3 +1,4 @@
+import { LoadingSkeleton } from '@/components/shared/LoadingSkeleton';
 import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import * as XLSX from 'xlsx';
@@ -852,10 +853,7 @@ export const GenerateSDCModal = ({ batch, onClose, onGenerated, liveStatus, poll
           <div>
             <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-gray-400 font-inter">Certificates</p>
             {certLoading ? (
-              <div className="flex flex-col items-center justify-center gap-2 rounded-2xl border border-gray-100 bg-gray-50/60 py-8">
-                <RefreshCw size={16} className="animate-spin text-brand-blue" />
-                <p className="text-xs text-gray-400 font-inter">Fetching issued certificates…</p>
-              </div>
+              <LoadingSkeleton variant="list" label="Fetching issued certificates" rows={2}/>
             ) : certMatches.length > 0 ? (
               <div className="max-h-64 space-y-2 overflow-y-auto pr-1">
                 {certMatches.map((m) => (
@@ -1349,7 +1347,7 @@ const BatchDetail = ({ batchSummary, onBack }) => {
 
   if (loading || !batch) {
     return (
-      <div className="py-24 text-center text-sm text-gray-400 font-inter">Loading batch...</div>
+      <LoadingSkeleton variant="detail" label="Loading batch" />
     );
   }
 
@@ -1963,7 +1961,7 @@ const SDCVerification = () => {
           {loading ? 'Loading organizations...' : `Showing ${filteredOrgs.length} organization${filteredOrgs.length !== 1 ? 's' : ''}`}
         </p>
 
-        {!loading && filteredOrgs.length === 0 ? (
+        {loading ? <LoadingSkeleton variant="cards" rows={4} label="Loading organizations" /> : filteredOrgs.length === 0 ? (
           <Card className="p-12 text-center">
             <ShieldCheck size={40} className="text-gray-200 mx-auto mb-3" />
             <p className="text-gray-400 font-inter text-sm">No organizations match your search.</p>
