@@ -2,6 +2,22 @@
 export const isConsentPage = (pathname = '') =>
   /^\/(?:verification\/)?consent\/[^/]+\/?$/.test(pathname);
 
+export const consentRequiredForBatch = (batch) => {
+  if (String(batch?.batch_type || batch?.entity_type || '').toLowerCase() !== 'human') return false;
+  if (['public', 'open_search'].includes(batch?.credential_visibility)) return false;
+  return ['private', 'permission_required'].includes(batch?.credential_visibility) || batch?.permission_mode === 'permission_required';
+};
+
+export const consentAllowsProcessing = (record, batch = null) => {
+  const type = String(batch?.batch_type || batch?.entity_type || record?.entity_type || record?.batch_type || '').toLowerCase();
+  if (type === 'product' || type === 'warranty') return true;
+  if (batch && ['public', 'open_search'].includes(batch.credential_visibility)) return true;
+  const required = consentRequiredForBatch(batch) || record?.consent_required === true ||
+    (record?.consent_required !== false && record?.consent_status != null);
+  // A response deadline never revokes an already accepted decision.
+  return !required || record?.consent_status === 'accepted';
+};
+
 export const consentDisplay = (info) => {
   if (info?.consent_status === 'accepted') return 'accepted';
   if (info?.expired === true) return 'expired';

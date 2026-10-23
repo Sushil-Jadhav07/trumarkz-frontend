@@ -6,6 +6,7 @@ import { AuthLayout } from '@/components/layout/AuthLayout';
 import { PageHeader } from '@/components/shared/PageHeader';
 import { Button } from '@/components/ui/Button';
 import { NotificationItem } from '@/components/shared/NotificationItem';
+import { BrowserNotifications } from '@/components/shared/BrowserNotifications';
 
 export const Notifications = () => {
   const [filter, setFilter] = useState('all');
@@ -13,6 +14,7 @@ export const Notifications = () => {
   const feed = notificationFeeds[filter];
   const busy = markingAllNotifications || readingNotificationIds.length > 0;
   return <AuthLayout title="Notifications">
+    <BrowserNotifications />
     <PageHeader title="Notifications" subtitle="Updates for your organization."
       action={notificationsEnabled && <div className="flex flex-wrap items-center gap-2"><Button variant="ghost" size="sm" icon={RefreshCw} disabled={feed.loading} onClick={fetchNotifications}>Refresh</Button><Button variant="outline" size="sm" icon={Check} disabled={busy || !unreadCountKnown || unreadCount === 0} onClick={markAllRead}>{markingAllNotifications ? 'Updating…' : 'Mark all as read'}</Button></div>} />
     {!notificationsEnabled ? <p className="rounded-xl border border-gray-200 bg-white p-6 text-sm text-gray-500">Notifications are available for organization accounts.</p> : <section className="overflow-hidden rounded-xl border border-gray-200 bg-white">

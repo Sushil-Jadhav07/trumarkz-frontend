@@ -1,0 +1,25 @@
+# OCR Gender / Nationality assignment migration
+
+Source: supplied `OCR_bulk_gender_nationality_api.md`, read completely before changes. It supersedes the earlier Excel/CSV feature.
+
+## Current behavior
+
+- Old Excel override controls, serializer and optional-column logic are removed. Excel/CSV always requires gender/nationality columns again. Its API helper does not send `bulk_gender`, `bulk_nationality` or `assignments`, even if stale caller options contain them.
+- Human document upload offers multiple assignment groups before extraction/creation. Each group chooses specific document checkboxes and one Gender and/or Nationality. Both fields use styled custom dropdowns backed by div listboxes/portals, not native selects. OCR review uses the same custom dropdowns for individual corrections.
+- Stable local IDs identify group members while files are being edited. Deleting a document prunes its membership; a later file cannot silently inherit its assignments. Removing every selected file removes that obsolete group. Mode changes clear groups. Editing is locked during preview extraction.
+- `buildOcrAssignments` maps those IDs to the exact final draft file order, preserving array/group order. Index `0` is valid. Empty selections, missing values, malformed/out-of-range indices, invalid gender, comma-separated assignment values and the literal `All` are rejected before the upload. Gender and nationality are independent; later groups win only for the field they supply.
+- The existing non-persisting `/ocr/extract` preview and cost approval remain intact. Preview assignments are explicitly local draft values. On actual creation, `submitOcrDraft` sends the final ordered images and JSON `assignments` in the **same** `POST /verification/bulk-upload/documents` request. Omitted/empty groups omit the multipart field. No new after-upload assignment API was invented.
+- Existing photos, additional documents, identity matching, reviewed corrections and checkpoint retries remain. The existing review PATCH still resends required demographic fields, with matching custom fields so stale extracted values cannot overwrite reviewed assignments. Successful creation is checkpointed before attachment/review work; retrying that work never creates another batch or resends the assignment upload.
+- Before creation, the costing screen can return to **Edit documents & assignments**, restoring source images, optional photos, supporting documents and groups. The normal preview/review runs again after editing. This edit action is unavailable once a successful upload response has been checkpointed.
+- The result view reads `successful_users[].gender`/`.nationality` directly and labels them **Upload-confirmed user values**. Later deliberate review corrections remain separate. No client-calculated values are presented as persisted backend results.
+- Product, Warranty and single-record endpoints do not receive OCR assignment fields.
+
+## Exact nationality list still missing from the handoff
+
+The document again omits the backend's 195-entry `NATIONALITY_OPTIONS` constant and provides no runtime list endpoint. The frontend does not fabricate a supposedly byte-for-byte synchronized list. The searchable nationality dropdown currently offers only the four demonym examples explicitly supplied in the handoffs (Afghan, American, Indian, Zimbabwean), plus **search/enter another individual demonym**. The backend validates the complete supported list and its errors are surfaced. `All` cannot be chosen or entered as an assignment. Replacing these suggestions with the complete canonical list remains dependent on receiving that backend constant.
+
+## Validation
+
+- 89 automated regression tests passed, including new OCR group serialization, first-file index zero, independent overlapping fields, last-match precedence, reordering/removal safeguards, no changes to unrelated extracted data, malformed group rejection, actual multipart API encoding, omission for no groups, removed Excel fields, Product isolation, and checkpoint-safe assignment submission.
+- Isolated browser with controlled APIs exercised the real Upload Template and Cost Breakdown components: no Excel overrides/optional columns; custom div dropdowns without `All`; three-image split Gender and independent Nationality groups; assigned preview values before any batch creation; visible HTTP 400 with files/groups restored for editing; actual review → costing → ordered upload/assignments; returned values and matching reviewed custom fields; deletion without retargeting; 390px overflow and portal-menu screenshots.
+- Production build passed. Existing bundle-size and Browserslist warnings remain. All browser/API writes were mocked; no live batch, OCR provider run or consent/verification mutation was submitted.

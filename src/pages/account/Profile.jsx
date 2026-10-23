@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Link } from 'react-router-dom';
 import { AuthLayout } from '@/components/layout/AuthLayout';
+import { BrowserNotifications } from '@/components/shared/BrowserNotifications';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
@@ -403,6 +404,8 @@ export const Profile = () => {
             </div>
           </div>
         </Card>
+
+        <BrowserNotifications />
 
         {/* Main content grid */}
         <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-5">

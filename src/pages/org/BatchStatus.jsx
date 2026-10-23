@@ -15,6 +15,7 @@ import { VerificationDetailsModal, VerificationCheckDetailsModal } from '@/compo
 import { WarrantyDocumentCell } from '@/components/shared/WarrantyDocumentCell';
 import { TablePagination } from '@/components/shared/TablePagination';
 import { loadWarrantyCertificates } from '@/utils/warrantyCertificates';
+import { useAutomaticBatchRefresh } from '@/hooks/useAutomaticBatchRefresh';
 import {
   ChevronLeft, ChevronRight, CheckCircle, Clock, Download,
   Eye, FileText, Info, Layers, Package, RefreshCw, Upload,
@@ -433,6 +434,7 @@ const BatchDetailModal = ({ batchId, batchName, onClose, asPage = false, onLoade
   // modal's Verifier line falls back to "—" for a manual check (never
   // fabricated) and shows "Automatic" only when the check's own label says so.
   const [selectedVerification, setSelectedVerification] = useState(null);
+  useAutomaticBatchRefresh({ batchId, batchType: detail?.batchType, records: detail?.records, onUpdate: (data) => setDetail(normaliseBatch(data)) });
   // The real, authoritative SDC/sharing state — from GET /sdc/batches/
   // {batch_id}/status itself (sdc_status, shared_with_org, ready/total),
   // never from GET /verification/batches/{batch_id}'s verification_progress.sdc,
@@ -1320,6 +1322,8 @@ const BatchDetailModal = ({ batchId, batchName, onClose, asPage = false, onLoade
         : null;
       return (
         <VerificationDetailsModal
+          batchId={batchId}
+          batchType={detail?.batchType}
           showDocuments
           record={verificationDetailsRecord}
           title={verificationDetailsRecord
@@ -1335,6 +1339,8 @@ const BatchDetailModal = ({ batchId, batchName, onClose, asPage = false, onLoade
 
     {selectedVerification && (
       <VerificationCheckDetailsModal
+        batchId={batchId}
+        batchType={detail?.batchType}
         selection={selectedVerification}
         title={getRecordTitle(selectedVerification.record)}
         onClose={() => setSelectedVerification(null)}

@@ -11,8 +11,8 @@ export const Navbar = ({ onMenuToggle, title }) => {
   const navigate = useNavigate();
   const [showDropdown, setShowDropdown] = React.useState(false);
 
-  const handleLogout = () => {
-    logout();
+  const handleLogout = async () => {
+    await logout();
     setShowDropdown(false);
     navigate('/logout');
   };

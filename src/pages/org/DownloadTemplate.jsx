@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as XLSX from 'xlsx';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { AuthLayout } from '@/components/layout/AuthLayout';
 import { PageHeader } from '@/components/shared/PageHeader';
 import { Button } from '@/components/ui/Button';
@@ -15,6 +15,9 @@ import { HUMAN_VERIFICATION_STEPS, HUMAN_VERIFICATION_STEP_META, HUMAN_VERIFICAT
 import { verificationAPI, triggerBlobDownload, getApiError } from '@/services/api';
 import { getVerificationApiTypes, getIndustryTypeList } from '@/utils/verificationFlow';
 import { extractOcrDraft } from '@/utils/ocrSubmission';
+import { OcrAssignmentGroups, OcrNationalitySelect } from '@/components/shared/OcrAssignmentGroups';
+import { CustomSelect } from '@/components/ui/CustomSelect';
+import { OCR_GENDERS, buildOcrAssignments, applyOcrAssignmentsToPreview } from '@/utils/ocrAssignments';
 
 // photo is appended automatically by the API — never pass it in headers.
 // required: true matches PATCH /verification/batch-users/{user_id}'s own
@@ -226,7 +229,12 @@ const ReviewOcrModal = ({ isOpen, ocrResult, sourceEntries = {}, onClose, onDone
     setConfirmedIds(new Set());
     setFinalPreview(false);
     clearAttachments();
-    setAttachments({});
+    const restored = Object.fromEntries((ocrResult?.successful_users || []).flatMap((user) => {
+      const attachment = sourceEntries[user.id]?.reviewAttachment;
+      return attachment?.file ? [[user.id, { ...attachment, previewUrl: URL.createObjectURL(attachment.file), uploaded: false }]] : [];
+    }));
+    attachmentsRef.current = restored;
+    setAttachments(restored);
   }, [ocrResult]);
 
   const users = ocrResult?.successful_users || [];
@@ -282,7 +290,8 @@ const ReviewOcrModal = ({ isOpen, ocrResult, sourceEntries = {}, onClose, onDone
     });
     return {
       ...topLevel,
-      custom_fields: { ...(_customFields || {}), ...customFromForm },
+      custom_fields: { ...(_customFields || {}), ...customFromForm,
+        ...Object.fromEntries(['gender', 'nationality'].filter((key) => String(allFields[key] ?? '').trim()).map((key) => [key, allFields[key]])) },
       mark_reviewed: true,
     };
   };
@@ -485,7 +494,15 @@ const ReviewOcrModal = ({ isOpen, ocrResult, sourceEntries = {}, onClose, onDone
                     ) : (
                       <div key={f.key} className={f.key.startsWith('address_line') ? 'col-span-2 xl:col-span-3' : 'min-w-0'}>
                         <label className="block font-inter text-[11px] font-medium text-slate-500 mb-1">{f.label}{f.required && <span className="text-red-500"> *</span>}</label>
-                        {f.key.startsWith('address_line') ? (
+                        {f.key === 'gender' ? <CustomSelect
+                          value={values[f.key] || ''} disabled={isConfirmed || finishing || confirmingId !== null}
+                          ariaLabel={`Gender for ${u.id}`} searchable placeholder={values[f.key] || 'Choose gender'}
+                          options={[{ value: '', label: 'Not set' }, ...OCR_GENDERS.map((value) => ({ value, label: value }))]}
+                          onChange={(value) => updateField(u.id, f.key, value)}
+                        /> : f.key === 'nationality' ? <OcrNationalitySelect
+                          value={values[f.key] || ''} disabled={isConfirmed || finishing || confirmingId !== null}
+                          ariaLabel={`Nationality for ${u.id}`} onChange={(value) => updateField(u.id, f.key, value)}
+                        /> : f.key.startsWith('address_line') ? (
                           <textarea rows={2} value={values[f.key] || ''} disabled={isConfirmed || finishing || confirmingId !== null} onChange={(e) => updateField(u.id, f.key, e.target.value)} className="w-full resize-y rounded-lg border border-slate-200 px-2.5 py-2 font-inter text-xs leading-relaxed text-slate-900 outline-none focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/10 disabled:bg-slate-50 disabled:text-slate-500" />
                         ) : <input
                           value={values[f.key] || ''}
@@ -828,8 +845,9 @@ const UserDocumentEntries = ({ mode, entries, onEntriesChange }) => {
 
 export const DownloadTemplate = () => {
   const navigate  = useNavigate();
+  const location = useLocation();
   const inputRef  = useRef(null);
-  const { selectedIndustry, selectedPermission, selectedVerifications, setBatchData, setSelectedHumanTemplate } = useApp();
+  const { selectedIndustry, selectedPermission, selectedVerifications, batchData, setBatchData, setSelectedHumanTemplate } = useApp();
 
   const baseFields = useMemo(() => BASE_FIELDS.map((field) => field.key === 'email'
     ? { ...field, required: selectedPermission === 'private' }
@@ -855,12 +873,21 @@ export const DownloadTemplate = () => {
   // documents call either way (see handleUploadDocuments).
   const [uploadMode, setUploadMode] = useState('single');
   const [docEntries, setDocEntries] = useState([]);
+  const [assignmentGroups, setAssignmentGroups] = useState([]);
+  const [reviewAssignmentGroups, setReviewAssignmentGroups] = useState([]);
   const [uploading,  setUploading]  = useState(false);
   const [ocrResult,  setOcrResult]  = useState(null);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [reviewEntries, setReviewEntries] = useState({});
   const entriesRef = useRef(docEntries);
   entriesRef.current = docEntries;
+  useEffect(() => {
+    const ids = new Set(docEntries.map((entry) => entry.id));
+    setAssignmentGroups((previous) => previous.flatMap((group) => {
+      const entryIds = group.entryIds.filter((id) => ids.has(id));
+      return group.entryIds.length && !entryIds.length ? [] : [{ ...group, entryIds }];
+    }));
+  }, [docEntries]);
 
   useEffect(() => () => {
     entriesRef.current.forEach((entry) => {
@@ -868,6 +895,25 @@ export const DownloadTemplate = () => {
       if (entry.photoPreviewUrl) URL.revokeObjectURL(entry.photoPreviewUrl);
     });
   }, []);
+  useEffect(() => {
+    if (!location.state?.restoreOcrDraft || !batchData?.ocrDraft || batchData?.ocrSubmission?.response) return;
+    const draft = batchData.ocrDraft;
+    const entries = draft.records.map((record) => ({
+      id: record.localId, file: record.file, previewUrl: URL.createObjectURL(record.file),
+      photo: record.photo || null, photoPreviewUrl: record.photo ? URL.createObjectURL(record.photo) : null,
+      reviewAttachment: record.attachment || null,
+    }));
+    setDocEntries(entries);
+    setAssignmentGroups(draft.assignmentGroups || []);
+    setBatchNameValue(batchData.batchName);
+    setUploadMode(entries.length > 1 ? 'bulk' : 'single');
+    return () => entries.forEach((entry) => {
+      URL.revokeObjectURL(entry.previewUrl);
+      if (entry.photoPreviewUrl) URL.revokeObjectURL(entry.photoPreviewUrl);
+    });
+    // Restore only on this explicit navigation, not on subsequent draft edits.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.key]);
 
   // Switching tabs is a fresh start — the two modes build their entries
   // differently enough (one-at-a-time vs multi-select) that carrying partial
@@ -881,6 +927,7 @@ export const DownloadTemplate = () => {
       if (entry.photoPreviewUrl) URL.revokeObjectURL(entry.photoPreviewUrl);
     });
     setDocEntries([]);
+    setAssignmentGroups([]);
     setUploadMode(nextMode);
   };
 
@@ -983,9 +1030,13 @@ export const DownloadTemplate = () => {
     if (!batchNameValue.trim()) { toast.error('Enter a batch name'); return; }
     setUploading(true);
     try {
+      const groups = assignmentGroups.map((group) => ({ ...group, entryIds: [...group.entryIds] }));
+      buildOcrAssignments(groups, docEntries); // Validate before any extraction requests.
       const records = await extractOcrDraft(docEntries, verificationAPI);
+      const previews = applyOcrAssignmentsToPreview(records, docEntries, groups);
+      setReviewAssignmentGroups(groups);
       setReviewEntries(Object.fromEntries(docEntries.map((entry) => [entry.id, entry])));
-      setOcrResult({ successful_users: records, errors: [], skipped_users: [] });
+      setOcrResult({ successful_users: previews, errors: [], skipped_users: [] });
       setReviewOpen(true);
     } catch (err) {
       toast.error(getApiError(err, err?.message || 'Failed to extract document details'));
@@ -998,7 +1049,7 @@ export const DownloadTemplate = () => {
     setReviewOpen(false);
     setBatchData({
       batchName: batchNameValue.trim(), description: '', recordCount: draft.records.length,
-      costConfirmed: false, uploadResponse: null, ocrDraft: draft,
+      costConfirmed: false, uploadResponse: null, ocrDraft: { ...draft, assignmentGroups: reviewAssignmentGroups },
       ocrSubmission: { response: null, completedIds: [], photoSavedIds: [], savedAttachments: {} },
     });
     setSelectedHumanTemplate('classic-blue');
@@ -1051,14 +1102,14 @@ export const DownloadTemplate = () => {
             <div className="flex min-h-0 flex-col lg:flex-row">
 
               {/* ── LEFT — Excel Template ──────────────────────────────── */}
-              <div className="flex w-1/2 shrink-0 flex-col border-b border-gray-100 bg-gray-50/30 lg:border-b-0 lg:border-r">
+              <div className="flex w-full shrink-0 flex-col border-b border-gray-100 bg-gray-50/30 lg:w-1/2 lg:border-b-0 lg:border-r">
                 <div className="flex items-center gap-2.5 border-b border-gray-100 bg-gray-50/60 px-6 py-4">
                   <div className={`flex h-7 w-7 items-center justify-center rounded-lg ${excelFile ? 'bg-green-100' : 'bg-blue-50'}`}>
                     <Upload size={13} className={excelFile ? 'text-green-600' : 'text-brand-blue'} />
                   </div>
                   <div>
                     <p className="font-inter text-sm font-semibold text-brand-dark">Excel Template</p>
-                    <p className="font-inter text-[11px] text-gray-400">.xlsx · Max 5 MB</p>
+                    <p className="font-inter text-[11px] text-gray-400">.xlsx / .csv · Max 5 MB</p>
                   </div>
                   {excelFile && (
                     <span className="ml-auto flex items-center gap-1 rounded-full bg-green-100 px-2.5 py-1 font-inter text-[10px] font-bold text-green-700">
@@ -1069,9 +1120,9 @@ export const DownloadTemplate = () => {
 
                 <div className="border-b border-gray-100 p-6">
                   <FileUpload
-                    label="Completed Excel file (.xlsx)"
+                    label="Completed Excel or CSV file"
                     fileType="xlsx"
-                    accept={{ 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'] }}
+                    accept={{ 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'], 'text/csv': ['.csv'] }}
                     selectedFile={excelFile}
                     onFileSelect={setExcelFile}
                     onRemove={() => setExcelFile(null)}
@@ -1135,6 +1186,7 @@ export const DownloadTemplate = () => {
                   <button
                     type="button"
                     onClick={() => switchUploadMode('single')}
+                    disabled={uploading}
                     className={`flex items-center gap-1.5 rounded-t-lg border-b-2 px-3 py-2 font-inter text-xs font-semibold transition-colors ${uploadMode === 'single' ? 'border-brand-blue text-brand-blue' : 'border-transparent text-gray-400 hover:text-gray-600'}`}
                   >
                     <Layers size={13} /> Single
@@ -1142,6 +1194,7 @@ export const DownloadTemplate = () => {
                   <button
                     type="button"
                     onClick={() => switchUploadMode('bulk')}
+                    disabled={uploading}
                     className={`flex items-center gap-1.5 rounded-t-lg border-b-2 px-3 py-2 font-inter text-xs font-semibold transition-colors ${uploadMode === 'bulk' ? 'border-brand-blue text-brand-blue' : 'border-transparent text-gray-400 hover:text-gray-600'}`}
                   >
                     <Images size={13} /> Bulk
@@ -1149,7 +1202,8 @@ export const DownloadTemplate = () => {
                 </div>
 
                 <div className="border-b border-gray-100 p-6">
-                  <UserDocumentEntries mode={uploadMode} entries={docEntries} onEntriesChange={setDocEntries} />
+                  <fieldset disabled={uploading}><UserDocumentEntries mode={uploadMode} entries={docEntries} onEntriesChange={setDocEntries} /></fieldset>
+                  <div className="mt-4"><OcrAssignmentGroups entries={docEntries} groups={assignmentGroups} onChange={setAssignmentGroups} disabled={uploading} /></div>
                 </div>
 
                 <div className="space-y-3 p-6">

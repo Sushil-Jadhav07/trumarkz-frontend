@@ -1,6 +1,7 @@
-import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
 import { authAPI, tokenHelpers } from '@/services/api';
 import { normalizeDhiwayDetails } from '@/utils/dhiway';
+import { pushNotifications } from '@/services/pushNotifications';
 
 const AuthContext = createContext(null);
 
@@ -55,6 +56,8 @@ const buildSuperAdminUser = (email = SUPER_ADMIN_EMAIL) => ({
 
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
+  const userRef = useRef(user);
+  userRef.current = user;
   const [role, setRole] = useState('organization');
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -383,12 +386,16 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
   // ── Logout ─────────────────────────────────────────────────────────────────
-  const logout = useCallback(() => {
-    tokenHelpers.remove();
-    sessionStorage.clear();
-    setUser(null);
-    setIsAuthenticated(false);
-    setRole('organization');
+  const logout = useCallback(async () => {
+    try {
+      await pushNotifications.cleanupOnLogout(userRef.current?.id);
+    } finally {
+      tokenHelpers.remove();
+      sessionStorage.clear();
+      setUser(null);
+      setIsAuthenticated(false);
+      setRole('organization');
+    }
   }, []);
 
   const updateUserProfile = useCallback((updates) => {

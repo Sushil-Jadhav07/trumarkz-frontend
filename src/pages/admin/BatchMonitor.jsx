@@ -18,6 +18,7 @@ import { GenerateSDCModal } from '@/pages/admin/SDCVerification';
 import { TablePagination } from '@/components/shared/TablePagination';
 import { normalizeDhiwayDetails, resolveDhiwaySpaceId } from '@/utils/dhiway';
 import { pendingManualUsers } from '@/utils/pendingManualVerifications';
+import { consentAllowsProcessing } from '@/utils/consent';
 import {
   AlertCircle, AlertTriangle, ArrowRight, Building2, Calendar, CheckCircle, ChevronDown, ChevronLeft, ChevronRight, Clock, Download, Eye, FileText, Info,
   Layers, Mail, MoreVertical, Package, Plus, RefreshCw, Save, Search, Send, ShieldCheck, Sparkles, Trash2, User, Users, X, XCircle, Zap,
@@ -552,7 +553,8 @@ export const SmartSendModal = ({ isOpen, onClose, onSent, batch }) => {
   // is keyed by `user_id`, not `id` (that field name only appears elsewhere,
   // e.g. the bulk-upload response's `entity_id`) — check all three so this
   // doesn't silently send `null` again if the shape varies by caller.
-  const batchUsers = batchRecords.map((r) => ({
+  const consentBlockedCount = batchRecords.filter((record) => !consentAllowsProcessing(record)).length;
+  const batchUsers = batchRecords.filter((record) => consentAllowsProcessing(record)).map((r) => ({
     id: r.id || r.user_id || r.entity_id,
     name: r.full_name || r.product_name || r.email || r.id || r.user_id || r.entity_id,
   }));
@@ -592,7 +594,7 @@ export const SmartSendModal = ({ isOpen, onClose, onSent, batch }) => {
     // party" — confirmed by the Manual Verification API docs, not a stale
     // endpoint. Its type list does not carry user status, so intersect it
     // with fresh per-user checks before offering assignments.
-    Promise.all([verificationAPI.getThirdPartyVerifiers(batch.id), verificationAPI.getBatchDetails(batch.id)])
+    Promise.all([verificationAPI.getThirdPartyVerifiers(batch.id), verificationAPI.getBatchConsentDetails(batch.id)])
       .then(async ([{ data }, { data: details }]) => {
         if (!active) return;
         if (!Array.isArray(details?.users) || details.users.some((user) => !user.verification_type_status || typeof user.verification_type_status !== 'object')) {
@@ -821,7 +823,7 @@ export const SmartSendModal = ({ isOpen, onClose, onSent, batch }) => {
 
     setSending(true);
     try {
-      const { data: latest } = await verificationAPI.getBatchDetails(batch.id);
+      const { data: latest } = await verificationAPI.getBatchConsentDetails(batch.id);
       if (!Array.isArray(latest?.users) || latest.users.some((user) => !user.verification_type_status || typeof user.verification_type_status !== 'object')) {
         throw new Error('Could not confirm the latest verification statuses. No emails were sent.');
       }
@@ -831,7 +833,7 @@ export const SmartSendModal = ({ isOpen, onClose, onSent, batch }) => {
         return assignedIds.length === eligibleIds.size && assignedIds.every((id) => eligibleIds.has(id));
       });
       if (!statusesUnchanged) {
-        toast.error('Verification statuses changed. Review the refreshed pending assignments before sending.');
+        toast.error('Verification or consent statuses changed. Review the refreshed eligible assignments before sending.');
         setReloadAssignments((value) => value + 1);
         return;
       }
@@ -957,7 +959,7 @@ export const SmartSendModal = ({ isOpen, onClose, onSent, batch }) => {
           </div>
           <div className="flex gap-3 shrink-0 text-right">
             <div>
-              <p className="text-[10px] text-gray-400 font-inter">Total Users</p>
+              <p className="text-[10px] text-gray-400 font-inter">Eligible Users</p>
               <p className="text-lg font-bold text-brand-dark font-sora">{batchUsers.length}</p>
             </div>
             <div>
@@ -971,9 +973,11 @@ export const SmartSendModal = ({ isOpen, onClose, onSent, batch }) => {
         <div className="flex items-start gap-2 rounded-xl border border-amber-100 bg-amber-50 px-3 py-2.5">
           <Info size={13} className="text-amber-500 mt-0.5 shrink-0" />
           <p className="text-xs text-amber-700 font-inter leading-relaxed">
-            Assign <strong>each pending verification</strong> to a verifier. Completed checks are excluded. Each verifier receives an Excel of their assigned users and a secure upload link. Assign every pending user exactly once for each check.
+            Assign <strong>each eligible pending verification</strong> to a verifier. Completed checks are excluded. Permission Required Human users must accept consent first. Each verifier receives an Excel of their assigned users and a secure upload link.
           </p>
         </div>
+
+        {consentBlockedCount > 0 && !loading && <p role="status" className="rounded-xl border border-amber-100 bg-amber-50 p-3 text-xs leading-5 text-amber-800">Waiting for consent: {consentBlockedCount} user(s) cannot be assigned or emailed until they accept. Reopen this dialog to refresh their consent status.</p>}
 
         {loading ? (
           <LoadingSkeleton variant="form" label="Loading verification types & verifiers" />
@@ -981,7 +985,7 @@ export const SmartSendModal = ({ isOpen, onClose, onSent, batch }) => {
           <div role="alert" className="space-y-3 rounded-xl border border-red-100 bg-red-50 p-4 text-sm text-red-700 font-inter"><p>{loadError}</p><button type="button" onClick={() => setReloadAssignments((value) => value + 1)} className="font-semibold underline">Try again</button></div>
         ) : verificationTypes.length === 0 ? (
           <div className="py-10 text-center">
-            <p className="text-sm text-gray-500 font-inter">No pending manual verifications remain for this batch.</p>
+            <p className="text-sm text-gray-500 font-inter">{consentBlockedCount > 0 ? 'No eligible manual verifications yet. User consent is required before sending verifier emails.' : 'No pending manual verifications remain for this batch.'}</p>
           </div>
         ) : (
           <div className="min-w-0">

@@ -67,3 +67,25 @@ test('extraction failures stop the draft before batch creation', async () => {
     extractOcrDocument: async () => { throw new Error('OCR failed'); },
   }), /No batch was created/);
 });
+
+test('assignment groups travel with final files in draft order and checkpoint retries never send them twice', async () => {
+  const draft = makeDraft();
+  draft.records = [draft.records[2], draft.records[0], draft.records[1]];
+  draft.assignmentGroups = [{ entryIds: ['local-1', 'local-3'], gender: 'Male' }, { entryIds: ['local-3'], nationality: 'Indian' }];
+  const progress = makeProgress(); let batches = 0, edits = 0;
+  const api = {
+    bulkUploadDocuments: async (files, name, options) => {
+      batches += 1;
+      assert.deepEqual(files.map((file) => file.name), ['source-3.png', 'source-1.png', 'source-2.png']);
+      assert.deepEqual(options.assignments, [{ file_indices: [1, 0], gender: 'Male' }, { file_indices: [0], nationality: 'Indian' }]);
+      return { data: { successful_users: files.map((file, i) => ({ id: `server-${i}`, file: file.name, gender: 'Male', nationality: 'Indian' })) } };
+    },
+    uploadOcrPhoto: async () => ({ data: { document_id: 'photo' } }),
+    uploadHumanDocument: async () => ({ data: { document_id: 'extra' } }),
+    updateBatchUser: async () => { if (++edits === 1) throw new Error('Retry review only'); },
+  };
+  const request = { draft, api, progress, checkpoint() {}, options: { batchType: 'human' }, batchName: 'OCR' };
+  await assert.rejects(submitOcrDraft(request), /Retry review only/);
+  await submitOcrDraft(request);
+  assert.equal(batches, 1);
+});

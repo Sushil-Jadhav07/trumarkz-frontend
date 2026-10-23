@@ -1,3 +1,5 @@
+import { consentAllowsProcessing } from './consent.js';
+
 const finishedStatuses = new Set(['approved', 'verified', 'completed', 'verification_completed', 'rejected', 'failed']);
 const typeKey = (value) => String(value || '').trim().toLowerCase().replace(/[\s_-]+/g, '_');
 
@@ -6,6 +8,7 @@ const typeKey = (value) => String(value || '').trim().toLowerCase().replace(/[\s
 export const pendingManualUsers = (records, verificationType) => {
   const seen = new Set();
   return (Array.isArray(records) ? records : []).filter((record) => {
+    if (!consentAllowsProcessing(record)) return false;
     const id = record.id || record.user_id || record.entity_id;
     if (!id || seen.has(id)) return false;
     const check = Object.entries(record.verification_type_status || {}).find(([name]) => typeKey(name) === typeKey(verificationType));

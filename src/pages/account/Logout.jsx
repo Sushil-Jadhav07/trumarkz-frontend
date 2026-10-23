@@ -13,8 +13,7 @@ export const Logout = () => {
   const { logout } = useAuth();
 
   useEffect(() => {
-    logout(); // clears JWT token + sessionStorage via AuthContext
-    toast.success('You have been logged out');
+    logout().then(() => toast.success('You have been logged out'));
   }, [logout]);
 
   return (

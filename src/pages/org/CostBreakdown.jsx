@@ -13,6 +13,7 @@ import { HUMAN_VERIFICATION_STEPS, HUMAN_VERIFICATION_STEP_META, HUMAN_VERIFICAT
 import { verificationAPI, getApiError } from '@/services/api';
 import { getIndustryTypeList } from '@/utils/verificationFlow';
 import { submitOcrDraft } from '@/utils/ocrSubmission';
+import { BulkHumanResolvedUsers } from '@/components/shared/BulkHumanResolvedUsers';
 
 const formatCurrency = (value) => `₹${Number(value).toLocaleString('en-IN')}`;
 
@@ -131,7 +132,6 @@ export const CostBreakdown = () => {
         toast.success(skippedCount > 0
           ? `${savedCount} records saved, ${skippedCount} documents skipped. See Batch Status for details.`
           : 'Batch created and reviewed documents saved');
-        navigate('/org/batch-status');
         return;
       }
       const { data } = await verificationAPI.bulkUpload(
@@ -153,11 +153,11 @@ export const CostBreakdown = () => {
       const totalSkipped = data?.total_skipped ?? (data?.skipped_users?.length || 0);
       const skippedUsers = data?.skipped_users || [];
 
-      if (totalUploaded === 0 && totalSkipped > 0) {
+      if (totalUploaded === 0) {
         // Deliberately NOT storing uploadResponse here — nothing was
         // actually created, so the top-of-function "already uploaded" guard
         // must not short-circuit a retry after the user fixes the file.
-        const reasons = [...new Set(skippedUsers.map((s) => s.reason).filter(Boolean))];
+        const reasons = [...new Set([...skippedUsers.map((s) => s.reason), ...(data?.errors || []).map((row) => row.error)].filter(Boolean))];
         toast.error(
           reasons.length > 0
             ? `No users were added — ${reasons.join('; ')}`
@@ -178,13 +178,24 @@ export const CostBreakdown = () => {
       } else {
         toast.success('Batch created successfully');
       }
-      navigate('/org/batch-status');
     } catch (error) {
       toast.error(getApiError(error, error?.message || 'Failed to create batch'));
     } finally {
       setSubmitting(false);
     }
   };
+
+  if (batchData?.uploadResponse) return (
+    <AuthLayout title="Batch Created">
+      <Card className="space-y-4 p-5">
+        <PageHeader title="Batch upload complete" subtitle={`${batchData.uploadResponse.total_uploaded ?? 0} users saved. Values below are confirmed by the server.`} />
+        <BulkHumanResolvedUsers users={batchData.uploadResponse.successful_users || []} />
+        {(batchData.uploadResponse.skipped_users || []).map((row, index) => <p key={`skip-${index}`} className="text-sm text-amber-700">Row {row.row}: {row.reason}</p>)}
+        {(batchData.uploadResponse.errors || []).map((row, index) => <p key={`error-${index}`} className="text-sm text-red-600">Row {row.row}: {row.error}</p>)}
+        <Button onClick={() => navigate('/org/batch-status')} icon={ArrowRight}>View Batch Status</Button>
+      </Card>
+    </AuthLayout>
+  );
 
   return (
     <AuthLayout title="Costing">
@@ -276,6 +287,10 @@ export const CostBreakdown = () => {
             </div>
 
             <div className="mt-5">
+              {batchData?.ocrDraft && !batchData?.ocrSubmission?.response && <Button
+                variant="outline" className="mb-3 w-full" disabled={submitting}
+                onClick={() => navigate('/org/template', { state: { restoreOcrDraft: true } })}
+              >Edit documents &amp; assignments</Button>}
               <Button
                 variant="primary"
                 size="lg"

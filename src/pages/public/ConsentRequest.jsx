@@ -8,7 +8,7 @@ import { consentDisplay, formatConsentDeadline } from '@/utils/consent';
 
 const states = {
   pending: { title: 'Permission Request', text: 'Review this request and choose whether this organization may use your information for verification.', icon: ShieldCheck, tone: 'bg-blue-50 text-brand-blue' },
-  accepted: { title: 'Permission Granted', text: 'You have allowed this organization to continue the verification process.', icon: CheckCircle, tone: 'bg-green-50 text-green-700' },
+  accepted: { title: 'Permission Granted', text: 'You have allowed this organization to continue verification. Any automatic checks run in the background; reports may take a few minutes to appear in the organization’s account.', icon: CheckCircle, tone: 'bg-green-50 text-green-700' },
   rejected: { title: 'Permission Declined', text: 'You have declined this verification request.', icon: XCircle, tone: 'bg-red-50 text-red-700' },
   expired: { title: 'Permission Request Expired', text: 'This request can no longer be responded to. Contact the requesting organization if you need assistance.', icon: Clock, tone: 'bg-gray-100 text-gray-600' },
   unavailable: { title: 'Request Unavailable', text: 'The current permission status could not be confirmed. Contact the requesting organization.', icon: XCircle, tone: 'bg-amber-50 text-amber-700' },

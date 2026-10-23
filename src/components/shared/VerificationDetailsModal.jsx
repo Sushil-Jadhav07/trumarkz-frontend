@@ -4,6 +4,8 @@ import { Modal } from '@/components/ui/Modal';
 import { Badge } from '@/components/ui/Badge';
 import { RecordDocuments } from '@/components/shared/RecordDocuments';
 import { ConsentBadge } from '@/components/shared/ConsentBadge';
+import { AutomaticVerificationStatus } from '@/components/shared/AutomaticVerificationStatus';
+import { useAutomaticVerification } from '@/hooks/useAutomaticVerification';
 
 const getInitials = (name) => {
   const parts = String(name || '').trim().split(/\s+/).filter(Boolean);
@@ -119,9 +121,11 @@ const getCertificateMeta = (certificate) => (
 // opts a caller into showing the button at all. This is re-verification
 // (a brand-new request), never an Approve/Reject control — those remain the
 // token-authenticated verifier's alone, never added here.
-export const VerificationCheckDetailsModal = ({ selection, title, verifierEmail, onClose, onResendRejected }) => {
+export const VerificationCheckDetailsModal = ({ selection, title, verifierEmail, onClose, onResendRejected, batchId, batchType, onRecordUpdate }) => {
+  const automatic = useAutomaticVerification({ record: selection?.record, batchId, batchType, onUpdate: onRecordUpdate });
   if (!selection) return null;
-  const { record, typeName } = selection;
+  const { typeName } = selection;
+  const record = automatic.record;
   const check = record?.verification_type_status?.[typeName];
   const rawStatus = String(check?.status || 'pending').toLowerCase();
   const isVerified = rawStatus === 'approved' || rawStatus === 'verified';
@@ -145,6 +149,7 @@ export const VerificationCheckDetailsModal = ({ selection, title, verifierEmail,
       size="md"
     >
       <div className="space-y-4">
+        {isAutomatic && <AutomaticVerificationStatus state={automatic} />}
         <div className="flex items-center gap-3 rounded-2xl border border-gray-100 bg-gray-50/60 px-4 py-3">
           <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sm font-bold font-sora ${avatarTone(title || 'record')}`}>
             {getInitials(title)}
@@ -230,10 +235,12 @@ export const VerificationCheckDetailsModal = ({ selection, title, verifierEmail,
 };
 
 export const VerificationDetailsModal = ({
-  record, title, subtitle, onClose,
+  record: initialRecord, title, subtitle, onClose,
   verifierByType, certificate, onViewCertificate, onDownloadCertificate,
-  showDocuments = false,
+  showDocuments = false, batchId, batchType, onRecordUpdate,
 }) => {
+  const automatic = useAutomaticVerification({ record: initialRecord, batchId, batchType, onUpdate: onRecordUpdate });
+  const record = automatic.record;
   if (!record) return null;
   const checkEntries = Object.entries(record.verification_type_status || {});
   const overallMeta = OVERALL_STATUS_META[record.overall_status_label] || null;
@@ -295,6 +302,7 @@ export const VerificationDetailsModal = ({
           {overallMeta && <Badge status={overallMeta.badge}>{overallMeta.label}</Badge>}
         </div>
         <ConsentBadge record={record} showDeadline />
+        <AutomaticVerificationStatus state={automatic} />
 
         <div>
           <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-gray-400 font-inter">

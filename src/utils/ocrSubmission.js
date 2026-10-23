@@ -1,4 +1,5 @@
 import { matchOcrEntries, saveOcrReviewRecord } from './ocrReview.js';
+import { buildOcrAssignments } from './ocrAssignments.js';
 
 export const buildOcrDraftRecord = (entry, data) => {
   const extracted = data?.extracted || data?.extracted_data || data?.fields || data;
@@ -25,7 +26,9 @@ export const extractOcrDraft = async (entries, api) => {
 // the batch upload response.
 export const submitOcrDraft = async ({ draft, batchName, options, api, progress, checkpoint }) => {
   if (!progress.response) {
-    const { data } = await api.bulkUploadDocuments(draft.records.map((record) => record.file), batchName, options);
+    const assignments = buildOcrAssignments(draft.assignmentGroups || [], draft.records);
+    const { data } = await api.bulkUploadDocuments(draft.records.map((record) => record.file), batchName,
+      { ...options, ...(assignments.length ? { assignments } : {}) });
     progress.response = data;
     checkpoint(progress);
   }

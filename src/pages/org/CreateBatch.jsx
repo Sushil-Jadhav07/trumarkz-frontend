@@ -439,7 +439,7 @@ const HumanBulkPanel = ({ onResult, selectedIndustry, selectedVerifications, sel
     const file = e.target.files?.[0];
     if (!file) return;
     const ext = file.name.split('.').pop().toLowerCase();
-    if (!['xlsx', 'xls'].includes(ext)) { toast.error('Only .xlsx or .xls files are accepted'); return; }
+    if (!['xlsx', 'csv'].includes(ext)) { toast.error('Only .xlsx or .csv files are accepted'); return; }
     setSelectedFile(file);
     setUploadResult(null);
   };
@@ -530,6 +530,8 @@ const HumanBulkPanel = ({ onResult, selectedIndustry, selectedVerifications, sel
                             <th className="text-left p-3 text-gray-500 font-medium">#</th>
                             <th className="text-left p-3 text-gray-500 font-medium">Name</th>
                             <th className="text-left p-3 text-gray-500 font-medium">Email</th>
+                            <th className="text-left p-3 text-gray-500 font-medium">Gender</th>
+                            <th className="text-left p-3 text-gray-500 font-medium">Nationality</th>
                             <th className="text-left p-3 text-gray-500 font-medium">Invite Link</th>
                           </tr>
                         </thead>
@@ -539,6 +541,8 @@ const HumanBulkPanel = ({ onResult, selectedIndustry, selectedVerifications, sel
                               <td className="p-3 text-gray-400">{i + 1}</td>
                               <td className="p-3 font-medium text-brand-dark">{u.full_name}</td>
                               <td className="p-3 text-gray-600">{u.email}</td>
+                              <td className="p-3 text-gray-600">{u.gender ?? '—'}</td>
+                              <td className="p-3 text-gray-600">{u.nationality ?? '—'}</td>
                               <td className="p-3">
                                 <a href={u.invite_link} target="_blank" rel="noopener noreferrer" className="text-brand-blue hover:underline truncate block max-w-[180px]">{u.invite_link}</a>
                               </td>
@@ -604,8 +608,7 @@ const HumanBulkPanel = ({ onResult, selectedIndustry, selectedVerifications, sel
           <div>
             <p className="text-xs font-semibold text-blue-700 font-inter mb-1">Required Excel columns</p>
             <p className="text-xs text-blue-600 font-inter">
-              <span className="font-semibold">full_name</span>, <span className="font-semibold">email</span>, <span className="font-semibold">phone_number</span>
-              {' '}plus optional verification-specific columns. The backend template also appends the locked <span className="font-semibold">Photo</span> column.
+              full_name, dob, gender, nationality{selectedPermission !== 'public' ? ', email' : ''}. Other verification-specific columns remain optional. The backend template also appends the locked Photo column.
             </p>
           </div>
           <Button variant="outline" size="sm" icon={Download} onClick={handleGenerateTemplate} loading={templateLoading}>
@@ -614,8 +617,8 @@ const HumanBulkPanel = ({ onResult, selectedIndustry, selectedVerifications, sel
         </div>
       </div>
       <div>
-        <label className="block text-sm font-medium text-gray-700 font-inter mb-2">Excel File (.xlsx / .xls) *</label>
-        <input ref={fileInputRef} type="file" accept=".xlsx,.xls" onChange={handleFileSelect} className="hidden" />
+        <label className="block text-sm font-medium text-gray-700 font-inter mb-2">Excel / CSV File (.xlsx / .csv) *</label>
+        <input ref={fileInputRef} type="file" accept=".xlsx,.csv" onChange={handleFileSelect} className="hidden" />
         {selectedFile ? (
           <div className="flex items-center gap-3 p-4 bg-green-50 rounded-xl border border-green-200">
             <FileSpreadsheet size={22} className="text-green-600 flex-shrink-0" />
@@ -635,7 +638,7 @@ const HumanBulkPanel = ({ onResult, selectedIndustry, selectedVerifications, sel
           >
             <Upload size={24} className="text-gray-400" />
             <span className="text-sm text-gray-500 font-inter">Click to select your Excel file</span>
-            <span className="text-xs text-gray-400 font-inter">.xlsx or .xls</span>
+            <span className="text-xs text-gray-400 font-inter">.xlsx or .csv</span>
           </button>
         )}
       </div>

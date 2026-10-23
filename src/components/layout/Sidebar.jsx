@@ -17,8 +17,8 @@ export const Sidebar = ({ collapsed, onToggle, mobileOpen = false, onMobileClose
   const navigate = useNavigate();
   const isCompact = collapsed && !mobileOpen;
 
-  const handleLogout = () => {
-    logout();
+  const handleLogout = async () => {
+    await logout();
     onMobileClose?.();
     navigate('/logout');
   };

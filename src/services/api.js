@@ -1,9 +1,18 @@
 import axios from 'axios';
 import { getDocumentViewCandidates } from '@/utils/recordDocuments';
 import { isConsentPage } from '@/utils/consent';
+import { createConsentGuard } from './consentGuard.js';
+import { automaticRecordId, canRetryAutomatic } from '@/utils/automaticVerification';
+import { validateOcrAssignments } from '@/utils/ocrAssignments';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
 const VERIFICATION_BASE_URL = import.meta.env.VITE_VERIFICATION_API_URL || API_BASE_URL;
+const consentGuard = createConsentGuard({
+  getBatch: (id) => verificationAPI.getBatchDetails(id),
+  getUsers: (filters) => verificationAPI.getAllVerifications(filters),
+  getUser: (id) => verificationAPI.getUserVerification(id),
+  getAssignments: (id) => verificationAPI.getManualAssignments(id),
+});
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -129,6 +138,11 @@ api.interceptors.response.use(
 verificationApi.interceptors.request.use(
   (config) => {
     const token = getStoredToken();
+    // Optional push work must never register/remove a token under a different
+    // account if authentication changes while an async operation is in flight.
+    if (config.expectedAccessToken && config.expectedAccessToken !== token) {
+      throw new axios.CanceledError('Push session changed');
+    }
     const isPublicUpload =
       config.url?.includes('/verification/upload/photo') ||
       config.url?.includes('/verification/upload/document') ||
@@ -354,6 +368,12 @@ export const authAPI = {
   getAuditLogs: (batchUserId) => api.get(`/auth/audit-logs/${batchUserId}`),
 };
 
+export const pushAPI = {
+  registerPushToken: (token, options = {}) => verificationApi.post('/push/tokens', { token, platform: 'web' }, options),
+  getPushTokens: (options = {}) => verificationApi.get('/push/tokens', options),
+  removePushToken: (token, options = {}) => verificationApi.delete('/push/tokens', { ...options, params: { token } }),
+};
+
 export const orgAPI = {};
 
 export const adminAPI = {
@@ -446,6 +466,10 @@ export const verificationAPI = {
   bulkUploadDocuments: (files, batchName, maybeOptions, maybeProgress) => {
     const formData = new FormData();
     const { options, onProgress } = normalizeUploadArgs(maybeOptions, maybeProgress);
+    if ((options.batchType || options.batch_type || 'human') === 'human') {
+      const assignments = validateOcrAssignments(options.assignments, files.length);
+      if (assignments.length) formData.append('assignments', JSON.stringify(assignments));
+    }
 
     files.forEach((file) => formData.append('files', file));
     formData.append('batch_name', batchName);
@@ -635,10 +659,20 @@ export const verificationAPI = {
   },
 
   getUserVerification: (userId) => verificationApi.get(`/verification/user/${userId}`),
+  retryAutomaticVerification: async (userId) => {
+    const { user, batch } = await consentGuard.assertUser(userId);
+    const row = batch.users?.find((item) => automaticRecordId(item) === String(userId));
+    if (!row || !canRetryAutomatic({ ...row, ...user, verification_type_status: row.verification_type_status }, batch)) {
+      throw new Error('Retry is unavailable: automatic verification must have no report and no approved or rejected automatic checks. Refresh the status.');
+    }
+    return verificationApi.post(`/verification/batch-users/${encodeURIComponent(userId)}/retry-automatic-verification`);
+  },
   getDocumentViewCandidates: (document) => getDocumentViewCandidates(document, VERIFICATION_BASE_URL),
 
-  generateQRAndCertificate: (userId) =>
-    verificationApi.post(`/verification/user/${userId}/generate-qr`),
+  generateQRAndCertificate: async (userId) => {
+    await consentGuard.assertUser(userId);
+    return verificationApi.post(`/verification/user/${userId}/generate-qr`);
+  },
 
   // batchType: optional 'human' | 'product' | 'warranty' — filters server-side
   // via ?batch_type=. Omit to get every batch type, same as before.
@@ -647,6 +681,7 @@ export const verificationAPI = {
       params: batchType ? { batch_type: batchType } : undefined,
     }),
   getBatchDetails: (batchId) => verificationApi.get(`/verification/batches/${batchId}`),
+  getBatchConsentDetails: async (batchId) => ({ data: await consentGuard.loadBatch(batchId) }),
 
   // POST /verification/batches/{batch_id}/share-with-organization —
   // Superadmin only. The real, persisted "Send to Organization" action:
@@ -743,8 +778,10 @@ export const verificationAPI = {
   deleteVerificationType: (id) => verificationApi.delete(`/verification/verification-types/${id}`),
 
   // Manual verification request — returns { request_id, token, expires_at, verifier_email }
-  requestManualVerification: (payload) =>
-    verificationApi.post('/verification/verification/manual/request', payload),
+  requestManualVerification: async (payload) => {
+    await consentGuard.assertBatch(payload.batch_id);
+    return verificationApi.post('/verification/verification/manual/request', payload);
+  },
 
   // Source of truth for the verifier-facing upload/review page — token-
   // authenticated, public. Returns the request's verification type, status,
@@ -794,19 +831,26 @@ export const verificationAPI = {
     verificationApi.get(`/verification/batches/${batchId}/third-party-verifiers`),
 
   // ── Bulk manual verification emails ───────────────────────────────────────
-  sendBulkManualVerification: (payload) =>
-    verificationApi.post('/verification/manual/send-bulk', payload),
+  sendBulkManualVerification: async (payload) => {
+    await consentGuard.assertBatch(payload.batch_id);
+    return verificationApi.post('/verification/manual/send-bulk', payload);
+  },
 
   // ── Smart Send: multiple verifiers per type — users are split sequentially
   // from the deterministic batch user order (created_at ASC, id ASC) and the
   // exact resulting user_ids are sent in the payload; the backend never
   // splits or reorders them itself. ──────────────────────────────────────
-  smartSendManualVerification: (payload) =>
-    verificationApi.post('/verification/manual/smart-send', payload),
+  smartSendManualVerification: async (payload) => {
+    const ids = (payload.verification_assignments || []).flatMap((type) => (type.verifiers || []).flatMap((verifier) => verifier.user_ids || []));
+    await consentGuard.assertBatch(payload.batch_id, ids);
+    return verificationApi.post('/verification/manual/smart-send', payload);
+  },
 
   // ── Resend manual verification link ───────────────────────────────────────
-  resendManualVerification: (requestId) =>
-    verificationApi.post(`/verification/manual/resend/${requestId}`),
+  resendManualVerification: async (requestId, batchId) => {
+    await consentGuard.assertRequest(requestId, batchId);
+    return verificationApi.post(`/verification/manual/resend/${requestId}`);
+  },
 
   // POST /verification/manual/resend-rejected — re-verification, NOT the
   // same as resendManualVerification above (that resends the same link for
@@ -817,13 +861,15 @@ export const verificationAPI = {
   // this type's current verification_type_status entry can move once the
   // new request is decided. 409 if a pending resend already exists for one
   // of these users/this type — never retry blindly on that.
-  resendRejectedForVerification: (payload) =>
-    verificationApi.post('/verification/manual/resend-rejected', {
+  resendRejectedForVerification: async (payload) => {
+    await consentGuard.assertBatch(payload.batch_id, payload.batch_user_ids);
+    return verificationApi.post('/verification/manual/resend-rejected', {
       batch_id: payload.batch_id,
       verification_type_name: payload.verification_type_name,
       batch_user_ids: payload.batch_user_ids,
       verifier_email: payload.verifier_email,
-    }),
+    });
+  },
 
   // ── Submitted verifier reports for a batch ─────────────────────────────────
   getSubmittedReports: (batchId, submittedOnly = false) =>
@@ -925,8 +971,10 @@ export const verificationAPI = {
     }),
 
   // ── Run automatic verification ────────────────────────────────────────────
-  runAutoVerification: (verificationTypeName, userId) =>
-    verificationApi.post(`/verification/verification/automatic/${verificationTypeName}/${userId}`),
+  runAutoVerification: async (verificationTypeName, userId) => {
+    await consentGuard.assertUser(userId);
+    return verificationApi.post(`/verification/verification/automatic/${verificationTypeName}/${userId}`);
+  },
 
   // ── Product Warranty ──────────────────────────────────────────────────────
   downloadWarrantyTemplate: () =>
@@ -1026,8 +1074,9 @@ export const sdcAPI = {
   // the whole eligible batch. Omit/empty to keep the original whole-batch
   // behavior — cleanObject already drops an empty array, so passing [] here
   // is always safe and never accidentally narrows the request.
-  generateBatchSDC: (batchId, payload = {}) =>
-    verificationApi.post(
+  generateBatchSDC: async (batchId, payload = {}) => {
+    await consentGuard.assertBatch(batchId, Array.isArray(payload.user_ids) && payload.user_ids.length ? payload.user_ids : undefined);
+    return verificationApi.post(
       `/sdc/batches/${batchId}/generate`,
       cleanObject({
         publish: !!payload.publish,
@@ -1036,7 +1085,8 @@ export const sdcAPI = {
         schema_id: payload.schema_id?.trim(),
         user_ids: Array.isArray(payload.user_ids) ? payload.user_ids : undefined,
       })
-    ),
+    );
+  },
 
   // GET /sdc/batches/{batch_id}/approvals — full history (pending, approved,
   // rejected), newest first. Org restricted to its own batches; super admin
@@ -1080,8 +1130,9 @@ export const sdcAPI = {
   // retry — already-issued records are never re-issued.
   // 409 = drafts still not ready — retry. 400 = generate wasn't called first.
   // 502 = Dhiway issue failed — not retried automatically.
-  issueBatchSDC: (batchId, payload = {}) =>
-    verificationApi.post(
+  issueBatchSDC: async (batchId, payload = {}) => {
+    await consentGuard.assertBatch(batchId);
+    return verificationApi.post(
       `/sdc/batches/${batchId}/issue`,
       cleanObject({
         send_email: !!payload.send_email,
@@ -1092,7 +1143,8 @@ export const sdcAPI = {
         reply_to_email: payload.reply_to_email?.trim(),
         cc_email: payload.cc_email?.trim(),
       })
-    ),
+    );
+  },
 };
 
 export const verifiersAPI = {

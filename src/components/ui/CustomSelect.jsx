@@ -16,14 +16,18 @@ import { Check, ChevronDown, Search } from 'lucide-react';
 // in, well short of its own max-height). The portal sidesteps that
 // entirely, matching the same technique already used by SmartSendModal's
 // VerifierRow dropdown elsewhere in this app.
-export const CustomSelect = ({ value, onChange, options, placeholder, className = '', disabled = false, ariaLabel, title, searchable = false, searchPlaceholder = 'Search options…' }) => {
+export const CustomSelect = ({ value, onChange, options, placeholder, className = '', disabled = false, ariaLabel, title, searchable = false, searchPlaceholder = 'Search options…', allowCustomValue = false }) => {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [menuPos, setMenuPos] = useState(null);
   const triggerRef = useRef(null);
   const menuRef = useRef(null);
-  const selected = options.find((o) => o.value === value);
-  const filteredOptions = searchable ? options.filter((option) => option.label.toLowerCase().includes(search.trim().toLowerCase())) : options;
+  const selected = options.find((o) => o.value === value) || (allowCustomValue && value ? { value, label: value } : undefined);
+  const availableOptions = selected && !options.some((option) => option.value === selected.value) ? [...options, selected] : options;
+  const filteredOptions = searchable ? availableOptions.filter((option) => option.label.toLowerCase().includes(search.trim().toLowerCase())) : availableOptions;
+  const customValue = typeof allowCustomValue === 'function' ? allowCustomValue(search.trim()) : allowCustomValue ? search.trim() : '';
+  const displayOptions = customValue && !availableOptions.some((option) => option.value.toLowerCase() === customValue.toLowerCase())
+    ? [...filteredOptions, { value: customValue, label: `Use “${customValue}”` }] : filteredOptions;
   useEffect(() => { if (!open) setSearch(''); }, [open]);
   useEffect(() => { if (disabled) setOpen(false); }, [disabled]);
 
@@ -120,10 +124,10 @@ export const CustomSelect = ({ value, onChange, options, placeholder, className 
         >
           {searchable && <div className="sticky top-0 z-10 border-b border-gray-100 bg-white p-2"><div className="flex items-center gap-2 rounded-md bg-gray-50 px-2.5"><Search size={14} className="shrink-0 text-gray-400" /><input autoFocus value={search} onChange={(event) => setSearch(event.target.value)} aria-label={searchPlaceholder} placeholder={searchPlaceholder} className="min-w-0 flex-1 bg-transparent py-2 text-sm text-gray-700 outline-none" /></div></div>}
           <div role={searchable ? 'listbox' : undefined} aria-label={searchable ? ariaLabel : undefined}>
-          {filteredOptions.length === 0 ? (
+          {displayOptions.length === 0 ? (
             <p className="px-3 py-4 text-center text-xs text-gray-500 font-inter">{search ? 'No matches found' : 'No options'}</p>
           ) : (
-            filteredOptions.map((o) => (
+            displayOptions.map((o) => (
               <button
                 key={o.value}
                 type="button"

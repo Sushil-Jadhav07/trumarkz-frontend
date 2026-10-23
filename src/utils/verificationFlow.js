@@ -32,7 +32,7 @@ export const getVerificationApiTypes = (selectedVerifications = []) =>
     .filter(Boolean);
 
 export const getHumanTemplateHeaders = (selectedVerifications = []) => {
-  const headers = ['full_name', 'email', 'phone_number', 'dob'];
+  const headers = ['full_name', 'email', 'phone_number', 'dob', 'gender', 'nationality'];
 
   selectedVerifications.forEach((item) => {
     (HUMAN_TEMPLATE_EXTRA_HEADERS[item] || []).forEach((header) => {

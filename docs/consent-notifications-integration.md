@@ -68,6 +68,15 @@ The existing permissions page is a per-batch wizard, not an organization-default
 
 ## Preserved scope and deployment limitations
 
-Product/Warranty verification behavior, SDC partial approval/selected-user generation, manual verifier assignment/upload/decisions, resend-rejected, report access rules, automatic verification, Dhiway, Super Admin organization management, and legal content were not rebuilt or changed. Consent enforcement remains the backend's responsibility; the frontend presents states rather than duplicating its eligibility rules.
+Product/Warranty verification behavior, SDC polling, report access rules, public verifier upload/decisions, Dhiway, Super Admin organization management, and legal content were not rebuilt. The consent safeguards below extend the existing action helpers; server-side enforcement remains authoritative.
+
+## Super Admin consent safeguards
+
+- Permission Required Human records enter Smart Send assignments only after `consent_status: accepted`. Pending, declined, automatically expired and missing decisions cannot authorize processing. An accepted decision is not revoked by its original response deadline.
+- Batch details omit consent, so the existing batch-filtered `/verification/all` endpoint supplies canonical consent fields in pages of 100. Incomplete, duplicate or wrong-batch responses block the action. There is no request per table row.
+- Fresh consent checks run before manual requests, bulk sends, Smart Send, resends, automatic verification, QR/certificate generation and SDC generation/issue. Explicit user selections cannot contain a non-accepted user. Smart Send also refreshes its pending assignments before submission.
+- Batch-wide endpoints retain their existing payloads and require at least one accepted user. Their documented backend eligibility filter must continue excluding non-accepted users in mixed batches; the frontend cannot replace that server-side boundary. An empty SDC `user_ids` list retains the existing whole-batch meaning.
+- Public Human batch overrides, Product and Warranty do not require consent. Template editing and saving drafts remain available; sending or processing permission-based records requires acceptance.
+- Validation: 69 automated tests pass, including actual API-helper checks proving nine processing/send paths make no POST while consent is pending, mixed-user filtering, fresh acceptance, failed refresh, pagination and unaffected batch types. Production build passes. These checks use controlled API responses; real email delivery, backend enforcement and deployed behavior still need environment verification.
 
 The supplied handoff reports that the consent/permission migrations and notification table migration are unapplied, backend changes are undeployed, the expiry scheduler/secret are unconfigured, and SMTP delivery is unverified. Those backend/deployment tasks were not performed here. No internal expiry endpoint or sweep secret is present in frontend source. Live notification creation after an actual batch deletion and real emailed consent links still require end-to-end verification against the correctly migrated/deployed backend. A notification collection 404 surfaces the environment/deployment issue instead of fake data; a consent-token 404 remains the contract's nontechnical invalid-link state.

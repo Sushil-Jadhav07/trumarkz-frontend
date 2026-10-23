@@ -11,6 +11,7 @@ import { verificationAPI, sdcAPI, getApiError } from '@/services/api';
 import { GenerateSDCModal, CertificateDetailModal } from '@/pages/admin/SDCVerification';
 import { VerificationDetailsModal, VerificationCheckDetailsModal } from '@/components/shared/VerificationDetailsModal';
 import { TablePagination } from '@/components/shared/TablePagination';
+import { useAutomaticBatchRefresh } from '@/hooks/useAutomaticBatchRefresh';
 import {
   useBatchList, WORKFLOW_STEPS, isProductRecord, recordTitle, getCertificateProductId,
   formatVerifTypeLabel, statusBadge,
@@ -115,6 +116,7 @@ export const BatchControlCenter = () => {
   const [verificationDetailsRecord, setVerificationDetailsRecord] = useState(null);
   // Exact clicked pair — { record, typeName } — for the single-check modal.
   const [selectedVerification, setSelectedVerification] = useState(null);
+  useAutomaticBatchRefresh({ batchId, batchType: batchDetail?.batch_type, records: batchDetail?.users, onUpdate: setBatchDetail });
   const [smartSendOpen, setSmartSendOpen] = useState(false);
   const [smartSendBatch, setSmartSendBatch] = useState(null);
   const [sdcGenerateBatch, setSdcGenerateBatch] = useState(null);
@@ -583,7 +585,7 @@ export const BatchControlCenter = () => {
   const handleResend = async (requestId, verifierEmail) => {
     setResending(requestId);
     try {
-      await verificationAPI.resendManualVerification(requestId);
+      await verificationAPI.resendManualVerification(requestId, selectedBatch.id);
       toast.success(`Verification link resent to ${verifierEmail}`);
     } catch (err) {
       toast.error(getApiError(err, 'Failed to resend verification link'));
@@ -1497,6 +1499,9 @@ export const BatchControlCenter = () => {
           : null;
         return (
           <VerificationDetailsModal
+            batchId={batchId}
+            batchType={batchDetail?.batch_type}
+            onRecordUpdate={(record) => setBatchDetail((previous) => previous ? { ...previous, users: previous.users.map((row) => String(row.id || row.user_id || row.entity_id) === String(record.id) ? { ...row, ...record } : row) } : previous)}
             showDocuments
             record={verificationDetailsRecord}
             title={verificationDetailsRecord
@@ -1518,6 +1523,9 @@ export const BatchControlCenter = () => {
         const svRecordId = svRecord.id || svRecord.user_id || svRecord.entity_id;
         return (
           <VerificationCheckDetailsModal
+            batchId={batchId}
+            batchType={batchDetail?.batch_type}
+            onRecordUpdate={(record) => setBatchDetail((previous) => previous ? { ...previous, users: previous.users.map((row) => String(row.id || row.user_id || row.entity_id) === String(record.id) ? { ...row, ...record } : row) } : previous)}
             selection={selectedVerification}
             title={recordTitle(svRecord)}
             verifierEmail={verifierByRecordAndType[svRecordId]?.[selectedVerification.typeName]}
