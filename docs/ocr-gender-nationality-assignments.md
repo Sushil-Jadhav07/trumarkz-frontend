@@ -4,6 +4,8 @@ Source: supplied `OCR_bulk_gender_nationality_api.md`, read completely before ch
 
 ## Current behavior
 
+The assignment controls now live directly beside Single/Bulk in the OCR header. Each document row has its own checkbox and shows its applied values. Select three rows, choose Male and Apply; selection clears so four different rows can then receive Female. The header's All users checkbox selects/deselects the current file list and shows a mixed state for a partial selection. Applied assignments appear as compact removable header chips, with no separate group-card panel. Download Template stays in that header too. This flow was verified in an isolated browser for seven users, one user, all-user nationality assignment, undo, exact final upload indices and 390px layout.
+
 - Old Excel override controls, serializer and optional-column logic are removed. Excel/CSV always requires gender/nationality columns again. Its API helper does not send `bulk_gender`, `bulk_nationality` or `assignments`, even if stale caller options contain them.
 - Human document upload offers multiple assignment groups before extraction/creation. Each group chooses specific document checkboxes and one Gender and/or Nationality. Both fields use styled custom dropdowns backed by div listboxes/portals, not native selects. OCR review uses the same custom dropdowns for individual corrections.
 - Stable local IDs identify group members while files are being edited. Deleting a document prunes its membership; a later file cannot silently inherit its assignments. Removing every selected file removes that obsolete group. Mode changes clear groups. Editing is locked during preview extraction.

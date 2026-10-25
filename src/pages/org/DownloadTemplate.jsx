@@ -15,7 +15,7 @@ import { HUMAN_VERIFICATION_STEPS, HUMAN_VERIFICATION_STEP_META, HUMAN_VERIFICAT
 import { verificationAPI, triggerBlobDownload, getApiError } from '@/services/api';
 import { getVerificationApiTypes, getIndustryTypeList } from '@/utils/verificationFlow';
 import { extractOcrDraft } from '@/utils/ocrSubmission';
-import { OcrAssignmentGroups, OcrNationalitySelect } from '@/components/shared/OcrAssignmentGroups';
+import { OcrAssignmentGroups, OcrAppliedAssignments, OcrNationalitySelect } from '@/components/shared/OcrAssignmentGroups';
 import { CustomSelect } from '@/components/ui/CustomSelect';
 import { OCR_GENDERS, buildOcrAssignments, applyOcrAssignmentsToPreview } from '@/utils/ocrAssignments';
 
@@ -587,7 +587,7 @@ const ReviewOcrModal = ({ isOpen, ocrResult, sourceEntries = {}, onClose, onDone
 //    1 user) when submitted — see handleUploadDocuments for how photos are
 //    then matched back to the real batch_user_ids once upload confirms
 //    which documents actually succeeded.
-const UserDocumentEntries = ({ mode, entries, onEntriesChange }) => {
+const UserDocumentEntries = ({ mode, entries, onEntriesChange, selectedIds = [], onToggleSelect, assignmentGroups = [] }) => {
   const singleDocInputRef = useRef(null);
   const bulkDocInputRef = useRef(null);
   const bulkPhotoInputRef = useRef(null);
@@ -596,6 +596,13 @@ const UserDocumentEntries = ({ mode, entries, onEntriesChange }) => {
   const viewPhotoInputRef = useRef(null);
   const [viewEntryId, setViewEntryId] = useState(null);
   const viewEntry = entries.find((e) => e.id === viewEntryId) || null;
+  const assignedById = useMemo(() => {
+    const values = new Map();
+    assignmentGroups.forEach((group) => group.entryIds.forEach((id) => {
+      values.set(id, { ...values.get(id), ...(group.gender ? { gender: group.gender } : {}), ...(group.nationality ? { nationality: group.nationality } : {}) });
+    }));
+    return values;
+  }, [assignmentGroups]);
 
   const makeEntry = (file) => ({
     id: `${Date.now()}-${Math.random()}`, file, previewUrl: URL.createObjectURL(file), photo: null, photoPreviewUrl: null,
@@ -679,11 +686,19 @@ const UserDocumentEntries = ({ mode, entries, onEntriesChange }) => {
       ) : (
         <div className="space-y-2">
           {entries.map((entry, i) => (
-            <div key={entry.id} className="flex items-center gap-3 rounded-xl border border-gray-200 bg-white p-3">
+            <div key={entry.id} className={`flex flex-wrap items-center gap-3 rounded-xl border p-3 transition-colors ${selectedIds.includes(entry.id) ? 'border-brand-blue bg-blue-50/40' : 'border-gray-200 bg-white'}`}>
+              <input
+                type="checkbox"
+                checked={selectedIds.includes(entry.id)}
+                onChange={() => onToggleSelect?.(entry.id)}
+                aria-label={`Select User ${i + 1} for bulk assignment`}
+                className="h-4 w-4 shrink-0 accent-blue-600"
+              />
               <img src={entry.previewUrl} alt="" className="h-10 w-10 shrink-0 rounded-lg border border-gray-100 object-cover" />
-              <div className="min-w-0 flex-1">
+              <div className="min-w-[6rem] flex-1">
                 <p className="font-inter text-xs font-semibold text-brand-dark">User {i + 1}</p>
                 <p className="truncate font-inter text-[11px] text-gray-400">{entry.file.name}</p>
+                {assignedById.has(entry.id) && <p className="mt-1 break-words font-inter text-[11px] font-medium text-blue-700">{Object.values(assignedById.get(entry.id)).join(' · ')}</p>}
               </div>
 
               <button
@@ -874,6 +889,12 @@ export const DownloadTemplate = () => {
   const [uploadMode, setUploadMode] = useState('single');
   const [docEntries, setDocEntries] = useState([]);
   const [assignmentGroups, setAssignmentGroups] = useState([]);
+  // Checked straight off each entry row (UserDocumentEntries' checkboxes) —
+  // this is what the Gender/Nationality bar in OcrAssignmentGroups turns
+  // into a new group on Apply. Lives here, not inside OcrAssignmentGroups,
+  // because the checkboxes themselves render inside UserDocumentEntries, a
+  // sibling component.
+  const [selectedEntryIds, setSelectedEntryIds] = useState([]);
   const [reviewAssignmentGroups, setReviewAssignmentGroups] = useState([]);
   const [uploading,  setUploading]  = useState(false);
   const [ocrResult,  setOcrResult]  = useState(null);
@@ -887,6 +908,7 @@ export const DownloadTemplate = () => {
       const entryIds = group.entryIds.filter((id) => ids.has(id));
       return group.entryIds.length && !entryIds.length ? [] : [{ ...group, entryIds }];
     }));
+    setSelectedEntryIds((previous) => previous.filter((id) => ids.has(id)));
   }, [docEntries]);
 
   useEffect(() => () => {
@@ -928,8 +950,14 @@ export const DownloadTemplate = () => {
     });
     setDocEntries([]);
     setAssignmentGroups([]);
+    setSelectedEntryIds([]);
     setUploadMode(nextMode);
   };
+
+  const toggleEntrySelect = (id) =>
+    setSelectedEntryIds((previous) => (previous.includes(id) ? previous.filter((x) => x !== id) : [...previous, id]));
+  const allEntriesSelected = docEntries.length > 0 && selectedEntryIds.length === docEntries.length;
+  const toggleSelectAllEntries = () => setSelectedEntryIds(allEntriesSelected ? [] : docEntries.map((entry) => entry.id));
 
   // Required fields (full_name, dob, gender, nationality) can't be toggled
   // off — see BASE_FIELDS.
@@ -1182,7 +1210,7 @@ export const DownloadTemplate = () => {
                 {/* Single: add one document (+ optional photo) at a time.
                     Bulk: multi-select every document at once, then multi-
                     select every photo at once — matched in selection order. */}
-                <div className="flex items-center gap-1.5 border-b border-gray-100 bg-white px-6 pt-3">
+                <div className="flex min-w-0 flex-wrap items-center gap-2 border-b border-gray-100 bg-white px-4 py-2 sm:px-6" role="group" aria-label="OCR upload header">
                   <button
                     type="button"
                     onClick={() => switchUploadMode('single')}
@@ -1199,11 +1227,52 @@ export const DownloadTemplate = () => {
                   >
                     <Images size={13} /> Bulk
                   </button>
+
+                  <OcrAssignmentGroups
+                    entries={docEntries}
+                    groups={assignmentGroups}
+                    onChange={setAssignmentGroups}
+                    selectedIds={selectedEntryIds}
+                    onClearSelection={() => setSelectedEntryIds([])}
+                    disabled={uploading}
+                  />
+                  <div className="ml-auto flex shrink-0 items-center gap-3">
+                    {docEntries.length > 0 && (
+                      <label className="flex items-center gap-1.5 text-xs font-semibold text-gray-500 font-inter">
+                        <input
+                          type="checkbox"
+                          checked={allEntriesSelected}
+                          aria-label="Select all users"
+                          ref={(node) => { if (node) node.indeterminate = selectedEntryIds.length > 0 && !allEntriesSelected; }}
+                          onChange={toggleSelectAllEntries}
+                          disabled={uploading}
+                          className="h-3.5 w-3.5 accent-blue-600"
+                        />
+                        All users
+                      </label>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setModalOpen(true)}
+                      className="flex items-center gap-1 font-inter text-xs font-semibold text-brand-blue hover:underline"
+                    >
+                      <Download size={12} /> Download Template
+                    </button>
+                  </div>
+                  <OcrAppliedAssignments groups={assignmentGroups} onChange={setAssignmentGroups} disabled={uploading} />
                 </div>
 
                 <div className="border-b border-gray-100 p-6">
-                  <fieldset disabled={uploading}><UserDocumentEntries mode={uploadMode} entries={docEntries} onEntriesChange={setDocEntries} /></fieldset>
-                  <div className="mt-4"><OcrAssignmentGroups entries={docEntries} groups={assignmentGroups} onChange={setAssignmentGroups} disabled={uploading} /></div>
+                  <fieldset disabled={uploading}>
+                    <UserDocumentEntries
+                      mode={uploadMode}
+                      entries={docEntries}
+                      onEntriesChange={setDocEntries}
+                      selectedIds={selectedEntryIds}
+                      onToggleSelect={toggleEntrySelect}
+                      assignmentGroups={assignmentGroups}
+                    />
+                  </fieldset>
                 </div>
 
                 <div className="space-y-3 p-6">
