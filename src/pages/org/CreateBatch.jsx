@@ -30,6 +30,7 @@ import {
   Tractor, Gem, Grid2X2, BadgeCheck, Award, Lock, Globe2
 } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { humanEmailRequired, validateHumanExcelEmails } from '@/utils/humanEmail';
 
 const parseTemplateHeaders = (value) =>
   String(value || '')
@@ -449,6 +450,9 @@ const HumanBulkPanel = ({ onResult, selectedIndustry, selectedVerifications, sel
     if (!selectedFile) { toast.error('Please select an Excel file'); return; }
     setLoading(true); setUploadProgress(0);
     try {
+      const workbook = XLSX.read(await selectedFile.arrayBuffer(), { type: 'array' });
+      const rows = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { header: 1 });
+      validateHumanExcelEmails(rows, selectedPermission);
       const { data } = await verificationAPI.bulkUpload(
         selectedFile,
         batchName.trim(),
@@ -465,7 +469,7 @@ const HumanBulkPanel = ({ onResult, selectedIndustry, selectedVerifications, sel
       onResult && onResult(data);
       toast.success(`Uploaded ${data.total_uploaded} records. Batch: ${data.batch_id}`);
     } catch (err) {
-      toast.error(getApiError(err, 'Batch upload failed. Please try again.'));
+      toast.error(getApiError(err, err?.message || 'Batch upload failed. Please try again.'));
     } finally {
       setLoading(false); setUploadProgress(0);
     }
@@ -608,7 +612,7 @@ const HumanBulkPanel = ({ onResult, selectedIndustry, selectedVerifications, sel
           <div>
             <p className="text-xs font-semibold text-blue-700 font-inter mb-1">Required Excel columns</p>
             <p className="text-xs text-blue-600 font-inter">
-              full_name, dob, gender, nationality{selectedPermission !== 'public' ? ', email' : ''}. Other verification-specific columns remain optional. The backend template also appends the locked Photo column.
+              full_name, dob, gender, nationality{humanEmailRequired(selectedPermission) ? ', email' : ''}. Other verification-specific columns remain optional. The backend template also appends the locked Photo column.
             </p>
           </div>
           <Button variant="outline" size="sm" icon={Download} onClick={handleGenerateTemplate} loading={templateLoading}>
@@ -1100,11 +1104,11 @@ export const CreateBatch = () => {
         <div className="w-full mx-auto lg:max-w-none">
           <PageHeader title="Create Verification Batch" subtitle="Start a verification flow for people or products" />
           <div className="mx-auto mt-10 max-w-md rounded-2xl border border-amber-100 bg-amber-50 p-6 text-center">
-            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-amber-100">
-              <AlertTriangle size={22} className="text-amber-500" />
+            <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-xl bg-amber-100">
+              <AlertTriangle size={18} className="text-amber-600" />
             </div>
-            <p className="mt-4 font-sora text-base font-semibold text-amber-800">GST Verification Required</p>
-            <p className="mt-1.5 font-inter text-sm text-amber-700">
+            <p className="mt-4 font-sora text-base font-semibold text-amber-900">GST Verification Required</p>
+            <p className="mt-1.5 font-inter text-sm leading-6 text-amber-700">
               {user?.gstin
                 ? "Your GSTIN hasn't been verified yet. Verify it from your profile to start creating verification batches."
                 : "Add and verify your organization's GSTIN from your profile to start creating verification batches."}

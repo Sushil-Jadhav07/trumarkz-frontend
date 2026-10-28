@@ -1,3 +1,5 @@
+import { humanEmailError } from './humanEmail.js';
+
 export const OCR_GENDERS = ['Male', 'Female', 'Other'];
 // Only examples explicitly supplied by the backend documentation. This is
 // not a fabricated replacement for its missing 195-entry constant.
@@ -21,8 +23,12 @@ export const validateOcrAssignments = (assignments, fileCount) => {
     if (group.file_indices.some((index) => !Number.isInteger(index) || index < 0 || index >= fileCount)) throw new Error('An assignment references a document outside this upload. Review your selections.');
     const gender = normalizeAssignmentValue(group.gender, 'gender');
     const nationality = normalizeAssignmentValue(group.nationality, 'nationality');
-    if (!gender && !nationality) throw new Error('Choose Gender or Nationality for each assignment group.');
-    return { file_indices: [...new Set(group.file_indices)], ...(gender ? { gender } : {}), ...(nationality ? { nationality } : {}) };
+    const hasEmail = Object.prototype.hasOwnProperty.call(group, 'email');
+    if (hasEmail && group.file_indices.length !== 1) throw new Error('An email assignment must target exactly one document.');
+    if (hasEmail && (typeof group.email !== 'string' || !group.email.trim() || humanEmailError(group.email, 'public'))) throw new Error('Enter a valid email address for the assigned document.');
+    const email = hasEmail ? group.email.trim() : undefined;
+    if (!gender && !nationality && !email) throw new Error('Choose Gender, Nationality or an individual Email for each assignment group.');
+    return { file_indices: [...new Set(group.file_indices)], ...(gender ? { gender } : {}), ...(nationality ? { nationality } : {}), ...(email ? { email } : {}) };
   });
 };
 

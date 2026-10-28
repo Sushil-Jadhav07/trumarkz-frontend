@@ -2282,15 +2282,17 @@ export const BatchStatus = () => {
         )}
       </div>
 
-      <Modal isOpen={showGstGate} onClose={() => setShowGstGate(false)} title="GST Verification Required" size="sm">
-        <div className="space-y-4">
-          <div className="flex items-start gap-3 rounded-xl border border-amber-100 bg-amber-50 p-4">
-            <AlertTriangle size={18} className="mt-0.5 shrink-0 text-amber-500" />
-            <div>
-              <p className="font-inter text-sm font-semibold text-amber-800">
+      <Modal isOpen={showGstGate} onClose={() => setShowGstGate(false)} title="GST Verification Required" size="lg">
+        <div className="space-y-5">
+          <div className="flex items-start gap-3 rounded-2xl border border-amber-100 bg-amber-50 p-4">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-100">
+              <AlertTriangle size={18} className="text-amber-600" />
+            </div>
+            <div className="min-w-0">
+              <p className="font-sora text-sm font-semibold text-amber-900">
                 Verify your GSTIN before creating batches
               </p>
-              <p className="mt-1 font-inter text-xs text-amber-700">
+              <p className="mt-1 font-inter text-xs leading-5 text-amber-700">
                 {user?.gstin
                   ? 'Your GSTIN is on file but hasn’t been verified yet. Verify it from your profile to start creating verification batches.'
                   : 'Add and verify your organization’s GSTIN from your profile to start creating verification batches.'}

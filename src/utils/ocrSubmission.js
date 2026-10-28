@@ -1,5 +1,6 @@
 import { matchOcrEntries, saveOcrReviewRecord } from './ocrReview.js';
 import { buildOcrAssignments } from './ocrAssignments.js';
+import { validateOcrDraftEmails } from './humanEmail.js';
 
 export const buildOcrDraftRecord = (entry, data) => {
   const extracted = data?.extracted || data?.extracted_data || data?.fields || data;
@@ -25,10 +26,19 @@ export const extractOcrDraft = async (entries, api) => {
 // a second batch. Draft IDs only identify local files; server IDs come from
 // the batch upload response.
 export const submitOcrDraft = async ({ draft, batchName, options, api, progress, checkpoint }) => {
+  validateOcrDraftEmails(draft, options);
   if (!progress.response) {
     const assignments = buildOcrAssignments(draft.assignmentGroups || [], draft.records);
+    // Creation must receive each reviewed email before consent eligibility is
+    // evaluated. Never spread one person's email across a demographic group.
+    if ((options?.batchType || options?.batch_type || 'human') === 'human') {
+      draft.records.forEach((record, index) => {
+        const email = String(record.payload?.email ?? '').trim();
+        if (email) assignments.push({ file_indices: [index], email });
+      });
+    }
     const { data } = await api.bulkUploadDocuments(draft.records.map((record) => record.file), batchName,
-      { ...options, ...(assignments.length ? { assignments } : {}) });
+      { ...options, assignments });
     progress.response = data;
     checkpoint(progress);
   }

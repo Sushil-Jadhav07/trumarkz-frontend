@@ -1,5 +1,6 @@
 import { LoadingSkeleton } from '@/components/shared/LoadingSkeleton';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import * as XLSX from 'xlsx';
 import { useNavigate } from 'react-router-dom';
 import { ArrowRight, CheckSquare, ReceiptText, RefreshCw } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -14,6 +15,7 @@ import { verificationAPI, getApiError } from '@/services/api';
 import { getIndustryTypeList } from '@/utils/verificationFlow';
 import { submitOcrDraft } from '@/utils/ocrSubmission';
 import { BulkHumanResolvedUsers } from '@/components/shared/BulkHumanResolvedUsers';
+import { validateHumanExcelEmails } from '@/utils/humanEmail';
 
 const formatCurrency = (value) => `₹${Number(value).toLocaleString('en-IN')}`;
 
@@ -134,6 +136,8 @@ export const CostBreakdown = () => {
           : 'Batch created and reviewed documents saved');
         return;
       }
+      const workbook = XLSX.read(await batchData.file.arrayBuffer(), { type: 'array' });
+      validateHumanExcelEmails(XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { header: 1 }), selectedPermission);
       const { data } = await verificationAPI.bulkUpload(
         batchData.file,
         batchData.batchName.trim(),

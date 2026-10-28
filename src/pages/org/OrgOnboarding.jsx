@@ -108,14 +108,14 @@ export const OrgOnboarding = () => {
 
   return (
     <div className="min-h-screen bg-brand-bg flex items-center justify-center p-4">
-      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="w-full max-w-lg">
-        <Card className="p-6 sm:p-8">
+      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="w-full max-w-3xl">
+        <Card className="p-6 sm:p-7">
           {/* Header */}
-          <div className="text-center mb-8">
-            <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-brand-blue/10">
-              <Building2 size={28} className="text-brand-blue" />
+          <div className="text-center mb-5">
+            <div className="mx-auto mb-2.5 flex h-11 w-11 items-center justify-center rounded-2xl bg-brand-blue/10">
+              <Building2 size={22} className="text-brand-blue" />
             </div>
-            <h2 className="font-sora font-bold text-2xl text-brand-dark mb-2">
+            <h2 className="font-sora font-bold text-xl text-brand-dark mb-1">
               Complete Your Profile
             </h2>
             <p className="text-sm text-gray-500 font-inter">
@@ -123,7 +123,7 @@ export const OrgOnboarding = () => {
             </p>
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-6">
+          <form onSubmit={handleSubmit} className="space-y-4">
             {/* ── Industry Type ── */}
             <div>
               <label className="block text-sm font-medium text-brand-dark font-inter mb-1.5">
@@ -132,7 +132,7 @@ export const OrgOnboarding = () => {
               <button
                 type="button"
                 onClick={() => setIndustryOpen(o => !o)}
-                className={`w-full flex items-center justify-between px-4 py-3 rounded-xl border text-sm font-inter transition-colors ${
+                className={`w-full flex items-center justify-between px-4 py-2.5 rounded-xl border text-sm font-inter transition-colors ${
                   errors.industryType ? 'border-red-400 bg-red-50' : 'border-gray-200 bg-white hover:border-brand-blue'
                 }`}
               >
@@ -164,50 +164,53 @@ export const OrgOnboarding = () => {
               )}
             </div>
 
-            {/* ── GSTIN ── */}
-            <Input
-              label="GSTIN *"
-              placeholder="e.g. 27ABCDE1234F1Z5"
-              value={form.gstin}
-              onChange={e => updateField('gstin', e.target.value.toUpperCase())}
-              error={errors.gstin}
-              icon={FileText}
-            />
+            {/* ── GSTIN / Business Reg No — side by side now that the card
+                is wide enough, instead of two full-width stacked rows. ── */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <Input
+                label="GSTIN *"
+                placeholder="e.g. 27ABCDE1234F1Z5"
+                value={form.gstin}
+                onChange={e => updateField('gstin', e.target.value.toUpperCase())}
+                error={errors.gstin}
+                icon={FileText}
+              />
+              <Input
+                label="Business Registration Number *"
+                placeholder="e.g. U74999MH2020PTC123456"
+                value={form.businessRegNumber}
+                onChange={e => updateField('businessRegNumber', e.target.value)}
+                error={errors.businessRegNumber}
+                icon={Briefcase}
+              />
+            </div>
 
-            {/* ── Business Reg No ── */}
-            <Input
-              label="Business Registration Number *"
-              placeholder="e.g. U74999MH2020PTC123456"
-              value={form.businessRegNumber}
-              onChange={e => updateField('businessRegNumber', e.target.value)}
-              error={errors.businessRegNumber}
-              icon={Briefcase}
-            />
-
-            {/* ── Address ── */}
-            <div className="space-y-3">
+            {/* ── Address — all three lines across one row at this width ── */}
+            <div className="space-y-1.5">
               <label className="block text-sm font-medium text-brand-dark font-inter">
                 Registered Address <span className="text-red-500">*</span>
               </label>
-              <Input
-                placeholder="Address Line 1 (Building, Street)"
-                value={form.addressLine1}
-                onChange={e => updateField('addressLine1', e.target.value)}
-                error={errors.addressLine1}
-                icon={MapPin}
-              />
-              <Input
-                placeholder="Address Line 2 (Area, Locality)"
-                value={form.addressLine2}
-                onChange={e => updateField('addressLine2', e.target.value)}
-                error={errors.addressLine2}
-              />
-              <Input
-                placeholder="Address Line 3 (City, State, PIN)"
-                value={form.addressLine3}
-                onChange={e => updateField('addressLine3', e.target.value)}
-                error={errors.addressLine3}
-              />
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <Input
+                  placeholder="Address Line 1 (Building, Street)"
+                  value={form.addressLine1}
+                  onChange={e => updateField('addressLine1', e.target.value)}
+                  error={errors.addressLine1}
+                  icon={MapPin}
+                />
+                <Input
+                  placeholder="Address Line 2 (Area, Locality)"
+                  value={form.addressLine2}
+                  onChange={e => updateField('addressLine2', e.target.value)}
+                  error={errors.addressLine2}
+                />
+                <Input
+                  placeholder="Address Line 3 (City, State, PIN)"
+                  value={form.addressLine3}
+                  onChange={e => updateField('addressLine3', e.target.value)}
+                  error={errors.addressLine3}
+                />
+              </div>
             </div>
 
             {/* ── Use Cases ── */}
@@ -224,7 +227,7 @@ export const OrgOnboarding = () => {
                       key={uc.key}
                       type="button"
                       onClick={() => toggleUseCase(uc)}
-                      className={`group flex min-h-[116px] items-start gap-3 rounded-2xl border p-4 text-left transition-all ${
+                      className={`group flex items-start gap-3 rounded-2xl border p-3 text-left transition-all ${
                         selected
                           ? 'border-brand-blue bg-brand-blue/5 shadow-sm ring-1 ring-brand-blue/15'
                           : errors.useCases
@@ -232,10 +235,10 @@ export const OrgOnboarding = () => {
                             : 'border-gray-200 bg-white hover:border-brand-blue/50 hover:shadow-sm'
                       }`}
                     >
-                      <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition-colors ${
+                      <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl transition-colors ${
                         selected ? 'bg-brand-blue text-white' : 'bg-gray-100 text-gray-500 group-hover:bg-brand-blue/10 group-hover:text-brand-blue'
                       }`}>
-                        <Icon size={20} />
+                        <Icon size={18} />
                       </div>
                       <div className="min-w-0 flex-1">
                         <div className="mb-1 flex items-start justify-between gap-2">

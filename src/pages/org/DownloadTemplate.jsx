@@ -18,6 +18,7 @@ import { extractOcrDraft } from '@/utils/ocrSubmission';
 import { OcrAssignmentGroups, OcrAppliedAssignments, OcrNationalitySelect } from '@/components/shared/OcrAssignmentGroups';
 import { CustomSelect } from '@/components/ui/CustomSelect';
 import { OCR_GENDERS, buildOcrAssignments, applyOcrAssignmentsToPreview } from '@/utils/ocrAssignments';
+import { humanEmailRequired, humanEmailError, withHumanEmailField, validateHumanExcelEmails } from '@/utils/humanEmail';
 
 // photo is appended automatically by the API — never pass it in headers.
 // required: true matches PATCH /verification/batch-users/{user_id}'s own
@@ -132,9 +133,9 @@ const normalizeDocType = (value) =>
 // Only the backend value decides. Anything that isn't one of the three
 // canonical types — including "document", null, undefined, "" — falls back
 // to the existing generic field list. We never guess DL/Aadhaar/PAN.
-const getReviewFields = (documentType) => {
+const getReviewFields = (documentType, permission) => {
   const dt = normalizeDocType(documentType);
-  return DOC_TYPE_FIELDS[dt] || REVIEW_FIELDS;
+  return withHumanEmailField(DOC_TYPE_FIELDS[dt] || REVIEW_FIELDS, permission);
 };
 
 // OCR commonly returns DOB as DD/MM/YYYY or DD-MM-YYYY — PATCH expects
@@ -204,7 +205,7 @@ const buildInitialForms = (result) => {
 };
 
 // OCR draft review: extraction and confirmation do not create a batch.
-const ReviewOcrModal = ({ isOpen, ocrResult, sourceEntries = {}, onClose, onDone }) => {
+const ReviewOcrModal = ({ isOpen, ocrResult, sourceEntries = {}, onClose, onDone, permission }) => {
   const [forms, setForms] = useState({});
   const [confirmingId, setConfirmingId] = useState(null);
   const [confirmedIds, setConfirmedIds] = useState(new Set());
@@ -288,6 +289,7 @@ const ReviewOcrModal = ({ isOpen, ocrResult, sourceEntries = {}, onClose, onDone
         topLevel[k] = v;
       }
     });
+    if ('email' in topLevel) topLevel.email = String(topLevel.email ?? '').trim();
     return {
       ...topLevel,
       custom_fields: { ...(_customFields || {}), ...customFromForm,
@@ -301,9 +303,11 @@ const ReviewOcrModal = ({ isOpen, ocrResult, sourceEntries = {}, onClose, onDone
   // own document-type field list (not a hardcoded list) so the user always
   // sees labels that match what's actually on screen for them.
   const getMissingRequiredFields = (userId, documentType) => {
-    const fields = getReviewFields(documentType);
+    const fields = getReviewFields(documentType, permission);
     const values = forms[userId] || {};
-    return fields.filter((f) => f.required && !String(values[f.key] ?? '').trim()).map((f) => f.label);
+    const missing = fields.filter((f) => f.required && !String(values[f.key] ?? '').trim()).map((f) => f.label);
+    if (String(values.email ?? '').trim() && humanEmailError(values.email, permission)) missing.push('Valid Email');
+    return missing;
   };
 
   const confirmUser = async (userId, documentType) => {
@@ -333,7 +337,7 @@ const ReviewOcrModal = ({ isOpen, ocrResult, sourceEntries = {}, onClose, onDone
 
   const handleFinish = async () => {
     const remaining = users.filter((u) => !confirmedIds.has(u.id));
-    const incomplete = remaining.filter((u) => getMissingRequiredFields(u.id, u.document_type).length > 0);
+    const incomplete = users.filter((u) => getMissingRequiredFields(u.id, u.document_type).length > 0);
     if (incomplete.length > 0) {
       toast.error(`${incomplete.length} record${incomplete.length === 1 ? '' : 's'} missing required fields: ${incomplete.map((u) => u.full_name || 'Unnamed record').join(', ')}`);
       return;
@@ -359,19 +363,27 @@ const ReviewOcrModal = ({ isOpen, ocrResult, sourceEntries = {}, onClose, onDone
     setFinalPreview(true);
   };
 
-  const continueFromPreview = () => onDone({
-    records: users.map((user) => ({
-      localId: user.id,
-      file: sourceEntries[user.id].file,
-      photo: sourceEntries[user.id].photo,
-      document_type: user.document_type,
-      payload: buildPayload(user.id),
-      attachment: attachmentsRef.current[user.id] ? {
-        file: attachmentsRef.current[user.id].file,
-        label: attachmentsRef.current[user.id].label.trim(),
-      } : null,
-    })),
-  });
+  const continueFromPreview = () => {
+    if (users.some((user) => getMissingRequiredFields(user.id, user.document_type).length > 0)) {
+      toast.error('Check the required fields and email addresses before continuing.');
+      setFinalPreview(false);
+      setConfirmedIds(new Set());
+      return;
+    }
+    onDone({
+      records: users.map((user) => ({
+        localId: user.id,
+        file: sourceEntries[user.id].file,
+        photo: sourceEntries[user.id].photo,
+        document_type: user.document_type,
+        payload: buildPayload(user.id),
+        attachment: attachmentsRef.current[user.id] ? {
+          file: attachmentsRef.current[user.id].file,
+          label: attachmentsRef.current[user.id].label.trim(),
+        } : null,
+      })),
+    });
+  };
 
   return (
     <Modal isOpen={isOpen} onClose={finishing || confirmingId !== null ? () => {} : onClose} title={finalPreview ? 'Final Preview' : 'Review Extracted Documents'} size="7xl" containerClassName="w-full max-w-7xl">
@@ -381,6 +393,7 @@ const ReviewOcrModal = ({ isOpen, ocrResult, sourceEntries = {}, onClose, onDone
             ? `${users.length} confirmed record${users.length === 1 ? '' : 's'}. Check the details and attachments before costing. Your batch will be created only after you approve the total cost.`
             : 'Review the extracted details and attach any additional documents. Confirmation saves your local draft; the batch and attachments are submitted after costing approval.'}
         </p>
+        <p className="font-inter text-xs text-slate-500">{humanEmailRequired(permission) ? 'Email is required for every user so they can receive the consent request.' : 'Email is optional for Open Search. You can continue without it.'}</p>
 
         <div className="flex items-center justify-between gap-3 border-b border-slate-100 pb-3 font-inter text-xs text-slate-500">
           <span>{users.length} record{users.length === 1 ? '' : 's'}</span>
@@ -391,7 +404,7 @@ const ReviewOcrModal = ({ isOpen, ocrResult, sourceEntries = {}, onClose, onDone
             const isConfirmed = confirmedIds.has(u.id);
             const values = forms[u.id] || {};
             const docTypeLabel = DOC_TYPE_LABELS[normalizeDocType(u.document_type)] || null;
-            const userFields = getReviewFields(u.document_type);
+            const userFields = getReviewFields(u.document_type, permission);
             const sourceEntry = sourceEntries[u.id];
             const attachment = attachments[u.id];
             return (
@@ -505,6 +518,10 @@ const ReviewOcrModal = ({ isOpen, ocrResult, sourceEntries = {}, onClose, onDone
                         /> : f.key.startsWith('address_line') ? (
                           <textarea rows={2} value={values[f.key] || ''} disabled={isConfirmed || finishing || confirmingId !== null} onChange={(e) => updateField(u.id, f.key, e.target.value)} className="w-full resize-y rounded-lg border border-slate-200 px-2.5 py-2 font-inter text-xs leading-relaxed text-slate-900 outline-none focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/10 disabled:bg-slate-50 disabled:text-slate-500" />
                         ) : <input
+                          type={f.key === 'email' ? 'email' : 'text'}
+                          required={Boolean(f.required)}
+                          aria-required={Boolean(f.required)}
+                          aria-label={`${f.label} for ${u.id}`}
                           value={values[f.key] || ''}
                           disabled={isConfirmed || finishing || confirmingId !== null}
                           onChange={(e) => updateField(u.id, f.key, e.target.value)}
@@ -865,7 +882,7 @@ export const DownloadTemplate = () => {
   const { selectedIndustry, selectedPermission, selectedVerifications, batchData, setBatchData, setSelectedHumanTemplate } = useApp();
 
   const baseFields = useMemo(() => BASE_FIELDS.map((field) => field.key === 'email'
-    ? { ...field, required: selectedPermission === 'private' }
+    ? { ...field, required: humanEmailRequired(selectedPermission) }
     : field), [selectedPermission]);
 
   const [excelFile,      setExcelFile]      = useState(null);
@@ -959,6 +976,26 @@ export const DownloadTemplate = () => {
   const allEntriesSelected = docEntries.length > 0 && selectedEntryIds.length === docEntries.length;
   const toggleSelectAllEntries = () => setSelectedEntryIds(allEntriesSelected ? [] : docEntries.map((entry) => entry.id));
 
+  // Same per-entry resolution UserDocumentEntries uses to show "Male ·
+  // Indian" under a row (later groups win over earlier ones for the same
+  // field) — duplicated here at the parent level because Continue/handle
+  // Upload need to gate on it too, not just display it. OCR extraction can
+  // guess gender/nationality from the document itself, but that guess is
+  // never trusted as final — every uploaded user must be EXPLICITLY
+  // assigned both fields via a group before the batch can proceed.
+  const ocrAssignedById = useMemo(() => {
+    const values = new Map();
+    assignmentGroups.forEach((group) => group.entryIds.forEach((id) => {
+      values.set(id, { ...values.get(id), ...(group.gender ? { gender: group.gender } : {}), ...(group.nationality ? { nationality: group.nationality } : {}) });
+    }));
+    return values;
+  }, [assignmentGroups]);
+  const unassignedDocCount = docEntries.filter((entry) => {
+    const a = ocrAssignedById.get(entry.id);
+    return !a || !a.gender || !a.nationality;
+  }).length;
+  const allDocEntriesAssigned = docEntries.length > 0 && unassignedDocCount === 0;
+
   // Required fields (full_name, dob, gender, nationality) can't be toggled
   // off — see BASE_FIELDS.
   const toggleBase = (key) => {
@@ -1034,6 +1071,7 @@ export const DownloadTemplate = () => {
         toast.error(`Missing required columns: ${missingHeaders.join(', ')}`);
         return;
       }
+      validateHumanExcelEmails(rows, selectedPermission);
 
       const recordCount = rows
         .slice(1)
@@ -1048,7 +1086,7 @@ export const DownloadTemplate = () => {
       setSelectedHumanTemplate('classic-blue');
       navigate('/org/costing');
     } catch (err) {
-      toast.error(getApiError(err, 'Failed to read the uploaded file'));
+      toast.error(getApiError(err, err?.message || 'Failed to read the uploaded file'));
     }
   };
 
@@ -1056,6 +1094,10 @@ export const DownloadTemplate = () => {
   const handleUploadDocuments = async () => {
     if (!docEntries.length) { toast.error('Add at least one user document'); return; }
     if (!batchNameValue.trim()) { toast.error('Enter a batch name'); return; }
+    if (!allDocEntriesAssigned) {
+      toast.error(`Assign Gender & Nationality for all ${docEntries.length} user${docEntries.length === 1 ? '' : 's'} before continuing`);
+      return;
+    }
     setUploading(true);
     try {
       const groups = assignmentGroups.map((group) => ({ ...group, entryIds: [...group.entryIds] }));
@@ -1276,6 +1318,14 @@ export const DownloadTemplate = () => {
                 </div>
 
                 <div className="space-y-3 p-6">
+                  {docEntries.length > 0 && !allDocEntriesAssigned && (
+                    <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5">
+                      <AlertTriangle size={14} className="mt-0.5 shrink-0 text-amber-500" />
+                      <p className="font-inter text-xs text-amber-700">
+                        {unassignedDocCount} of {docEntries.length} user{docEntries.length === 1 ? '' : 's'} still need{unassignedDocCount === 1 ? 's' : ''} Gender &amp; Nationality assigned — select them above, choose both, and click Apply before you can continue.
+                      </p>
+                    </div>
+                  )}
                   <div className="rounded-xl border border-gray-200 bg-white p-4 text-center">
                     <p className="font-sora text-2xl font-bold text-brand-dark">{docEntries.length}</p>
                     <p className="mt-0.5 font-inter text-[11px] text-gray-400">Users Added</p>
@@ -1287,6 +1337,7 @@ export const DownloadTemplate = () => {
                       {[
                         { label: 'Batch name set',   done: Boolean(batchNameValue.trim()) },
                         { label: 'Users added',      done: docEntries.length > 0 },
+                        ...(docEntries.length > 0 ? [{ label: 'Gender & Nationality assigned', done: allDocEntriesAssigned }] : []),
                       ].map(({ label, done }) => (
                         <div key={label} className="flex items-center gap-2.5">
                           <div className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full transition-colors ${done ? 'bg-green-100' : 'bg-gray-100'}`}>
@@ -1311,7 +1362,8 @@ export const DownloadTemplate = () => {
               <Button
                 variant="primary" size="lg" className="w-full sm:flex-1"
                 onClick={handleContinue}
-                disabled={uploading}
+                disabled={uploading || (!excelFile && docEntries.length > 0 && !allDocEntriesAssigned)}
+                title={!excelFile && docEntries.length > 0 && !allDocEntriesAssigned ? `Assign Gender & Nationality for all ${docEntries.length} users first` : undefined}
                 icon={uploading ? RefreshCw : ArrowRight}
               >
                 {uploading ? 'Uploading & scanning…' : 'Continue'}
@@ -1456,6 +1508,7 @@ export const DownloadTemplate = () => {
 
       {/* ── OCR Review Modal ─────────────────────────────────────────────────── */}
       <ReviewOcrModal
+        permission={selectedPermission}
         isOpen={reviewOpen}
         ocrResult={ocrResult}
         sourceEntries={reviewEntries}

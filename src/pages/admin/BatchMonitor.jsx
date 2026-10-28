@@ -19,6 +19,8 @@ import { TablePagination } from '@/components/shared/TablePagination';
 import { normalizeDhiwayDetails, resolveDhiwaySpaceId } from '@/utils/dhiway';
 import { pendingManualUsers } from '@/utils/pendingManualVerifications';
 import { consentAllowsProcessing } from '@/utils/consent';
+import { batchMatchesDate, batchDateError, batchDatePresets } from '@/utils/batchFilters';
+import { useBatchVerificationFilter } from '@/hooks/useBatchVerificationFilter';
 import {
   AlertCircle, AlertTriangle, ArrowRight, Building2, Calendar, CheckCircle, ChevronDown, ChevronLeft, ChevronRight, Clock, Download, Eye, FileText, Info,
   Layers, Mail, MoreVertical, Package, Plus, RefreshCw, Save, Search, Send, ShieldCheck, Sparkles, Trash2, User, Users, X, XCircle, Zap,
@@ -2539,13 +2541,37 @@ export const BatchMonitor = () => {
   const [dateFrom,     setDateFrom]     = useState('');
   const [dateTo,       setDateTo]       = useState('');
   const [showDateRange, setShowDateRange] = useState(false);
+  const [verificationFilterId, setVerificationFilterId] = useState('');
+  const [verificationOptions, setVerificationOptions] = useState([]);
+  const [verificationOptionsError, setVerificationOptionsError] = useState('');
+  const [verificationOptionsLoading, setVerificationOptionsLoading] = useState(true);
+  const [metadataVersion, setMetadataVersion] = useState(0);
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [currentPage,  setCurrentPage]  = useState(1);
   const [pageSize,     setPageSize]     = useState(10);
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [orgFilter, statusFilter, batchTypeFilter, searchTerm, dateFrom, dateTo]);
+  }, [orgFilter, statusFilter, batchTypeFilter, searchTerm, dateFrom, dateTo, verificationFilterId]);
+
+  useEffect(() => {
+    let active = true;
+    setVerificationOptionsLoading(true); setVerificationOptionsError('');
+    verificationAPI.getVerificationTypes().then(({ data }) => {
+      const types = Array.isArray(data) ? data : data?.verification_types;
+      if (!Array.isArray(types)) throw new Error('Verification types are unavailable.');
+      if (active) setVerificationOptions(types.filter((type) => type?.name && type?.id).sort((a, b) => a.name.localeCompare(b.name)));
+    }).catch((error) => { if (active) setVerificationOptionsError(getApiError(error, 'Could not load verification filters.')); })
+      .finally(() => { if (active) setVerificationOptionsLoading(false); });
+    return () => { active = false; };
+  }, [metadataVersion]);
+
+  useEffect(() => {
+    if (!showDateRange) return;
+    const close = (event) => { if (event.key === 'Escape') setShowDateRange(false); };
+    window.addEventListener('keydown', close);
+    return () => window.removeEventListener('keydown', close);
+  }, [showDateRange]);
 
   const closeActionMenu = useCallback(() => {
     setActionMenu({ batchId: null, anchorRect: null });
@@ -2581,23 +2607,24 @@ export const BatchMonitor = () => {
   };
 
   const searchValue = searchTerm.trim().toLowerCase();
-  const fromTime = dateFrom ? new Date(dateFrom).getTime() : null;
-  const toTime = dateTo ? new Date(`${dateTo}T23:59:59.999`).getTime() : null;
+  const dateError = batchDateError(dateFrom, dateTo);
 
-  const visibleBatches = batches.filter((b) => {
+  const candidateBatches = batches.filter((b) => {
     if (orgFilter && b.orgName !== orgFilter) return false;
     if (statusFilter !== 'all' && !STATUS_FILTERS[statusFilter]?.(b)) return false;
     if (batchTypeFilter && b.batchType !== batchTypeFilter) return false;
     if (searchValue && !`${b.name} ${b.id} ${b.orgName}`.toLowerCase().includes(searchValue)) return false;
-    if (fromTime && (!b.createdAt || new Date(b.createdAt).getTime() < fromTime)) return false;
-    if (toTime && (!b.createdAt || new Date(b.createdAt).getTime() > toTime)) return false;
-    return true;
+    return batchMatchesDate(b, dateFrom, dateTo);
   });
+  const selectedVerification = verificationOptions.find((type) => type.id === verificationFilterId) || (verificationFilterId ? { id: verificationFilterId, name: '' } : null);
+  const verificationFilter = useBatchVerificationFilter(candidateBatches, selectedVerification, metadataVersion);
+  const visibleBatches = verificationFilter.batches;
+  const filtersBusy = verificationFilter.loading || Boolean(verificationFilterId && verificationOptionsLoading);
 
-  const hasActiveFilters = !!(orgFilter || statusFilter !== 'all' || batchTypeFilter || searchTerm || dateFrom || dateTo);
+  const hasActiveFilters = !!(orgFilter || statusFilter !== 'all' || batchTypeFilter || searchTerm || dateFrom || dateTo || verificationFilterId);
   const clearAllFilters = () => {
     setOrgFilter(''); setStatusFilter('all'); setBatchTypeFilter('');
-    setSearchTerm(''); setDateFrom(''); setDateTo('');
+    setSearchTerm(''); setDateFrom(''); setDateTo(''); setVerificationFilterId('');
   };
 
   const totalPages = Math.max(1, Math.ceil(visibleBatches.length / pageSize));
@@ -2689,6 +2716,7 @@ export const BatchMonitor = () => {
 
   // ── Export the currently filtered batch list (not just the current page) ──
   const handleExport = (format) => {
+    if (filtersBusy || verificationFilter.error || dateError) { toast.error('Wait for the filters to load and choose a valid date range before exporting.'); return; }
     setShowExportMenu(false);
     if (visibleBatches.length === 0) { toast.error('No batches to export'); return; }
     const rows = visibleBatches.map((b) => ({
@@ -2721,11 +2749,11 @@ export const BatchMonitor = () => {
         subtitle="Review live human and product verification records"
         action={
           <div className="flex items-center gap-3">
-            <Button variant="outline" size="sm" icon={RefreshCw} loading={refreshing} onClick={() => fetchData(true)}>
+            <Button variant="outline" size="sm" icon={RefreshCw} loading={refreshing} onClick={async () => { await fetchData(true); setMetadataVersion((value) => value + 1); }}>
               Refresh
             </Button>
             <div className="relative">
-              <Button variant="primary" size="sm" icon={Download} onClick={() => setShowExportMenu((v) => !v)}>
+              <Button variant="primary" size="sm" icon={Download} disabled={filtersBusy || Boolean(verificationFilter.error || dateError)} onClick={() => setShowExportMenu((v) => !v)}>
                 Export
               </Button>
               {showExportMenu && (
@@ -2788,13 +2816,15 @@ export const BatchMonitor = () => {
 
       {/* Filter bar */}
       <Card className="p-4 mb-4 overflow-visible">
-        <div className="flex flex-col xl:flex-row xl:items-center gap-3">
+        <div className="grid min-w-0 grid-cols-1 items-center gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.3fr)_minmax(0,2fr)_auto]">
           <div className="flex items-center gap-2">
             <Building2 size={14} className="text-gray-400 shrink-0" />
             <CustomSelect
               value={orgFilter}
+              ariaLabel="Filter by organization"
+              searchable
               onChange={setOrgFilter}
-              className="w-full max-w-[200px]"
+              className="min-w-0 flex-1"
               options={[
                 { value: '', label: 'All Organizations' },
                 ...orgOptions.map((org) => ({ value: org, label: org })),
@@ -2806,8 +2836,9 @@ export const BatchMonitor = () => {
             <Layers size={14} className="text-gray-400 shrink-0" />
             <CustomSelect
               value={batchTypeFilter}
+              ariaLabel="Filter by batch type"
               onChange={setBatchTypeFilter}
-              className="w-full max-w-[160px]"
+              className="min-w-0 flex-1"
               options={[
                 { value: '', label: 'All Batch Types' },
                 { value: 'human', label: 'Human' },
@@ -2817,13 +2848,18 @@ export const BatchMonitor = () => {
             />
           </div>
 
-          <div className="relative flex-1 min-w-[200px]">
+          <CustomSelect value={verificationFilterId} onChange={setVerificationFilterId} ariaLabel="Filter by verification type" searchable
+            disabled={verificationOptionsLoading || Boolean(verificationOptionsError)}
+            options={[{ value: '', label: verificationOptionsLoading ? 'Loading verification types…' : 'All Verification Types' }, ...verificationOptions.map((type) => ({ value: type.id, label: type.name })), ...(verificationFilterId && !verificationOptions.some((type) => type.id === verificationFilterId) ? [{ value: verificationFilterId, label: 'Selected verification (unavailable)' }] : [])]} />
+
+          <div className="relative min-w-0">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
             <input
               type="text"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               placeholder="Search by batch name or ID..."
+              aria-label="Search batches"
               className="w-full rounded-lg border border-gray-200 bg-white pl-9 pr-3 py-2 text-xs font-inter text-gray-600 focus:outline-none focus:ring-2 focus:ring-brand-blue/20"
             />
           </div>
@@ -2832,25 +2868,30 @@ export const BatchMonitor = () => {
             <button
               type="button"
               onClick={() => setShowDateRange((v) => !v)}
+              aria-label="Filter by batch creation date"
+              aria-expanded={showDateRange}
               className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-semibold font-inter text-gray-600 hover:border-gray-300 whitespace-nowrap"
             >
               <Calendar size={14} className="text-gray-400" />
-              {dateFrom || dateTo ? `${dateFrom || '…'} → ${dateTo || '…'}` : 'Date Range'}
+              {dateFrom || dateTo ? `${dateFrom || '…'} → ${dateTo || '…'}` : 'Created Date'}
               <ChevronDown size={12} className="text-gray-400" />
             </button>
             {showDateRange && (
               <>
                 <div className="fixed inset-0 z-40" onClick={() => setShowDateRange(false)} />
-                <div className="absolute right-0 top-full mt-2 w-64 rounded-xl border border-gray-200 bg-white p-3 shadow-xl z-50 space-y-2.5">
+                <div role="dialog" aria-label="Batch creation date range" className="absolute left-0 top-full z-50 mt-2 w-64 max-w-[calc(100vw-3rem)] space-y-2.5 rounded-xl border border-gray-200 bg-white p-3 shadow-xl sm:left-auto sm:right-0">
+                  <p className="text-xs font-semibold text-gray-700">Batch creation date</p>
+                  <div className="grid grid-cols-2 gap-2">{batchDatePresets().map((preset) => <button type="button" key={preset.label} onClick={() => { setDateFrom(preset.from); setDateTo(preset.to); setShowDateRange(false); }} className="rounded-md border border-gray-200 px-2 py-1.5 text-xs text-gray-600 hover:border-blue-300 hover:bg-blue-50">{preset.label}</button>)}</div>
                   <div>
                     <label className="text-[11px] font-semibold text-gray-500 font-inter">From</label>
-                    <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="w-full mt-1 rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs font-inter text-gray-600" />
+                    <input aria-label="Created from date" type="date" max={dateTo || undefined} value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="w-full mt-1 rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs font-inter text-gray-600" />
                   </div>
                   <div>
                     <label className="text-[11px] font-semibold text-gray-500 font-inter">To</label>
-                    <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="w-full mt-1 rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs font-inter text-gray-600" />
+                    <input aria-label="Created to date" type="date" min={dateFrom || undefined} value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="w-full mt-1 rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs font-inter text-gray-600" />
                   </div>
                   <div className="flex justify-between pt-1">
+                    {dateError && <p role="alert" className="text-xs text-red-600">{dateError}</p>}
                     <button type="button" onClick={() => { setDateFrom(''); setDateTo(''); }} className="text-xs text-gray-400 font-inter hover:text-gray-600">Clear</button>
                     <button type="button" onClick={() => setShowDateRange(false)} className="text-xs font-semibold text-brand-blue font-inter hover:underline">Done</button>
                   </div>
@@ -2885,11 +2926,14 @@ export const BatchMonitor = () => {
               Clear All
             </button>
           )}
+          <span role="status" className="ml-auto text-xs text-gray-500">{filtersBusy ? 'Checking verification types…' : `${visibleBatches.length} of ${batches.length} batches`}</span>
         </div>
+        {dateError && <p role="alert" className="mt-3 text-xs text-red-600">{dateError}</p>}
+        {verificationOptionsError && <p role="alert" className="mt-3 text-xs text-red-600">{verificationOptionsError} <button type="button" onClick={() => setMetadataVersion((value) => value + 1)} className="font-semibold underline">Retry loading filters</button></p>}
       </Card>
 
       {/* Batch Table */}
-      {loading ? (
+      {verificationFilter.error ? <Card className="p-6"><p role="alert" className="text-sm text-red-600">{verificationFilter.error}</p><button type="button" onClick={verificationFilter.retry} className="mt-3 text-sm font-semibold text-brand-blue">Retry verification filter</button></Card> : loading || filtersBusy ? (
         <LoadingSkeleton variant="table" label="Loading batches" columns={7}/>
       ) : visibleBatches.length === 0 ? (
         <Card className="p-10 text-center">

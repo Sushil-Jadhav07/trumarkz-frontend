@@ -43,6 +43,21 @@ test('malformed groups, unsupported keywords and invalid indices fail before upl
   assert.throws(() => validateOcrAssignments('{}', 3), /array/);
   assert.deepEqual(validateOcrAssignments(undefined, 3), []);
 });
+
+test('email assignments require a valid individual address and exactly one file, including index zero', () => {
+  assert.deepEqual(validateOcrAssignments([
+    { file_indices: [0], email: ' first@example.test ' },
+    { file_indices: [1], email: 'second@example.test', gender: 'female' },
+  ], 2), [
+    { file_indices: [0], email: 'first@example.test' },
+    { file_indices: [1], gender: 'Female', email: 'second@example.test' },
+  ]);
+  for (const group of [
+    { file_indices: [0, 1], email: 'first@example.test' },
+    { file_indices: [0, 0], email: 'first@example.test' },
+    ...['', ' ', 'bad', 'a@example.test,b@example.test', null, 123].map((email) => ({ file_indices: [0], email })),
+  ]) assert.throws(() => validateOcrAssignments([group], 2));
+});
 test('actual API includes assignments and ordered images together, omits empty groups, and never sends removed Excel fields', async () => {
   const require = createRequire(import.meta.url), axios = require('axios'), calls = [];
   const old = axios.defaults.adapter;
@@ -52,7 +67,10 @@ test('actual API includes assignments and ordered images together, omits empty g
   try { vm.runInNewContext(result.outputFiles[0].text, { module, exports: module.exports, require, FormData, URLSearchParams, AbortController, localStorage: { getItem: () => 'test-token' }, window: { location: { pathname: '/org/costing' } } }); } finally { axios.defaults.adapter = old; }
   const api = module.exports.verificationAPI;
   const files = ['a', 'b', 'c'].map((name) => new File([name], `${name}.png`));
-  const assignments = buildOcrAssignments(groups, entries);
+  const assignments = [...buildOcrAssignments(groups, entries),
+    { file_indices: [0], email: 'first@example.test' },
+    { file_indices: [1], email: 'second@example.test' },
+  ];
   const response = await api.bulkUploadDocuments(files, 'Batch', { batchType: 'human', credentialVisibility: 'private', assignments });
   assert.equal(calls[0].url, '/verification/bulk-upload/documents');
   assert.deepEqual(calls[0].data.getAll('files').map((file) => file.name), ['a.png', 'b.png', 'c.png']);

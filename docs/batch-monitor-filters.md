@@ -1,0 +1,11 @@
+# Batch Monitor filters
+
+Super Admin Batch Monitor now combines the existing organization, batch type, status and search controls with a searchable verification-type filter and a batch-created date range. Dates refer to the table's **Created On** field, not an inferred verification-completion timestamp.
+
+Date presets cover Today, the last 7/30 calendar days and the current month. Custom From/To dates may be open-ended; both endpoints include the complete browser-local calendar day. Invalid/reversed ranges display an error and block export. Clear All resets the combined filters and pagination returns to page one when criteria change. Exports consume the same filtered batch array shown in the table. Summary cards retain their existing all-batch scope.
+
+The configured backend's OpenAPI `BatchListResponse` omits verification types. The frontend therefore loads the existing verification-type catalog once, and fetches existing batch-detail metadata only when a verification filter is selected. Organization/date/status/search filters narrow candidates first. Detail reads are limited to three concurrent requests, cached between selections and cancelled when filters change or the page unmounts. Refresh invalidates the cache. Matching uses actual verification IDs/names, never batch titles or the manual/automatic category label. An unavailable/deleted selected catalog type cannot silently turn filtering off.
+
+Loading is explicit. A failed metadata read does not become a false empty result or silently permit a partial export; the screen provides Retry and retains successful cached metadata. A large unfiltered selection can still require a read per batch because the list endpoint omits those fields; no speculative server query parameter or new endpoint was introduced.
+
+Validation: 96 automated tests passed, including seven new date-boundary/normalization, matching, concurrency, cache, cancellation and recovery checks. Isolated browser checks with controlled APIs covered verification switching without repeated reads, combined organization/type/date/status/search behavior, empty/reset states, Today boundaries, filtered CSV export, invalid range handling, metadata failure/retry and 390px overflow. Production build passed with the existing large-bundle/Browserslist warnings. No live batch mutation was performed.

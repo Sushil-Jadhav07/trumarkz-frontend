@@ -91,6 +91,17 @@ const buildBatchSummary = (rawBatches = []) =>
     .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
     .slice(0, 3);
 
+// Supplied illustration asset (public/assets) — already includes its own
+// soft blue backdrop and accent shapes, so this just sizes/contains it.
+// Used only by the "under review" banner above.
+const SetupIllustration = () => (
+  <img
+    src="/assets/Blue building with clock illustration.png"
+    alt=""
+    className="h-28 w-28 shrink-0 object-contain"
+  />
+);
+
 export const OrgDashboard = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -226,9 +237,36 @@ export const OrgDashboard = () => {
     }, 300);
   };
 
+  // An org is only usable for SDC/certificate generation once Superadmin has
+  // provisioned at least one Dhiway space (space_id) for it — see
+  // dhiways_details on the org's own profile (AuthContext normalises it to
+  // user.dhiwaysDetails). Freshly onboarded orgs have none yet, so surface
+  // that as a plain "under review" status instead of letting them discover
+  // it later as a confusing failure deep in batch/certificate generation.
+  const hasDhiwaySpace = Array.isArray(user?.dhiwaysDetails) && user.dhiwaysDetails.some((row) => row?.space_id);
+
   return (
     <AuthLayout title="Organization Dashboard">
       <div className="space-y-6">
+        {!hasDhiwaySpace && (
+          <Card className="flex flex-col gap-2 p-4 sm:flex-row sm:items-center sm:gap-3 sm:p-4">
+            <SetupIllustration />
+            <div className="min-w-0 flex-1">
+              <h3 className="font-sora text-base font-bold text-brand-dark">
+                A little setup. Then you're ready.
+              </h3>
+              <p className="mt-0.5 font-inter text-xs leading-5 text-gray-500">
+                We're preparing your organization's verification space.
+                <br className="hidden sm:block" />
+                Keep creating batches—we'll let you know when SDC certificate generation is ready.
+              </p>
+            </div>
+            <span className="inline-flex shrink-0 items-center gap-1.5 self-start rounded-full bg-blue-50 px-3 py-1.5 font-inter text-sm font-semibold text-brand-blue sm:self-center">
+              <Clock size={15} /> Setup in progress
+            </span>
+          </Card>
+        )}
+
         <Card className="overflow-hidden border-0 bg-[linear-gradient(135deg,_#141b2d,_#1a2a4d_52%,_#2f63e0)] px-5 py-4 text-white shadow-[0_24px_56px_-40px_rgba(20,27,45,0.5)]">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex items-start gap-3">

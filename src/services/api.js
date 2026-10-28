@@ -680,7 +680,7 @@ export const verificationAPI = {
     verificationApi.get('/verification/batches', {
       params: batchType ? { batch_type: batchType } : undefined,
     }),
-  getBatchDetails: (batchId) => verificationApi.get(`/verification/batches/${batchId}`),
+  getBatchDetails: (batchId, config) => verificationApi.get(`/verification/batches/${batchId}`, config),
   getBatchConsentDetails: async (batchId) => ({ data: await consentGuard.loadBatch(batchId) }),
 
   // POST /verification/batches/{batch_id}/share-with-organization —
