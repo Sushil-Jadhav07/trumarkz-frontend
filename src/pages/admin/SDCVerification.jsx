@@ -11,7 +11,7 @@ import { Modal } from '@/components/ui/Modal';
 import { Input } from '@/components/ui/Input';
 import { ProgressBar } from '@/components/ui/ProgressBar';
 import { authAPI, verificationAPI, sdcAPI, adminAPI, getApiError } from '@/services/api';
-import { normalizeDhiwayDetails, resolveDhiwaySpaceId } from '@/utils/dhiway';
+import { normalizeDhiwayDetails, resolveDhiwaySpaceId, batchSdcSpaceId } from '@/utils/dhiway';
 import {
   Search, ShieldCheck, Users, ChevronRight, CheckCircle, Clock, XCircle,
   ArrowLeft, FileText, QrCode, Eye, ChevronDown, Sparkles, RefreshCw, AlertCircle, Building2,
@@ -117,6 +117,8 @@ const normaliseBatch = (b) => {
     industryType: rawTypes,
     sdcStatus: sdcInfo?.status ? 'generated' : null,
     sdcInfo,
+    // Server-resolved certificate space from the batch list (the list has no verification_progress).
+    sdcSpaceId: b.sdc_space_id || null,
     users: records,
   };
 };
@@ -337,7 +339,7 @@ export const GenerateSDCModal = ({ batch, onClose, onGenerated, liveStatus, poll
         const { data } = await sdcAPI.getRecords({
           active: 1, page, pageSize: 100,
           org_id: batch?.sdcInfo?.org_id || undefined,
-          space_id: batch?.sdcInfo?.space_id || batch?.spaceId || undefined,
+          space_id: batch?.sdcSpaceId || batchSdcSpaceId(batch?.sdcInfo, batch?.spaceId) || undefined,
         });
         const pageRecords = Array.isArray(data?.records) ? data.records : [];
         allRecords.push(...pageRecords);
@@ -1268,7 +1270,7 @@ const BatchDetail = ({ batchSummary, onBack }) => {
       // any certificate that falls outside the first 100 once an org
       // accumulates more than that many issued records.
       const orgId   = batchSummary.sdcInfo?.org_id || undefined;
-      const spaceId = batchSummary.sdcInfo?.space_id || batchSummary.spaceId || undefined;
+      const spaceId = batchSummary.sdcSpaceId || batchSdcSpaceId(batchSummary.sdcInfo, batchSummary.spaceId) || undefined;
       // GET /sdc/batches/{batch_id}/status's certificate_ids is the backend's
       // own authoritative "issued for this batch" set — confirmed backend-
       // side that these ids can be present before anchorTime is populated

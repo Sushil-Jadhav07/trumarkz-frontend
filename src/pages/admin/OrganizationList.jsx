@@ -164,17 +164,35 @@ export const OrganizationList = () => {
   // ids are skipped (dhiwayStatus is deliberately not a dependency here, or
   // every resolve would re-trigger this).
   useEffect(() => {
-    const idsToCheck = paginatedOrgs.map((o) => o.id).filter((id) => id && dhiwayStatus[id] === undefined);
+    // The list now carries has_dhiway_space (Dhiway Spaces row OR active Schema Configuration),
+    // computed by the server. Only rows without it — an older backend — fall back to per-row reads.
+    const idsToCheck = paginatedOrgs
+      .filter((o) => typeof o.has_dhiway_space !== 'boolean')
+      .map((o) => o.id)
+      .filter((id) => id && dhiwayStatus[id] === undefined);
     if (idsToCheck.length === 0) return;
     setDhiwayStatus((prev) => {
       const next = { ...prev };
       idsToCheck.forEach((id) => { next[id] = 'loading'; });
       return next;
     });
+    // An org is set up through either system: a legacy Dhiway Spaces row, or an active Schema
+    // Configuration (which carries its own space_id/schema_id). Checking only the first made every
+    // schema-config-only org look unconfigured.
     idsToCheck.forEach((id) => {
-      adminAPI.getOrganization(id)
-        .then(({ data }) => setDhiwayStatus((prev) => ({ ...prev, [id]: hasDhiwaySpace(data) })))
-        .catch(() => setDhiwayStatus((prev) => ({ ...prev, [id]: null })));
+      Promise.allSettled([
+        adminAPI.getOrganization(id),
+        adminAPI.getSchemaConfigs(id, { activeOnly: true }),
+      ]).then(([orgRes, cfgRes]) => {
+        const legacy = orgRes.status === 'fulfilled' && hasDhiwaySpace(orgRes.value.data);
+        const configs = cfgRes.status === 'fulfilled' && Array.isArray(cfgRes.value.data?.configs) ? cfgRes.value.data.configs : null;
+        const viaSchema = !!configs?.some((c) => c.is_active !== false && c.space_id);
+        let status;
+        if (legacy || viaSchema) status = { ok: true, legacy, viaSchema };
+        else if (orgRes.status === 'rejected' || configs === null) status = null; // can't tell — never guess "Needs Setup"
+        else status = { ok: false };
+        setDhiwayStatus((prev) => ({ ...prev, [id]: status }));
+      });
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filteredOrgs, safePage, pageSize]);
@@ -290,16 +308,26 @@ export const OrganizationList = () => {
                           itself doesn't carry this field. */}
                       <div>
                         {(() => {
-                          const status = dhiwayStatus[org.id];
+                          const status = typeof org.has_dhiway_space === 'boolean'
+                            ? { ok: org.has_dhiway_space, server: true }
+                            : dhiwayStatus[org.id];
                           if (status === undefined || status === 'loading') {
                             return <Badge tone="gray"><RefreshCw size={9} className="animate-spin" /></Badge>;
                           }
                           if (status === null) {
                             return <Badge tone="gray" title="Could not check — try Refresh">Unknown</Badge>;
                           }
+                          const via = status.ok
+                            ? [status.legacy && 'Dhiway Spaces', status.viaSchema && 'Schema Configurations'].filter(Boolean).join(' + ')
+                            : '';
                           return (
-                            <Badge tone={status ? 'green' : 'amber'} title={status ? undefined : 'No Dhiway space_id/schema_id given yet — SDC generation is blocked for this org'}>
-                              {status ? 'Configured' : 'Needs Setup'}
+                            <Badge
+                              tone={status.ok ? 'green' : 'amber'}
+                              title={status.ok
+                                ? (status.server ? 'Configured — a Dhiway Spaces row or an active Schema Configuration' : `Configured via ${via}`)
+                                : 'No Dhiway space given yet (no Dhiway Spaces row and no active Schema Configuration) — SDC generation is blocked for this org'}
+                            >
+                              {status.ok ? 'Configured' : 'Needs Setup'}
                             </Badge>
                           );
                         })()}

@@ -244,11 +244,27 @@ export const OrgDashboard = () => {
   // that as a plain "under review" status instead of letting them discover
   // it later as a confusing failure deep in batch/certificate generation.
   const hasDhiwaySpace = Array.isArray(user?.dhiwaysDetails) && user.dhiwaysDetails.some((row) => row?.space_id);
+  // A space can also come from an active Schema Configuration — that counts as set up too.
+  // null = still checking (or the check failed): the banner stays hidden rather than guessing.
+  const [hasSchemaSpace, setHasSchemaSpace] = useState(null);
+  useEffect(() => {
+    if (hasDhiwaySpace || !user?.id) return undefined;
+    let active = true;
+    authAPI.getSchemaConfigs(user.id, { activeOnly: true })
+      .then(({ data }) => {
+        if (!active) return;
+        const configs = Array.isArray(data?.configs) ? data.configs : [];
+        setHasSchemaSpace(configs.some((c) => c.is_active !== false && c.space_id));
+      })
+      .catch(() => { if (active) setHasSchemaSpace(null); });
+    return () => { active = false; };
+  }, [hasDhiwaySpace, user?.id]);
+  const needsSetup = !hasDhiwaySpace && hasSchemaSpace === false;
 
   return (
     <AuthLayout title="Organization Dashboard">
       <div className="space-y-6">
-        {!hasDhiwaySpace && (
+        {needsSetup && (
           <Card className="flex flex-col gap-2 p-4 sm:flex-row sm:items-center sm:gap-3 sm:p-4">
             <SetupIllustration />
             <div className="min-w-0 flex-1">

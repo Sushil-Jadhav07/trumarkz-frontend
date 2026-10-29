@@ -32,6 +32,7 @@ import {
 import toast from 'react-hot-toast';
 import { humanEmailRequired, validateHumanExcelEmails } from '@/utils/humanEmail';
 import { SchemaConfigSelect } from '@/components/shared/SchemaConfigSelect';
+import { schemaSourceColumns } from '@/utils/schemaConfig';
 
 const parseTemplateHeaders = (value) =>
   String(value || '')
@@ -449,6 +450,7 @@ const HumanBulkPanel = ({ onResult, selectedIndustry, selectedVerifications, sel
   const [batchName, setBatchName] = useState('');
   const [description, setDescription] = useState('');
   const [schemaName, setSchemaName] = useState('');
+  const [schemaConfig, setSchemaConfig] = useState(null);
   const [selectedFile, setSelectedFile] = useState(null);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -473,7 +475,11 @@ const HumanBulkPanel = ({ onResult, selectedIndustry, selectedVerifications, sel
     try {
       const workbook = XLSX.read(await selectedFile.arrayBuffer(), { type: 'array' });
       const rows = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { header: 1 });
-      validateHumanExcelEmails(rows, selectedPermission);
+      // A schema's mapped email column counts; with a schema the server makes the final check.
+      validateHumanExcelEmails(rows, selectedPermission, {
+        emailColumns: schemaSourceColumns(schemaConfig).email || [],
+        schemaApplies: !!schemaConfig,
+      });
       const { data } = await verificationAPI.bulkUpload(
         selectedFile,
         batchName.trim(),
@@ -502,7 +508,8 @@ const HumanBulkPanel = ({ onResult, selectedIndustry, selectedVerifications, sel
     try {
       const { data } = await verificationAPI.generateHumanTemplate(
         getHumanTemplateHeaders(selectedVerifications),
-        getVerificationApiTypes(selectedVerifications)
+        getVerificationApiTypes(selectedVerifications),
+        schemaName
       );
       triggerBlobDownload(data, 'trumarkz-human-template.xlsx');
       toast.success('Template downloaded.');
@@ -621,8 +628,8 @@ const HumanBulkPanel = ({ onResult, selectedIndustry, selectedVerifications, sel
   return (
     <div className="space-y-5">
       <Input label="Batch Name *" placeholder="e.g. Driver Verification - May 2026" value={batchName} onChange={(e) => setBatchName(e.target.value)} icon={Layers} />
-      <SchemaConfigSelect orgId={user?.id} spaceType="human" value={schemaName} onChange={setSchemaName} disabled={loading} />
-      <div>
+      <SchemaConfigSelect orgId={user?.id} spaceType="human" value={schemaName} onChange={setSchemaName} onConfigChange={setSchemaConfig} disabled={loading} />
+<div>
         <label className="block text-sm font-medium text-gray-700 font-inter mb-1">Description (optional)</label>
         <textarea
           className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm font-inter focus:outline-none focus:ring-2 focus:ring-brand-blue/30 resize-none"
@@ -784,7 +791,9 @@ const ProductBulkPanel = ({ categories, onResult, selectedCategory, selectedServ
       const normalizedHeaders = headers.map((header) =>
         header.trim().toLowerCase().replace(/\s+/g, '_')
       );
-      const { data } = await verificationAPI.generateProductTemplate(categoryId, normalizedHeaders);
+      // generateProductTemplate takes (headers, schemaName). This used to pass categoryId as the
+      // headers, so the server template always failed and the local fallback was used instead.
+      const { data } = await verificationAPI.generateProductTemplate(normalizedHeaders, schemaName);
       triggerBlobDownload(data, `${batchName.trim() || 'product-template'}.xlsx`);
       toast.success('Template downloaded.');
     } catch (err) {

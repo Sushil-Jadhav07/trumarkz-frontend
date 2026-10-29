@@ -12,6 +12,7 @@ import { GenerateSDCModal, CertificateDetailModal } from '@/pages/admin/SDCVerif
 import { VerificationDetailsModal, VerificationCheckDetailsModal } from '@/components/shared/VerificationDetailsModal';
 import { TablePagination } from '@/components/shared/TablePagination';
 import { useAutomaticBatchRefresh } from '@/hooks/useAutomaticBatchRefresh';
+import { batchSdcSpaceId } from '@/utils/dhiway';
 import {
   useBatchList, WORKFLOW_STEPS, isProductRecord, recordTitle, getCertificateProductId,
   formatVerifTypeLabel, statusBadge,
@@ -173,7 +174,7 @@ export const BatchControlCenter = () => {
     // this falls back to only for older batches that predate this field).
     const sdcInfo = sdcInfoArg !== undefined ? sdcInfoArg : batchDetail?.verification_progress?.sdc;
     const orgId   = sdcInfo?.org_id || undefined;
-    const spaceId = sdcInfo?.space_id || selectedBatch?.spaceId || undefined;
+    const spaceId = batchSdcSpaceId(sdcInfo, selectedBatch?.spaceId) || undefined;
     setSdcCertsLoading(true);
     try {
       // GET /sdc/batches/{batch_id}/status's certificate_ids is the backend's

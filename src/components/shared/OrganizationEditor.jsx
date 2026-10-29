@@ -1,11 +1,11 @@
 import { LoadingSkeleton } from '@/components/shared/LoadingSkeleton';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { RefreshCw, AlertTriangle } from 'lucide-react';
 import { Input } from '@/components/ui/Input';
 import { DhiwaysDetailsEditor } from '@/components/shared/DhiwaysDetailsEditor';
 import { OrgSchemaConfigsPanel } from '@/components/shared/OrgSchemaConfigsPanel';
 import { SERVICE_TYPE_OPTIONS } from '@/data/serviceTypeOptions';
-import { normalizeDhiwayDetails } from '@/utils/dhiway';
+import { normalizeDhiwayDetails, mergeSchemaConfigSpaces } from '@/utils/dhiway';
 import { adminAPI, getApiError } from '@/services/api';
 import toast from 'react-hot-toast';
 const USE_CASE_OPTIONS = [
@@ -52,6 +52,32 @@ export const OrganizationEditor = ({ onClose, orgId, onSuccess }) => {
         use_cases: org.use_cases || {},
         dhiways_details: normalizeDhiwayDetails(org.dhiways_details || []),
       });
+    }
+  }, [org]);
+
+  // Keep Dhiway Spaces in step with Schema Configurations: any active config's space/schema that
+  // isn't in the list yet is saved to the organization right away and added to this form, so a
+  // later "Save Changes" (which sends the form's list) keeps it instead of overwriting it.
+  const savedDhiwayRef = useRef(null);
+  const syncingRef = useRef(false);
+  useEffect(() => { savedDhiwayRef.current = org ? normalizeDhiwayDetails(org.dhiways_details || []) : null; }, [org]);
+
+  const syncSchemaSpaces = useCallback(async (configs) => {
+    if (!org || syncingRef.current) return;
+    // Always start from what the server has saved — never from an empty list, which would wipe rows.
+    const saved = savedDhiwayRef.current ?? normalizeDhiwayDetails(org.dhiways_details || []);
+    const { rows, changed } = mergeSchemaConfigSpaces(saved, configs);
+    if (!changed) return;
+    syncingRef.current = true;
+    try {
+      await adminAPI.updateOrganization(org.id, { dhiways_details: rows });
+      savedDhiwayRef.current = rows;
+      setForm((f) => ({ ...f, dhiways_details: mergeSchemaConfigSpaces(f.dhiways_details, configs).rows }));
+      toast.success('Dhiway Spaces updated from Schema Configurations');
+    } catch (err) {
+      toast.error(getApiError(err, 'Could not add the schema configuration’s space to Dhiway Spaces'));
+    } finally {
+      syncingRef.current = false;
     }
   }, [org]);
 
@@ -184,6 +210,9 @@ export const OrganizationEditor = ({ onClose, orgId, onSuccess }) => {
 
           <div className="min-w-0 md:col-span-2">
             <label className="block text-sm font-medium text-brand-dark font-inter mb-1.5">Dhiway Spaces</label>
+            <p className="mb-2 text-[11px] text-gray-500 font-inter">
+              Spaces from Schema Configurations below are added here automatically.
+            </p>
             <div className="[&>div>div]:flex-wrap [&_input]:min-w-0 [&_input]:basis-40">
             <DhiwaysDetailsEditor
               value={form.dhiways_details}
@@ -219,7 +248,7 @@ export const OrganizationEditor = ({ onClose, orgId, onSuccess }) => {
           "Save Changes" submit. See OrgSchemaConfigsPanel. */}
       {org && !loading && !loadError && (
         <div className="mt-6 border-t border-gray-100 pt-5">
-          <OrgSchemaConfigsPanel orgId={org.id} isSuperAdminViewer />
+          <OrgSchemaConfigsPanel orgId={org.id} isSuperAdminViewer onConfigsChange={syncSchemaSpaces} />
         </div>
       )}
 

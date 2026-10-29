@@ -4,6 +4,7 @@ import { isConsentPage } from '@/utils/consent';
 import { createConsentGuard } from './consentGuard.js';
 import { automaticRecordId, canRetryAutomatic } from '@/utils/automaticVerification';
 import { validateOcrAssignments } from '@/utils/ocrAssignments';
+import { withSampleRecord } from '@/utils/schemaConfig';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
 const VERIFICATION_BASE_URL = import.meta.env.VITE_VERIFICATION_API_URL || API_BASE_URL;
@@ -66,6 +67,18 @@ const clearAuthStorage = () => {
 
 const getStoredToken = () =>
   localStorage.getItem('access_token') || localStorage.getItem('trumarkz_access_token');
+
+// [body, config] for a schema-config save. With a pasted sample record the body is pre-serialised
+// so the record reaches the server byte-for-byte; axios passes string bodies through unchanged.
+// local_fields survives cleanObject even when empty: an explicit [] means "no fields" to the
+// server, while dropping the key would mean "keep the previous version's fields".
+const schemaConfigBody = (payload, sampleRecordText) => {
+  const cleaned = cleanObject(payload);
+  if (Array.isArray(payload.local_fields)) cleaned.local_fields = payload.local_fields;
+  return sampleRecordText
+    ? [withSampleRecord(JSON.stringify(cleaned), sampleRecordText), { headers: { 'Content-Type': 'application/json' } }]
+    : [cleaned];
+};
 
 const cleanObject = (input = {}) =>
   Object.fromEntries(
@@ -366,13 +379,14 @@ export const authAPI = {
     }),
   // POST — registers version 1. payload: { space_type, schema_variant?,
   // schema_id, space_id, label, local_fields?, input_map?, output_map?,
-  // is_default? }. Returns { config, warnings }.
-  createSchemaConfig: (orgId, payload) =>
-    api.post(`/auth/organizations/${orgId}/schema-configs`, cleanObject(payload)),
+  // is_default? }, plus the optional pasted sample_record (sent verbatim, see
+  // withSampleRecord). Returns { config, warnings }.
+  createSchemaConfig: (orgId, payload, { sampleRecordText } = {}) =>
+    api.post(`/auth/organizations/${orgId}/schema-configs`, ...schemaConfigBody(payload, sampleRecordText)),
   // POST .../versions — full-replace edit; always creates the next version,
   // never patches in place. Same payload shape as create.
-  createSchemaConfigVersion: (orgId, configId, payload) =>
-    api.post(`/auth/organizations/${orgId}/schema-configs/${configId}/versions`, cleanObject(payload)),
+  createSchemaConfigVersion: (orgId, configId, payload, { sampleRecordText } = {}) =>
+    api.post(`/auth/organizations/${orgId}/schema-configs/${configId}/versions`, ...schemaConfigBody(payload, sampleRecordText)),
   // POST .../set-default — no body; config_id is the path param.
   setSchemaConfigDefault: (orgId, configId) =>
     api.post(`/auth/organizations/${orgId}/schema-configs/${configId}/set-default`),
@@ -644,7 +658,9 @@ export const verificationAPI = {
     });
   },
 
-  generateHumanTemplate: (headers, verificationTypes = []) => {
+  // schemaName: the batch's schema configuration label — the server then appends that schema's own
+  // fields as extra columns (never replacing or reordering these headers).
+  generateHumanTemplate: (headers, verificationTypes = [], schemaName) => {
     const formData = new FormData();
     appendFormValue(formData, 'headers', Array.isArray(headers) ? headers.join(',') : headers);
     appendFormValue(
@@ -652,6 +668,7 @@ export const verificationAPI = {
       'verification_types',
       Array.isArray(verificationTypes) ? verificationTypes.join(',') : verificationTypes
     );
+    appendFormValue(formData, 'schema_name', schemaName);
 
     return verificationApi.post('/verification/generate-human-template', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
@@ -659,9 +676,10 @@ export const verificationAPI = {
     });
   },
 
-  generateProductTemplate: (headers) => {
+  generateProductTemplate: (headers, schemaName) => {
     const formData = new FormData();
     appendFormValue(formData, 'headers', Array.isArray(headers) ? headers.join(',') : headers);
+    appendFormValue(formData, 'schema_name', schemaName);
 
     return verificationApi.post('/verification/products/template', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
@@ -1301,14 +1319,26 @@ export const tokenHelpers = {
   get: getStoredToken,
 };
 
+// Validation responses carry the specifics in an `errors` list beside a generic `message`
+// (e.g. {"message": "Invalid schema configuration", "errors": [...]}). Showing only the message
+// hides which field was wrong, so the list is appended whenever the server sends one.
+const appendErrors = (message, errors) => {
+  const items = (Array.isArray(errors) ? errors : [])
+    .map((e) => (typeof e === 'string' ? e : e?.msg || e?.message || ''))
+    .filter(Boolean);
+  if (!items.length) return message;
+  return message ? `${message}: ${items.join('; ')}` : items.join('; ');
+};
+
 export const getApiError = (err, fallback = 'Something went wrong. Please try again.') => {
-  const detail = err?.response?.data?.detail;
-  if (typeof detail === 'string') return detail;
+  const data = err?.response?.data;
+  const detail = data?.detail;
+  if (typeof detail === 'string') return appendErrors(detail, data?.errors);
   if (Array.isArray(detail)) {
     return detail.map((item) => item?.msg || item?.message).filter(Boolean).join('. ') || fallback;
   }
-  if (detail && typeof detail === 'object') return detail.message || detail.error || fallback;
-  return err?.response?.data?.message || fallback;
+  if (detail && typeof detail === 'object') return appendErrors(detail.message || detail.error || '', detail.errors) || fallback;
+  return appendErrors(data?.message || '', data?.errors) || fallback;
 };
 
 export const triggerBlobDownload = (blob, fileName) => {

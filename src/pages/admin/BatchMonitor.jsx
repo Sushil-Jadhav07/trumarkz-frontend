@@ -16,7 +16,7 @@ import { CustomSelect } from '@/components/ui/CustomSelect';
 import { verificationAPI, verifiersAPI, sdcAPI, adminAPI, getApiError, triggerBlobDownload } from '@/services/api';
 import { GenerateSDCModal } from '@/pages/admin/SDCVerification';
 import { TablePagination } from '@/components/shared/TablePagination';
-import { normalizeDhiwayDetails, resolveDhiwaySpaceId } from '@/utils/dhiway';
+import { normalizeDhiwayDetails, resolveDhiwaySpaceId, batchSdcSpaceId } from '@/utils/dhiway';
 import { pendingManualUsers } from '@/utils/pendingManualVerifications';
 import { consentAllowsProcessing } from '@/utils/consent';
 import { batchMatchesDate, batchDateError, batchDatePresets } from '@/utils/batchFilters';
@@ -266,6 +266,9 @@ const normaliseApiBatch = (b) => {
     batchType: b.batch_type || null,
     latestCreatedAt: createdAt,
     sdcInfo: b.verification_progress?.sdc || null,
+    // The list endpoint carries no verification_progress; sdc_space_id is the server's own answer
+    // for where this batch's certificates live (recorded space, else frozen schema space).
+    sdcSpaceId: b.sdc_space_id || null,
     // Real, persisted sharing state from the backend (Batch.shared_with_org)
     // — the actual security gate for certificate visibility, not a local
     // notify-action. See handleSendToOrganization / shareWithOrganization.
@@ -2421,7 +2424,7 @@ export const useBatchList = () => {
       ...batch,
       name: edited.name || batch.name,
       orgName: edited.orgName || batch.orgName,
-      spaceId: batch.orgId ? getOrgSpaceId(batch.orgId, batch.batchType) || null : null,
+      spaceId: batch.sdcSpaceId || batchSdcSpaceId(batch.sdcInfo, batch.orgId ? getOrgSpaceId(batch.orgId, batch.batchType) : '') || null,
       createdAt: batch.latestCreatedAt || null,
       status,
       statusMeta: batchStatusMeta[status] || batchStatusMeta.pending,
@@ -2505,7 +2508,7 @@ export const WarrantyControlCenter = () => {
           batchId={batch.id}
           batchName={batch.name}
           orgId={batch.orgId || null}
-          spaceId={batch.orgId ? getOrgSpaceId(batch.orgId, batch.batchType || 'warranty') || null : null}
+          spaceId={batch.sdcSpaceId || batchSdcSpaceId(batch.sdcInfo, batch.orgId ? getOrgSpaceId(batch.orgId, batch.batchType || 'warranty') : '') || null}
           onClose={() => navigate('/admin/batch-monitor')}
         />
       </div>

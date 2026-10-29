@@ -21,6 +21,7 @@ import { OcrAssignmentGroups, OcrAppliedAssignments, OcrNationalitySelect } from
 import { CustomSelect } from '@/components/ui/CustomSelect';
 import { OCR_GENDERS, buildOcrAssignments, applyOcrAssignmentsToPreview } from '@/utils/ocrAssignments';
 import { humanEmailRequired, humanEmailError, withHumanEmailField, validateHumanExcelEmails } from '@/utils/humanEmail';
+import { missingRequiredColumns, schemaSourceColumns } from '@/utils/schemaConfig';
 
 // photo is appended automatically by the API — never pass it in headers.
 // required: true matches PATCH /verification/batch-users/{user_id}'s own
@@ -888,6 +889,7 @@ export const DownloadTemplate = () => {
   // (or the original fixed layout, if nothing is configured)" — the exact
   // same behavior as before this feature existed.
   const [schemaName, setSchemaName] = useState('');
+  const [schemaConfig, setSchemaConfig] = useState(null);
 
   const baseFields = useMemo(() => BASE_FIELDS.map((field) => field.key === 'email'
     ? { ...field, required: humanEmailRequired(selectedPermission) }
@@ -1037,7 +1039,7 @@ export const DownloadTemplate = () => {
   const handleDownload = async () => {
     setDownloading(true);
     try {
-      const { data } = await verificationAPI.generateHumanTemplate(templateHeaders, selectedVerificationTypes);
+      const { data } = await verificationAPI.generateHumanTemplate(templateHeaders, selectedVerificationTypes, schemaName);
       triggerBlobDownload(data, 'trumarkz-human-template.xlsx');
       toast.success('Template downloaded');
     } catch (err) {
@@ -1070,16 +1072,22 @@ export const DownloadTemplate = () => {
       // Some headers carry a format hint from the generated template (e.g.
       // "DOB (YYYY-MM-DD)" sanitizes to "dob_yyyy_mm_dd") — match by prefix,
       // not exact equality, so those still count as present.
-      const uploadedHeaders = (Array.isArray(rows[0]) ? rows[0] : []).map(sanitizeKey).filter(Boolean);
+      // With a schema, the org's own mapped/aliased column names count too (the server maps them
+      // before its own required-column check). Anything still unrecognised is left to the server
+      // rather than blocked here — it validates against the schema with its exact message.
       const requiredHeaders = baseFields.filter((f) => f.required).map((f) => f.key);
-      const missingHeaders = requiredHeaders.filter(
-        (h) => !uploadedHeaders.some((u) => u === h || u.startsWith(`${h}_`))
-      );
+      const missingHeaders = missingRequiredColumns(rows[0], requiredHeaders, schemaConfig, { prefixOk: true });
       if (missingHeaders.length > 0) {
-        toast.error(`Missing required columns: ${missingHeaders.join(', ')}`);
-        return;
+        if (!schemaConfig) {
+          toast.error(`Missing required columns: ${missingHeaders.join(', ')}`);
+          return;
+        }
+        toast(`Couldn't find a column for ${missingHeaders.join(', ')} — the server will check it against the "${schemaConfig.label}" schema when the batch is created.`, { icon: 'ℹ️', duration: 7000 });
       }
-      validateHumanExcelEmails(rows, selectedPermission);
+      validateHumanExcelEmails(rows, selectedPermission, {
+        emailColumns: schemaSourceColumns(schemaConfig).email || [],
+        schemaApplies: !!schemaConfig,
+      });
 
       const recordCount = rows
         .slice(1)
@@ -1179,7 +1187,7 @@ export const DownloadTemplate = () => {
                   Configurations) — otherwise this renders nothing and the
                   batch uses the default layout, exactly as before. */}
               <div className="mt-3 max-w-xs">
-                <SchemaConfigSelect orgId={user?.id} spaceType="human" value={schemaName} onChange={setSchemaName} />
+                <SchemaConfigSelect orgId={user?.id} spaceType="human" value={schemaName} onChange={setSchemaName} onConfigChange={setSchemaConfig} />
               </div>
             </div>
 

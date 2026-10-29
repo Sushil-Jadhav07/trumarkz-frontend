@@ -8,6 +8,7 @@ import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
 import { Badge } from '@/components/ui/Badge';
 import { sdcAPI, getApiError } from '@/services/api';
+import { useAuth } from '@/context/AuthContext';
 import { Search, FileText, ArrowRight, RefreshCw } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -27,13 +28,18 @@ const FILTERS = [
 
 export const ReportsList = () => {
   const navigate = useNavigate();
+  const { role } = useAuth();
+  // GET /sdc/records is super-admin only (confirmed by the backend): an organization account
+  // gets a 403 there, so organizations open their certificates from each batch instead.
+  const isOrganization = role === 'organization';
   const [filter, setFilter] = useState('all');
   const [search, setSearch] = useState('');
   const [records, setRecords] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!isOrganization);
 
   // anchorTime is Dhiway's source of truth for issued-vs-draft: set = issued, null = still a draft.
   const fetchRecords = useCallback(async (silent = false) => {
+    if (isOrganization) return;
     if (!silent) setLoading(true);
     try {
       const { data } = await sdcAPI.getRecords({ active: 1, pageSize: 100 });
@@ -43,9 +49,33 @@ export const ReportsList = () => {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [isOrganization]);
 
   useEffect(() => { fetchRecords(); }, [fetchRecords]);
+
+  if (isOrganization) {
+    return (
+      <AuthLayout title="Certificates">
+        <div className="w-full mx-auto lg:max-w-none">
+          <PageHeader title="Certificates" subtitle="View and download your organization's signed digital certificates" />
+          <Card className="p-10 text-center">
+            <FileText size={32} className="mx-auto mb-3 text-gray-200" />
+            <p className="font-inter text-sm text-brand-dark">Your certificates are listed inside each batch.</p>
+            <p className="mt-1 font-inter text-xs text-gray-500">
+              Open a batch to view, download or share the certificates issued for it.
+            </p>
+            <button
+              type="button"
+              onClick={() => navigate('/org/batch-status')}
+              className="mt-5 inline-flex items-center gap-1.5 rounded-xl bg-brand-blue px-4 py-2.5 font-inter text-sm font-medium text-white hover:bg-blue-700"
+            >
+              Go to Batches <ArrowRight size={14} />
+            </button>
+          </Card>
+        </div>
+      </AuthLayout>
+    );
+  }
 
   const filtered = records.filter((r) => {
     const issued = !!r.anchorTime && !r.revoked;

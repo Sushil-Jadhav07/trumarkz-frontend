@@ -10,8 +10,9 @@ import {
   SCHEMA_SPACE_TYPE_OPTIONS, SCHEMA_SEMANTIC_FIELDS,
   emptySchemaConfigForm, configToForm,
   rowsToMap, HUMAN_SCHEMA_VARIANT, schemaConfigJsonToForm,
-  schemaConfigBlockingErrors, schemaConfigMappingWarnings, RECOMMENDED_INPUT_FIELDS, duplicateLabelError,
+  duplicateLabelError,
   classifyJsonBox, exampleRecordJson, buildSchemaConfigPayload, setInputMapping,
+  autoMatchedFields, formatServerPath, sampleToSend, mappingRowKeys, mappingSources,
 } from '@/utils/schemaConfig';
 
 // Dynamic organization-specific schema registry (org_schema_configs) — see
@@ -23,11 +24,14 @@ import {
 // enforce itself (the backend enforces it too, this is just so a disabled
 // action isn't a surprise 403): an organization viewer cannot edit/version/
 // set-default/deactivate a config whose created_by_role is "super_admin".
-export const OrgSchemaConfigsPanel = ({ orgId, isSuperAdminViewer = false }) => {
+// `onConfigsChange(configs)` fires after every (re)load, so the host page can bring the configs'
+// Dhiway space/schema into its own Dhiway Spaces list.
+export const OrgSchemaConfigsPanel = ({ orgId, isSuperAdminViewer = false, onConfigsChange }) => {
   const [configs, setConfigs] = useState([]);
   const [loading, setLoading] = useState(false);
   const [showInactive, setShowInactive] = useState(false);
   const [collapsed, setCollapsed] = useState({});
+  const [expandedFields, setExpandedFields] = useState({}); // config id -> showing its server field list
 
   const [formOpen, setFormOpen] = useState(false);
   const [editingConfig, setEditingConfig] = useState(null); // null = create new; else "new version of this"
@@ -47,7 +51,11 @@ export const OrgSchemaConfigsPanel = ({ orgId, isSuperAdminViewer = false }) => 
     if (!orgId) return;
     setLoading(true);
     adminAPI.getSchemaConfigs(orgId, { activeOnly: !showInactive })
-      .then(({ data }) => setConfigs(Array.isArray(data?.configs) ? data.configs : []))
+      .then(({ data }) => {
+        const list = Array.isArray(data?.configs) ? data.configs : [];
+        setConfigs(list);
+        onConfigsChange?.(list.filter((c) => c.is_active !== false));
+      })
       .catch((err) => toast.error(getApiError(err, 'Failed to load schema configurations')))
       .finally(() => setLoading(false));
   };
@@ -124,8 +132,8 @@ export const OrgSchemaConfigsPanel = ({ orgId, isSuperAdminViewer = false }) => 
     }
     setForm(result.form);
     setFormErrors([]);
-    resetJson('');
-    toast.success('Configuration JSON applied');
+    resetJson(result.sampleText);
+    toast.success(result.sampleText ? 'Configuration applied — its sample record is in the box' : 'Configuration JSON applied');
   };
 
   const insertExample = () => {
@@ -140,19 +148,25 @@ export const OrgSchemaConfigsPanel = ({ orgId, isSuperAdminViewer = false }) => 
   const labelClash = duplicateLabelError(form.label, form.space_type, configs, editingConfig?.id);
   const labelError = labelServerError || labelClash;
   const currentInputs = rowsToMap(form.input_map);
-  const semanticFields = SCHEMA_SEMANTIC_FIELDS[form.space_type] || [];
-  const recommended = RECOMMENDED_INPUT_FIELDS[form.space_type] || [];
-  const blockingErrors = schemaConfigBlockingErrors(form);
-  const mappingWarnings = schemaConfigMappingWarnings(form);
+  const mappingRows = mappingRowKeys(form.space_type, form.input_map);
+  const knownFields = SCHEMA_SEMANTIC_FIELDS[form.space_type] || [];
+  const autoMatched = autoMatchedFields(form.space_type, discovery);
+  const willSendSample = sampleToSend(box);
   const keptLocalFields = form.local_fields.filter((f) => f.name?.trim()).length;
   const keptOutputs = Object.keys(rowsToMap(form.output_map)).length;
+  const sourceKeys = mappingSources(discovery, form.local_fields);
 
   const mappingOptions = (semantic) => {
     const current = currentInputs[semantic];
-    const sourceKeys = discovery ? discovery.mappableKeys : [];
-    const options = [{ value: '', label: 'Not mapped' }, ...sourceKeys.map((k) => ({ value: k, label: k }))];
+    // The server maps a top-level sample key with exactly this name automatically.
+    const empty = autoMatched.includes(semantic) ? `Matched automatically ("${semantic}")` : 'Not mapped';
+    const options = [{ value: '', label: empty }, ...sourceKeys.map((k) => ({ value: k, label: k }))];
     if (current && !sourceKeys.includes(current)) {
       options.push({ value: current, label: discovery ? `${current} (current — not in this sample)` : `${current} (current)` });
+    }
+    if (!knownFields.includes(semantic) && current) {
+      // A key the server or a pasted config set that isn't in the usual list — shown so it can be cleared.
+      options[0] = { value: '', label: 'Remove this mapping' };
     }
     return options;
   };
@@ -161,25 +175,26 @@ export const OrgSchemaConfigsPanel = ({ orgId, isSuperAdminViewer = false }) => 
     if (!warnings?.length) return;
     toast(
       <div className="space-y-1">
-        <p className="text-xs font-semibold text-brand-dark">Saved with {warnings.length === 1 ? 'a warning' : `${warnings.length} warnings`}</p>
+        <p className="text-xs font-semibold text-brand-dark">Saved. Optional suggestions from the server:</p>
         <ul className="list-disc space-y-0.5 pl-4 text-[11px] text-gray-600">
           {warnings.map((w, i) => <li key={i}>{w}</li>)}
         </ul>
       </div>,
-      { icon: '⚠️', duration: 8000 },
+      { icon: 'ℹ️', duration: 8000 },
     );
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
 
-    // Only genuinely invalid input stops the save. A sample record is never sent — the API has no
-    // field for it — so it can't block anything once it parses.
+    // Only genuinely invalid input stops the save. A valid sample record goes to the server as
+    // sample_record, which derives the fields from it; nothing in it is required.
     if (box.kind === 'invalid') {
       setJsonErrors([`${box.error} — fix it, or clear the box`]);
       return;
     }
     let current = form;
+    let sampleText = willSendSample ? jsonText : '';
     if (box.kind === 'config') {
       const result = schemaConfigJsonToForm(jsonText, form, { lockSpaceType: !!editingConfig });
       if (result.errors) {
@@ -188,41 +203,56 @@ export const OrgSchemaConfigsPanel = ({ orgId, isSuperAdminViewer = false }) => 
       }
       current = result.form;
       setForm(current);
-      resetJson('');
+      // A pasted request body's own sample_record is still sent, not dropped.
+      sampleText = sampleToSend(classifyJsonBox(result.sampleText)) ? result.sampleText : '';
+      resetJson(result.sampleText);
     }
 
+    // Required by the API contract itself (SchemaConfigUpsertRequest.required).
     if (!current.schema_id.trim() || !current.space_id.trim() || !current.label.trim()) {
       setFormErrors(['Schema ID, Space ID, and Label are all required']);
       return;
     }
+    // The server's documented duplicate-label rule; shown under the Label field already.
     if (duplicateLabelError(current.label, current.space_type, configs, editingConfig?.id)) {
       setFormErrors([]);
-      return; // already shown under the Label field
-    }
-    const blocking = schemaConfigBlockingErrors(current);
-    if (blocking.length) {
-      setFormErrors(blocking);
       return;
     }
 
-    const payload = buildSchemaConfigPayload(current);
+    const sendSample = !!sampleText;
+    const payload = buildSchemaConfigPayload(current, { withSampleRecord: sendSample });
+    const options = sendSample ? { sampleRecordText: sampleText } : {};
 
     setSubmitting(true);
     setFormErrors([]);
     try {
-      if (editingConfig) {
-        const { data } = await adminAPI.createSchemaConfigVersion(orgId, editingConfig.id, payload);
-        showWarnings(data?.warnings);
-        toast.success(`New version saved for "${payload.label}"`);
-      } else {
-        const { data } = await adminAPI.createSchemaConfig(orgId, payload);
-        showWarnings(data?.warnings);
-        toast.success(`"${payload.label}" registered`);
+      const { data } = editingConfig
+        ? await adminAPI.createSchemaConfigVersion(orgId, editingConfig.id, payload, options)
+        : await adminAPI.createSchemaConfig(orgId, payload, options);
+      // The server's own field list is what counts — report that, not the local preview.
+      const serverFields = data?.config?.local_fields?.length ?? 0;
+      showWarnings(data?.warnings);
+      // Present only when the server could read the Dhiway schema itself (null otherwise, today always).
+      if (Array.isArray(data?.dhiway_schema_properties) && data.dhiway_schema_properties.length) {
+        toast(`Dhiway schema properties: ${data.dhiway_schema_properties.join(', ')}`, { icon: 'ℹ️', duration: 8000 });
       }
+      toast.success(
+        `${editingConfig ? `New version saved for "${payload.label}"` : `"${payload.label}" registered`}`
+        + (sendSample ? ` — server discovered ${plural(serverFields, 'field')}` : ''),
+      );
+      if (data?.config?.id) setExpandedFields((s) => ({ ...s, [data.config.id]: sendSample }));
       setFormOpen(false);
       load();
     } catch (err) {
       const status = err?.response?.status;
+      if (status === 422) {
+        // FastAPI request validation: [{loc, msg}] — show each problem with where it is.
+        const detail = Array.isArray(err?.response?.data?.detail) ? err.response.data.detail : [];
+        setFormErrors(detail.length
+          ? detail.map((d) => `${(d.loc || []).filter((p) => p !== 'body').join('.') || 'request'}: ${d.msg}`)
+          : [getApiError(err, 'The server rejected this configuration')]);
+        return;
+      }
       if (status === 400) {
         const errors = err?.response?.data?.errors || [getApiError(err, 'Invalid schema configuration')];
         // Duplicate-label rejections belong on the Label field, verbatim; everything else stays in the list.
@@ -304,6 +334,21 @@ export const OrgSchemaConfigsPanel = ({ orgId, isSuperAdminViewer = false }) => 
                               schema_id: {config.schema_id} · space_id: {config.space_id}
                               {config.schema_variant ? ` · ${config.schema_variant}` : ''}
                             </p>
+                            <p className="mt-0.5 text-[11px] text-gray-500 font-inter">
+                              {plural((config.local_fields || []).length, 'field')} · {Object.keys(config.input_map || {}).length} input · {plural(Object.keys(config.output_map || {}).length, 'output mapping')}
+                              {((config.local_fields || []).length > 0 || Object.keys(config.input_map || {}).length > 0 || Object.keys(config.output_map || {}).length > 0) && (
+                                <>
+                                  {' · '}
+                                  <button
+                                    type="button"
+                                    onClick={() => setExpandedFields((s) => ({ ...s, [config.id]: !s[config.id] }))}
+                                    className="font-semibold text-brand-blue hover:underline"
+                                  >
+                                    {expandedFields[config.id] ? 'Hide details' : 'Show details'}
+                                  </button>
+                                </>
+                              )}
+                            </p>
                           </div>
                           <div className="flex shrink-0 items-center gap-1.5">
                             {config.is_active && !config.is_default && (
@@ -335,6 +380,50 @@ export const OrgSchemaConfigsPanel = ({ orgId, isSuperAdminViewer = false }) => 
                               </button>
                             )}
                           </div>
+                          {expandedFields[config.id] && (
+                            // Exactly what the server stored — names, paths, types and mappings as returned.
+                            <div className="grid w-full gap-2 md:grid-cols-3">
+                              <div className="rounded-lg border border-gray-100 bg-gray-50/50">
+                                <p className="border-b border-gray-100 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-gray-400">Fields</p>
+                                {(config.local_fields || []).length === 0
+                                  ? <p className="px-2.5 py-1.5 text-[11px] text-gray-400">None</p>
+                                  : config.local_fields.map((f, i) => (
+                                    <p key={`${f.name}-${i}`} className="flex flex-wrap gap-x-2 px-2.5 py-1 text-[11px] font-inter">
+                                      <span className="font-semibold text-brand-dark">{f.name}</span>
+                                      {formatServerPath(f.path) && formatServerPath(f.path) !== f.name && (
+                                        <span className="font-mono text-gray-500">{formatServerPath(f.path)}</span>
+                                      )}
+                                      <span className="text-gray-400">{f.type || 'string'}{f.nullable ? ' · nullable' : ''}{f.required ? ' · required' : ''}</span>
+                                      {Array.isArray(f.aliases) && f.aliases.length > 0 && <span className="text-gray-400">aliases: {f.aliases.join(', ')}</span>}
+                                    </p>
+                                  ))}
+                              </div>
+                              <div className="rounded-lg border border-gray-100 bg-gray-50/50">
+                                <p className="border-b border-gray-100 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-gray-400">Input mapping (your field → TruMarkZ)</p>
+                                {Object.keys(config.input_map || {}).length === 0
+                                  ? <p className="px-2.5 py-1.5 text-[11px] text-gray-400">None</p>
+                                  : Object.entries(config.input_map).map(([semantic, source]) => (
+                                    <p key={semantic} className="px-2.5 py-1 text-[11px] font-inter">
+                                      <span className="font-mono text-brand-dark">{source}</span>
+                                      <span className="text-gray-400"> → </span>
+                                      <span className="font-semibold text-brand-dark">{semantic}</span>
+                                    </p>
+                                  ))}
+                              </div>
+                              <div className="rounded-lg border border-gray-100 bg-gray-50/50">
+                                <p className="border-b border-gray-100 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-gray-400">Output mapping (TruMarkZ → Dhiway column)</p>
+                                {Object.keys(config.output_map || {}).length === 0
+                                  ? <p className="px-2.5 py-1.5 text-[11px] text-gray-400">None — the default {config.space_type} layout is used</p>
+                                  : Object.entries(config.output_map).map(([semantic, column]) => (
+                                    <p key={semantic} className="px-2.5 py-1 text-[11px] font-inter">
+                                      <span className="font-semibold text-brand-dark">{semantic}</span>
+                                      <span className="text-gray-400"> → </span>
+                                      <span className="font-mono text-brand-dark">{column}</span>
+                                    </p>
+                                  ))}
+                              </div>
+                            </div>
+                          )}
                         </div>
                       );
                     })
@@ -376,7 +465,10 @@ export const OrgSchemaConfigsPanel = ({ orgId, isSuperAdminViewer = false }) => 
               <label className="block text-xs font-medium text-brand-dark font-inter mb-1.5">Entity Type</label>
               <CustomSelect
                 value={form.space_type}
-                onChange={(v) => updateForm({ space_type: v, schema_variant: v === 'human' ? HUMAN_SCHEMA_VARIANT : '', input_map: [], output_map: [] })}
+                onChange={(v) => updateForm({
+                  // Fields and mappings belong to one entity type; never carry them across a switch.
+                  space_type: v, schema_variant: v === 'human' ? HUMAN_SCHEMA_VARIANT : '', local_fields: [], input_map: [], output_map: [],
+                })}
                 options={SCHEMA_SPACE_TYPE_OPTIONS}
                 disabled={!!editingConfig}
                 ariaLabel="Entity type"
@@ -415,8 +507,8 @@ export const OrgSchemaConfigsPanel = ({ orgId, isSuperAdminViewer = false }) => 
                   <Braces size={13} className="text-brand-blue" /> Sample record JSON
                 </label>
                 <p className="mt-0.5 text-[11px] text-gray-400 font-inter">
-                  Paste one record (or an array of records) exactly as your organization sends it — any field names, nesting
-                  or types. It is only read here to list its fields; it is not saved.
+                  Paste one record exactly as your organization sends it — any field names, nesting, arrays or types. It is
+                  sent as-is; the server discovers its fields and does not store the record itself.
                 </p>
               </div>
               <button
@@ -460,7 +552,9 @@ export const OrgSchemaConfigsPanel = ({ orgId, isSuperAdminViewer = false }) => 
               <div className="mt-2 rounded-lg border border-gray-100 bg-white">
                 <div className="flex items-center justify-between gap-2 border-b border-gray-100 px-2.5 py-1.5">
                   <p className="text-[11px] font-semibold text-brand-dark font-inter">
-                    {plural(discovery.fields.length, 'field')} found in {plural(discovery.records, 'record')}
+                    {discovery.fields.length
+                      ? <>Preview: {plural(discovery.fields.length, 'field')} found<span className="font-normal text-gray-400"> — the server works out the final field list when you save</span></>
+                      : <>This record is empty<span className="font-normal text-gray-400"> — it has no fields, so it won’t be sent</span></>}
                   </p>
                   {jsonText && (
                     <button type="button" onClick={() => resetJson('')} className="text-[11px] font-semibold text-gray-500 font-inter hover:text-brand-dark">
@@ -485,8 +579,8 @@ export const OrgSchemaConfigsPanel = ({ orgId, isSuperAdminViewer = false }) => 
                   ))}
                 </ul>
                 <p className="border-t border-gray-100 px-2.5 py-1.5 text-[11px] text-gray-400 font-inter">
-                  Only top-level fields holding a plain value can be mapped — the configuration API stores one source field
-                  name per mapping and has no nested-path format.
+                  Every path here, nested ones included, becomes a field on the server. Only a top-level field holding a plain
+                  value can be picked for an input mapping, because a mapping stores one source field name.
                 </p>
               </div>
             )}
@@ -496,14 +590,17 @@ export const OrgSchemaConfigsPanel = ({ orgId, isSuperAdminViewer = false }) => 
             <p className="text-xs font-medium text-brand-dark font-inter">Input mapping</p>
             <p className="mt-0.5 mb-2 text-[11px] text-gray-400 font-inter">
               Which of your fields feeds each {form.space_type} field at upload time.
-              {discovery ? ' Choose from the fields found in your sample.' : ' Paste a sample record above to choose from its fields.'}
+              {discovery
+                ? ' Choose from the fields found in your sample.'
+                : sourceKeys.length
+                  ? ' Choose from the fields saved on this configuration, or paste a sample record.'
+                  : ' Paste a sample record above to choose from its fields.'}
             </p>
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-              {semanticFields.map((semantic) => (
+              {mappingRows.map((semantic) => (
                 <div key={semantic} className="flex items-center gap-2">
                   <span className="w-[120px] shrink-0 truncate text-[11px] font-medium text-brand-dark font-inter" title={semantic}>
                     {semantic}
-                    {recommended.includes(semantic) && <span className="ml-1 text-amber-500" title="Recommended">•</span>}
                   </span>
                   <CustomSelect
                     value={currentInputs[semantic] || ''}
@@ -518,22 +615,15 @@ export const OrgSchemaConfigsPanel = ({ orgId, isSuperAdminViewer = false }) => 
               ))}
             </div>
 
-            {blockingErrors.length > 0 && (
-              <div className="mt-2 rounded-lg border border-red-100 bg-red-50 px-2.5 py-2">
-                {blockingErrors.map((e, i) => <p key={i} className="text-[11px] text-red-600 font-inter">{e}</p>)}
-              </div>
-            )}
-            {mappingWarnings.length > 0 && (
-              <div className="mt-2 rounded-lg border border-amber-100 bg-amber-50 px-2.5 py-2">
-                <p className="text-[11px] font-semibold text-amber-700 font-inter">You can still save — these are warnings, not errors:</p>
-                {mappingWarnings.map((w, i) => <p key={i} className="text-[11px] text-amber-700 font-inter">{w}</p>)}
-              </div>
-            )}
-
             <p className="mt-2 text-[11px] text-gray-500 font-inter">
-              Output mapping: {keptOutputs ? `${plural(keptOutputs, 'field')} kept` : 'none — records use the default Dhiway field names'}
-              {' · '}Local fields: {keptLocalFields ? `${keptLocalFields} kept` : 'none'}.
-              {' '}These are never guessed from a sample; set them by pasting a configuration JSON.
+              Fields:{' '}
+              {willSendSample
+                ? `discovered by the server from this sample when you save${keptLocalFields ? ` (replacing the current ${keptLocalFields})` : ''}`
+                : keptLocalFields
+                  ? `${keptLocalFields} kept from this configuration${discovery ? ' (the pasted record is empty, so it is not sent)' : ''}`
+                  : 'none yet — paste a sample record'}
+              {' · '}Output mapping: {keptOutputs ? `${plural(keptOutputs, 'field')} kept` : 'none — records use the default Dhiway field names'}.
+              {' '}Dhiway output names are never guessed; set them by pasting a configuration JSON.
             </p>
           </div>
 

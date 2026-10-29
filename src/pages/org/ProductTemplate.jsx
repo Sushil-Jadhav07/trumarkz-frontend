@@ -26,6 +26,7 @@ import {
   VERIFICATION_REQUIRED_HEADERS,
 } from '@/data/productVerificationFlow';
 import { verificationAPI, triggerBlobDownload, getApiError } from '@/services/api';
+import { missingRequiredColumns } from '@/utils/schemaConfig';
 
 // "+" is preserved (not stripped to "_") since it's canonical to backend
 // field names like third+party+qr1/third+party+qr2 — sanitizing it away
@@ -125,6 +126,7 @@ export const ProductTemplate = () => {
   } = useApp();
   const { user } = useAuth();
   const [schemaName, setSchemaName] = useState('');
+  const [schemaConfig, setSchemaConfig] = useState(null);
 
   // Warranty's fixed-field list is read straight from the backend's own
   // generated template (see the effect below) instead of trusting the
@@ -351,7 +353,7 @@ export const ProductTemplate = () => {
         const normalised = templateHeaders.map((h) =>
           h.trim().toLowerCase().replace(/\s+/g, '_')
         );
-        const { data } = await verificationAPI.generateProductTemplate(normalised);
+        const { data } = await verificationAPI.generateProductTemplate(normalised, schemaName);
         triggerBlobDownload(data, `${batchNameValue || 'product-template'}.xlsx`);
         toast.success('Template downloaded');
       }
@@ -380,7 +382,6 @@ export const ProductTemplate = () => {
       const workbook = XLSX.read(arrayBuffer, { type: 'array' });
       const worksheet = workbook.Sheets[workbook.SheetNames[0]];
       const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
-      const uploadedHeaders = (rows[0] || []).map((h) => sanitizeKey(h)).filter(Boolean);
 
       if (!isWarranty) {
         // product_name and sku_no are required for the normal Product flow —
@@ -392,10 +393,15 @@ export const ProductTemplate = () => {
         // populated exclusively by the backend's own qr_slot verifier-report
         // workflow, assigned automatically by request-creation order once
         // manual verifications are sent.
-        const missingHeaders = VERIFICATION_REQUIRED_HEADERS.filter((h) => !uploadedHeaders.includes(h));
+        // A schema's mapped/aliased column names count too; with a schema, anything still
+        // unrecognised is left to the server's own mapped check instead of being blocked here.
+        const missingHeaders = missingRequiredColumns(rows[0], VERIFICATION_REQUIRED_HEADERS, schemaConfig);
         if (missingHeaders.length > 0) {
-          toast.error(`Missing required columns: ${missingHeaders.join(', ')}`);
-          return;
+          if (!schemaConfig) {
+            toast.error(`Missing required columns: ${missingHeaders.join(', ')}`);
+            return;
+          }
+          toast(`Couldn't find a column for ${missingHeaders.join(', ')} — the server will check it against the "${schemaConfig.label}" schema when the batch is created.`, { icon: 'ℹ️', duration: 7000 });
         }
       }
 
@@ -491,7 +497,7 @@ export const ProductTemplate = () => {
                     schema configured for this entity type — otherwise
                     renders nothing and the batch uses the default layout. */}
                 <div className="mt-3 max-w-xs">
-                  <SchemaConfigSelect orgId={user?.id} spaceType={isWarranty ? 'warranty' : 'product'} value={schemaName} onChange={setSchemaName} />
+                  <SchemaConfigSelect orgId={user?.id} spaceType={isWarranty ? 'warranty' : 'product'} value={schemaName} onChange={setSchemaName} onConfigChange={setSchemaConfig} />
                 </div>
               </div>
             </div>

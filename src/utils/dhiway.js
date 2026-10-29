@@ -70,3 +70,49 @@ export const resolveDhiwayDetailForType = (rows = [], requestedType = 'human') =
 
 export const resolveDhiwaySpaceId = (rows = [], requestedType = 'human') =>
   resolveDhiwayDetailForType(rows, requestedType)?.space_id || '';
+
+// Brings every active Schema Configuration's space/schema into the org's Dhiway Spaces list
+// (dhiways_details), so both lists agree. Rows already present — same space_id, schema_id and
+// space_type — are left alone, so nothing is ever duplicated. A config marked default becomes the
+// default row for its own space_type; a newly added row is otherwise default only if its type had
+// no row yet. Returns the updated rows and whether anything changed.
+export const mergeSchemaConfigSpaces = (rows = [], configs = []) => {
+  const next = normalizeDhiwayDetails(rows).map((r) => ({ ...r }));
+  let changed = false;
+  const sameRow = (r, c) =>
+    r.space_id === c.space_id && r.schema_id === c.schema_id && normalizeDhiwaySpaceType(r.space_type) === c.space_type;
+
+  (Array.isArray(configs) ? configs : [])
+    .filter((c) => c && c.is_active !== false && String(c.space_id || '').trim() && String(c.schema_id || '').trim())
+    .map((c) => ({
+      space_id: String(c.space_id).trim(),
+      schema_id: String(c.schema_id).trim(),
+      space_type: normalizeDhiwaySpaceType(c.space_type),
+      is_default: !!c.is_default,
+    }))
+    .filter((c) => c.space_type)
+    .forEach((c) => {
+      const ofType = next.filter((r) => normalizeDhiwaySpaceType(r.space_type) === c.space_type);
+      let row = next.find((r) => sameRow(r, c));
+      if (!row) {
+        row = { space_id: c.space_id, schema_id: c.schema_id, space_type: c.space_type, default: ofType.length === 0 };
+        next.push(row);
+        changed = true;
+      }
+      if (c.is_default && !row.default) {
+        ofType.forEach((r) => { r.default = false; });
+        row.default = true;
+        changed = true;
+      }
+    });
+
+  return { rows: next, changed };
+};
+
+// The Dhiway space a batch's certificates actually live in, from the batch's own
+// verification_progress.sdc: the space recorded when SDCs were generated, else the space of the
+// schema configuration frozen onto the batch at creation (sdc.resolved_template), and only then
+// `fallback` — the org's legacy Dhiway Spaces list. An org set up only through Schema
+// Configurations has no legacy row, so falling back first would search the wrong space.
+export const batchSdcSpaceId = (sdcInfo, fallback = '') =>
+  String(sdcInfo?.space_id || sdcInfo?.resolved_template?.space_id || fallback || '').trim();

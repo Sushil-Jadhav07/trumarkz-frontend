@@ -42,3 +42,12 @@ test('OCR submission fails before any write for a missing private email; Open pr
   draft.records[0].payload.email = 'user@example.test';
   await submitOcrDraft(request('private')); assert.equal(uploads, 2); assert.equal(edits, 2);
 });
+
+test('a schema\'s mapped email column is recognised; with a schema an unknown column is left to the server', async () => {
+  const { validateHumanExcelEmails } = await import('./humanEmail.js');
+  const rows = [['Employee Name', 'Work Email'], ['A', 'bad-email']];
+  assert.throws(() => validateHumanExcelEmails(rows, 'private'), /Email column is required/);
+  assert.throws(() => validateHumanExcelEmails(rows, 'private', { emailColumns: ['work_email'], schemaApplies: true }), /valid email in Excel row 2/);
+  assert.doesNotThrow(() => validateHumanExcelEmails([['Employee Name'], ['A']], 'private', { schemaApplies: true }));
+  assert.doesNotThrow(() => validateHumanExcelEmails([['Name', 'Work Email'], ['A', 'a@x.in']], 'private', { emailColumns: ['work_email'], schemaApplies: true }));
+});

@@ -2,14 +2,15 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   emptySchemaConfigForm, schemaConfigJsonToForm, duplicateLabelError, HUMAN_SCHEMA_VARIANT,
-  schemaConfigBlockingErrors, schemaConfigMappingWarnings, classifyJsonBox, exampleRecordJson,
+  classifyJsonBox, exampleRecordJson, sampleToSend, mappingRowKeys, mappingSources,
   buildSchemaConfigPayload, configToForm, setInputMapping, rowsToMap,
+  autoMatchedFields, withSampleRecord, formatServerPath,
 } from './schemaConfig.js';
 
 // SchemaConfigUpsertRequest, as published by the live API's /openapi.json.
-const UPSERT_FIELDS = ['space_type', 'schema_variant', 'schema_id', 'space_id', 'label', 'local_fields', 'input_map', 'output_map', 'is_default'];
+const UPSERT_FIELDS = ['space_type', 'schema_variant', 'schema_id', 'space_id', 'label', 'local_fields', 'input_map', 'output_map', 'is_default', 'sample_record'];
 const UPSERT_REQUIRED = ['space_type', 'schema_id', 'space_id', 'label'];
-const LOCAL_FIELD_KEYS = ['name', 'type', 'required', 'description', 'aliases'];
+const LOCAL_FIELD_KEYS = ['name', 'type', 'required', 'description', 'aliases', 'path', 'nullable'];
 
 const assertMatchesUpsertContract = (payload) => {
   for (const key of Object.keys(payload)) assert.ok(UPSERT_FIELDS.includes(key), `"${key}" is not in SchemaConfigUpsertRequest`);
@@ -19,8 +20,9 @@ const assertMatchesUpsertContract = (payload) => {
     assert.equal(Object.getPrototypeOf(map), Object.prototype);
     for (const v of Object.values(map)) assert.equal(typeof v, 'string');
   }
-  assert.ok(Array.isArray(payload.local_fields));
-  for (const f of payload.local_fields) {
+  // local_fields is absent when a sample record supplies the fields; otherwise always an array.
+  if ('local_fields' in payload) assert.ok(Array.isArray(payload.local_fields));
+  for (const f of payload.local_fields || []) {
     for (const key of Object.keys(f)) assert.ok(LOCAL_FIELD_KEYS.includes(key), key);
     assert.equal(typeof f.name, 'string');
   }
@@ -28,19 +30,47 @@ const assertMatchesUpsertContract = (payload) => {
 
 const human = (extra = {}) => ({ ...emptySchemaConfigForm('human'), label: 'L', schema_id: 's', space_id: 'p', ...extra });
 
-test('the old "input_map is required" error is gone: an empty config is valid and only warns', () => {
-  const form = human();
-  assert.deepEqual(schemaConfigBlockingErrors(form), []);
-  assert.equal(schemaConfigMappingWarnings(form).length, 3);
-  assert.ok(schemaConfigMappingWarnings(form).every((w) => !/required to register/.test(w)));
-  assert.deepEqual(schemaConfigMappingWarnings(emptySchemaConfigForm('product')), []);
-  assertMatchesUpsertContract(buildSchemaConfigPayload(form));
+test('no field is required: a config with no mappings at all builds a valid request', () => {
+  for (const type of ['human', 'product', 'warranty']) {
+    const form = { ...emptySchemaConfigForm(type), label: 'L', schema_id: 's', space_id: 'p' };
+    assertMatchesUpsertContract(buildSchemaConfigPayload(form));
+  }
 });
 
-test('only what the API rejects with a 400 blocks: an input_map key outside the semantic fields', () => {
+test('the frontend no longer rejects input_map keys itself — they are sent and the server decides', () => {
   const form = human({ input_map: [{ key: 'full_name', value: 'Emp Name' }, { key: 'salary', value: 'CTC' }] });
-  assert.match(schemaConfigBlockingErrors(form)[0], /"salary".*accepts only/);
-  assert.equal(schemaConfigMappingWarnings(form).length, 2, 'warnings stay separate from the blocking error');
+  assert.deepEqual(buildSchemaConfigPayload(form).input_map, { full_name: 'Emp Name', salary: 'CTC' });
+  assert.deepEqual(mappingRowKeys('human', form.input_map).slice(-1), ['salary'], 'and it stays visible in the grid');
+});
+
+test('an empty {} record is not sent, so an edit keeps its existing fields', () => {
+  assert.equal(sampleToSend(classifyJsonBox('{}')), false);
+  assert.equal(sampleToSend(classifyJsonBox('{"a": 1}')), true);
+  assert.equal(sampleToSend(classifyJsonBox('{"a": {}}')), true, 'a key holding an empty object is still a field');
+  assert.equal(sampleToSend(classifyJsonBox('')), false);
+  const existing = [{ name: 'email', type: 'string', required: false, aliasesText: '', path: ['email'], nullable: false }];
+  const payload = buildSchemaConfigPayload(human({ local_fields: existing }), { withSampleRecord: sampleToSend(classifyJsonBox('{}')) });
+  assert.equal(payload.local_fields.length, 1);
+});
+
+test('a pasted request body is configuration, and its sample_record goes back into the box', () => {
+  const body = JSON.stringify({ space_type: 'human', label: 'From body', schema_id: 's', space_id: 'p', sample_record: { name: 'A', contact: { email: 'x' } } });
+  assert.equal(classifyJsonBox(body).kind, 'config', 'not mistaken for a record with fields "space_type", "label", …');
+  const { form, sampleText } = schemaConfigJsonToForm(body, emptySchemaConfigForm('human'));
+  assert.equal(form.label, 'From body');
+  assert.deepEqual(JSON.parse(sampleText), { name: 'A', contact: { email: 'x' } });
+  assert.match(schemaConfigJsonToForm('{"label": "x", "sample_record": [1]}', emptySchemaConfigForm()).errors[0], /must be a JSON object/);
+});
+
+test('mapping sources: the sample when there is one, otherwise the server-saved top-level fields as returned', () => {
+  const saved = [
+    { name: 'Emp Name', path: ['Emp Name'] },
+    { name: 'contact.email', path: ['contact', 'email'] },
+    { name: 'legacy_field' },
+    { name: 'Emp Name', path: ['Emp Name'] },
+  ];
+  assert.deepEqual(mappingSources(null, saved), ['Emp Name', 'legacy_field']);
+  assert.deepEqual(mappingSources(classifyJsonBox('{"x": 1, "y": {"z": 2}}').discovery, saved), ['x']);
 });
 
 test('the box tells a sample record from a configuration JSON', () => {
@@ -130,9 +160,62 @@ test('duplicate active labels are caught case-insensitively, per space_type, but
   assert.equal(duplicateLabelError('Products', 'human', configs), '');
 });
 
-test('bad local field types in a pasted configuration are reported', () => {
-  const bad = schemaConfigJsonToForm('{"local_fields": [{"name": "x", "type": "text"}, {"type": "string"}]}', emptySchemaConfigForm());
+test('a pasted configuration needs local field names, but types are left to the server', () => {
+  const ok = schemaConfigJsonToForm('{"local_fields": [{"name": "x", "type": "object"}, {"name": "y", "type": "array"}]}', emptySchemaConfigForm());
+  assert.equal(ok.errors, undefined, 'server-generated types such as object/array are accepted');
+  const bad = schemaConfigJsonToForm('{"local_fields": [{"type": "string"}, {"name": "z", "type": 5}]}', emptySchemaConfigForm());
   assert.equal(bad.errors.length, 2);
+});
+
+test('the exact example from the backend registers as Human without full_name or dob', () => {
+  const text = '{\n  "name": "afafa",\n  "email": "asfasfaf",\n  "phone": "afafafa",\n  "created_at": "Oct 29, 2026"\n}';
+  const box = classifyJsonBox(text);
+  assert.equal(box.kind, 'sample');
+  assert.deepEqual(box.discovery.mappableKeys, ['name', 'email', 'phone', 'created_at']);
+
+  const form = human();
+  const autoMatched = autoMatchedFields('human', box.discovery);
+  assert.deepEqual(autoMatched, ['email'], 'the server maps a top-level "email" key to email by itself');
+
+  const payload = buildSchemaConfigPayload(form, { withSampleRecord: true });
+  assertMatchesUpsertContract(payload);
+  assert.equal('local_fields' in payload, false, 'fields are derived server-side, so the key is not sent');
+  assert.deepEqual(buildSchemaConfigPayload(form).local_fields, [], 'without a sample an explicit [] is sent — "no fields", not "keep previous"');
+  const body = withSampleRecord(JSON.stringify(payload), text);
+  assert.deepEqual(JSON.parse(body).sample_record, JSON.parse(text));
+  assert.equal(JSON.parse(body).label, 'L', 'metadata stays separate from the record');
+});
+
+test('sample_record is sent byte-for-byte, nested objects, arrays and key order included', () => {
+  const text = '{"b": 1, "10": {"deep": [1, {"x": null}]}, "a b.c": [], "z": {}}';
+  const body = withSampleRecord('{"label":"L"}', text);
+  assert.ok(body.includes(`"sample_record":${text}`), 'the record text is not re-serialised');
+  assert.deepEqual(JSON.parse(body), { label: 'L', sample_record: JSON.parse(text) });
+  assert.equal(withSampleRecord('{}', '{"a":1}'), '{"sample_record":{"a":1}}');
+  assert.throws(() => withSampleRecord('{"label":"L"}', '{"a":1,}'), SyntaxError);
+});
+
+test('a list of records is not a sample_record object', () => {
+  const box = classifyJsonBox('[{"name": "A"}, {"name": "B"}]');
+  assert.equal(box.kind, 'invalid');
+  assert.match(box.error, /one record object/);
+});
+
+test('server-discovered path and nullable survive an edit; null path segments read as array items', () => {
+  const response = {
+    space_type: 'human', schema_id: 's', space_id: 'p', label: 'L', is_default: false,
+    local_fields: [
+      { name: 'contact.email', type: 'string', required: false, aliases: [], path: ['contact', 'email'], nullable: false },
+      { name: 'skills[]', type: 'string', required: false, aliases: [], path: ['skills', null], nullable: true },
+    ],
+    input_map: {}, output_map: {},
+  };
+  const payload = buildSchemaConfigPayload(configToForm(response));
+  assert.deepEqual(payload.local_fields, response.local_fields);
+  assert.equal(formatServerPath(['contact', 'email']), 'contact.email');
+  assert.equal(formatServerPath(['skills', null]), 'skills[]');
+  assert.equal(formatServerPath(['history', null, 'org']), 'history[].org');
+  assert.equal(formatServerPath(null), '');
 });
 
 test('a new human form defaults to the 5-QR variant', () => {
@@ -176,4 +259,22 @@ test('bad input is reported, not applied', () => {
   assert.match(schemaConfigJsonToForm('{"space_type": "vehicle"}', emptySchemaConfigForm()).errors[0], /space_type/);
   const locked = schemaConfigJsonToForm('{"space_type": "product"}', emptySchemaConfigForm('human'), { lockSpaceType: true });
   assert.match(locked.errors[0], /cannot be changed/);
+});
+
+test('upload column check: exact names without a schema; mapped and aliased names with one', async () => {
+  const { missingRequiredColumns, schemaSourceColumns, normalizeColumnName } = await import('./schemaConfig.js');
+  const required = ['full_name', 'dob', 'gender', 'nationality'];
+  const header = ['Employee Name', 'Birth Date', 'Gender', 'Nationality'];
+  assert.deepEqual(missingRequiredColumns(header, required, null), ['full_name', 'dob'], 'no schema: unchanged exact check');
+  assert.deepEqual(missingRequiredColumns(['Full Name', 'DOB (YYYY-MM-DD)', 'gender', 'nationality'], required, null, { prefixOk: true }), []);
+
+  const config = {
+    label: 'Acme',
+    input_map: { full_name: 'employee_name', dob: 'date_of_birth' },
+    local_fields: [{ name: 'date_of_birth', aliases: ['Birth Date', 'D.O.B'] }],
+  };
+  assert.deepEqual(schemaSourceColumns(config), { full_name: ['employee_name'], dob: ['date_of_birth', 'birth_date', 'd_o_b'] });
+  assert.deepEqual(missingRequiredColumns(header, required, config), [], 'the schema\'s own column names are accepted');
+  assert.deepEqual(missingRequiredColumns(['Gender', 'Nationality'], required, config), ['full_name', 'dob']);
+  assert.equal(normalizeColumnName('  Employee-Name '), 'employee_name');
 });

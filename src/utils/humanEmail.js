@@ -13,11 +13,14 @@ export const withHumanEmailField = (fields, permission) => {
     : [fields[0], email, ...fields.slice(1)].filter(Boolean);
 };
 
-export const validateHumanExcelEmails = (rows, permission) => {
-  const headers = (rows[0] || []).map((value) => String(value || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, ''));
-  const column = headers.findIndex((value) => value === 'email' || value.startsWith('email_'));
+// `emailColumns`: extra (normalised) column names that hold the email under the batch's schema.
+// `schemaApplies`: with a schema, a column the browser can't recognise is left for the server's own
+// mapped check instead of being rejected here.
+export const validateHumanExcelEmails = (rows, permission, { emailColumns = [], schemaApplies = false } = {}) => {
+  const headers = (rows[0] || []).map((value) => String(value ?? '').trim().toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '_').replace(/^_+|_+$/g, ''));
+  const column = headers.findIndex((value) => value === 'email' || value.startsWith('email_') || emailColumns.includes(value));
   if (column < 0) {
-    if (humanEmailRequired(permission)) throw new Error('Email column is required for Permission Required verification.');
+    if (humanEmailRequired(permission) && !schemaApplies) throw new Error('Email column is required for Permission Required verification.');
     return;
   }
   const invalid = [];

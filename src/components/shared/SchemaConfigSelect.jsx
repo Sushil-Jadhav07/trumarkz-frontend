@@ -11,9 +11,17 @@ import { adminAPI } from '@/services/api';
 // the previous (default/legacy) behavior exactly as before this feature.
 // `value`/`onChange` are the plain `label` string — or '' for "use default",
 // matching the `schema_name` the batch-creation call expects verbatim.
-export const SchemaConfigSelect = ({ orgId, spaceType, value, onChange, disabled }) => {
+// `onConfigChange(config | null)` reports the full selected configuration (its input_map/aliases),
+// so an upload page can recognise the org's own column names the way the server will.
+export const SchemaConfigSelect = ({ orgId, spaceType, value, onChange, onConfigChange, disabled }) => {
   const [configs, setConfigs] = useState([]);
   const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    if (!onConfigChange) return;
+    onConfigChange((value && configs.find((c) => c.label === value)) || null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [configs, value]);
 
   useEffect(() => {
     if (!orgId || !spaceType) return;
@@ -53,7 +61,9 @@ export const SchemaConfigSelect = ({ orgId, spaceType, value, onChange, disabled
         disabled={disabled}
         ariaLabel="Schema configuration for this batch"
         options={configs.map((c) => ({ value: c.label, label: `${c.label}${c.is_default ? ' (Default)' : ''}` }))}
-        placeholder="Use organization default"
+        // Only shown when nothing is selected, which only happens when there is no default schema:
+        // the batch then uses the standard layout, not "the organization default".
+        placeholder="None — standard layout"
       />
     </div>
   );

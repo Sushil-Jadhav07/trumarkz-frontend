@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Link } from 'react-router-dom';
 import { AuthLayout } from '@/components/layout/AuthLayout';
@@ -16,7 +16,7 @@ import {
 import { SERVICE_TYPE_OPTIONS } from '@/data/serviceTypeOptions';
 import { DhiwaysDetailsEditor } from '@/components/shared/DhiwaysDetailsEditor';
 import { OrgSchemaConfigsPanel } from '@/components/shared/OrgSchemaConfigsPanel';
-import { normalizeDhiwayDetails, getDhiwaySpaceTypeLabel } from '@/utils/dhiway';
+import { normalizeDhiwayDetails, getDhiwaySpaceTypeLabel, mergeSchemaConfigSpaces } from '@/utils/dhiway';
 import toast from 'react-hot-toast';
 
 const roleLabels = {
@@ -164,6 +164,27 @@ export const Profile = () => {
   const avatarInitial = displayName[0]?.toUpperCase() || 'U';
   const roleLabel = roleLabels[user?.role] || user?.role || 'Account';
   const roleColor = roleColors[user?.role] || 'bg-gray-100 text-gray-600';
+
+  // Same rule as the SuperAdmin editor: a Schema Configuration's space/schema is added to this org's
+  // Dhiway Spaces (saved at once), and to the open edit draft so its Save doesn't drop it.
+  const syncingSchemaSpaces = useRef(false);
+  const syncSchemaSpaces = useCallback(async (configs) => {
+    if (syncingSchemaSpaces.current || !user) return;
+    const { rows, changed } = mergeSchemaConfigSpaces(user.dhiwaysDetails || [], configs);
+    if (!changed) return;
+    syncingSchemaSpaces.current = true;
+    try {
+      await authAPI.updateOwnProfile({ dhiwaysDetails: rows });
+      updateUserProfile({ dhiwaysDetails: rows });
+      setOrgDraft((d) => ({ ...d, dhiwaysDetails: mergeSchemaConfigSpaces(d.dhiwaysDetails || [], configs).rows }));
+      toast.success('Dhiway Spaces updated from Schema Configurations');
+      await refreshUser?.();
+    } catch (err) {
+      toast.error(getApiError(err, 'Could not add the schema configuration’s space to Dhiway Spaces'));
+    } finally {
+      syncingSchemaSpaces.current = false;
+    }
+  }, [user, updateUserProfile, refreshUser]);
 
   const startEditOrg = () => {
     setOrgDraft({
@@ -733,7 +754,7 @@ export const Profile = () => {
                     <p className="text-xs text-gray-400 font-inter mt-0.5">Use your own Dhiway schema(s) and field names for batches instead of the default layout</p>
                   </div>
                 </div>
-                <OrgSchemaConfigsPanel orgId={user?.id} />
+                <OrgSchemaConfigsPanel orgId={user?.id} onConfigsChange={syncSchemaSpaces} />
               </Card>
             )}
           </div>
