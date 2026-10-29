@@ -12,6 +12,8 @@ import { FileUpload } from '@/components/ui/FileUpload';
 import { ArrowRight, CheckCircle, Download, FileText, Image as ImageIcon, Plus, RefreshCw, Upload, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useApp } from '@/context/AppContext';
+import { useAuth } from '@/context/AuthContext';
+import { SchemaConfigSelect } from '@/components/shared/SchemaConfigSelect';
 import {
   PRODUCT_VERIFICATION_STEPS,
   PRODUCT_VERIFICATION_STEP_META,
@@ -121,6 +123,8 @@ export const ProductTemplate = () => {
     selectedProductTemplate,
     setProductBatchData,
   } = useApp();
+  const { user } = useAuth();
+  const [schemaName, setSchemaName] = useState('');
 
   // Warranty's fixed-field list is read straight from the backend's own
   // generated template (see the effect below) instead of trusting the
@@ -424,6 +428,7 @@ export const ProductTemplate = () => {
       setProductBatchData({
         file: excelFile,
         batchName: batchNameValue,
+        schemaName,
         description: '',
         recordCount,
         templateHeaders,
@@ -482,6 +487,12 @@ export const ProductTemplate = () => {
                   className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3 font-inter text-sm font-medium text-brand-dark outline-none transition-all placeholder:text-gray-300 focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/15"
                   placeholder="e.g. Electronics Batch June 2026"
                 />
+                {/* Only appears once the organization has at least one active
+                    schema configured for this entity type — otherwise
+                    renders nothing and the batch uses the default layout. */}
+                <div className="mt-3 max-w-xs">
+                  <SchemaConfigSelect orgId={user?.id} spaceType={isWarranty ? 'warranty' : 'product'} value={schemaName} onChange={setSchemaName} />
+                </div>
               </div>
             </div>
 

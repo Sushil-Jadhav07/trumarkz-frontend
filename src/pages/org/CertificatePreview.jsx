@@ -127,6 +127,7 @@ export const CertificatePreview = () => {
           industryType: getIndustryTypeList(selectedIndustry),
           verificationTypes: selectedVerifications.join(','),
           credentialVisibility: selectedPermission || 'private',
+          schemaName: batchData.schemaName,
         }
       );
 

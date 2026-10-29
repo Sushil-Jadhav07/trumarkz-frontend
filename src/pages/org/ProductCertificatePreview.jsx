@@ -108,6 +108,7 @@ export const ProductCertificatePreview = () => {
           docProductNames: validDocs.map((e) => e.productName.trim()),
           docLabels:       validDocs.map((e) => e.label),
           docFiles:        validDocs.map((e) => e.file),
+          schemaName: productBatchData.schemaName,
         }
       );
 

@@ -31,6 +31,7 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { humanEmailRequired, validateHumanExcelEmails } from '@/utils/humanEmail';
+import { SchemaConfigSelect } from '@/components/shared/SchemaConfigSelect';
 
 const parseTemplateHeaders = (value) =>
   String(value || '')
@@ -159,7 +160,9 @@ const ProductProgress = ({ step }) => {
 
 // ─── Single Human Modal ───────────────────────────────────────────────────────
 const SingleHumanModal = ({ isOpen, onClose, onSuccess, selectedIndustry, selectedVerifications, selectedPermission }) => {
+  const { user } = useAuth();
   const [loading, setLoading] = useState(false);
+  const [schemaName, setSchemaName] = useState('');
   const [form, setForm] = useState({
     full_name: '', phone_number: '', email: '',
     dob: '', aadhar_number: '', pan_number: '',
@@ -182,6 +185,7 @@ const SingleHumanModal = ({ isOpen, onClose, onSuccess, selectedIndustry, select
         industry_type: getIndustryTypeList(selectedIndustry),
         verification_types: getVerificationApiTypes(selectedVerifications),
         credential_visibility: selectedPermission || 'private',
+        schema_name: schemaName,
       });
       toast.success('Human record created! Invite link generated.');
       onSuccess(data);
@@ -200,6 +204,7 @@ const SingleHumanModal = ({ isOpen, onClose, onSuccess, selectedIndustry, select
       address_line1: '', address_line2: '', address_line3: '',
       pincode: '', state: '', country: '',
     });
+    setSchemaName('');
     onClose();
   };
 
@@ -209,6 +214,8 @@ const SingleHumanModal = ({ isOpen, onClose, onSuccess, selectedIndustry, select
         <div className="p-3 bg-blue-50 rounded-xl border border-blue-100">
           <p className="text-xs text-blue-700 font-inter font-semibold">Required fields: Full Name, Phone Number, Email</p>
         </div>
+
+        <SchemaConfigSelect orgId={user?.id} spaceType="human" value={schemaName} onChange={setSchemaName} disabled={loading} />
 
         {/* Required */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -258,11 +265,13 @@ const SingleHumanModal = ({ isOpen, onClose, onSuccess, selectedIndustry, select
 
 // ─── Single Product Modal ─────────────────────────────────────────────────────
 const SingleProductModal = ({ isOpen, onClose, onSuccess, categories, selectedCategory, selectedService }) => {
+  const { user } = useAuth();
   const [loading, setLoading] = useState(false);
   const [categoryId, setCategoryId] = useState(selectedCategory?.categoryId || '');
   const [productName, setProductName] = useState('');
   const [warrantyStatus, setWarrantyStatus] = useState(selectedService?.warrantyStatus || 'not_applicable');
   const [customFields, setCustomFields] = useState([{ key: '', value: '' }]);
+  const [schemaName, setSchemaName] = useState('');
 
   const addField = () => setCustomFields((f) => [...f, { key: '', value: '' }]);
   const removeField = (i) => setCustomFields((f) => f.filter((_, idx) => idx !== i));
@@ -294,6 +303,7 @@ const SingleProductModal = ({ isOpen, onClose, onSuccess, categories, selectedCa
         custom_fields,
         verification_types: getProductVerificationTypes(selectedService),
         credential_visibility: selectedService?.id === 'verification' ? 'public' : 'private',
+        schema_name: schemaName,
       });
       toast.success('Product record created! Invite link generated.');
       onSuccess(data);
@@ -308,6 +318,7 @@ const SingleProductModal = ({ isOpen, onClose, onSuccess, categories, selectedCa
   const handleClose = () => {
     setCategoryId(selectedCategory?.categoryId || ''); setProductName(''); setWarrantyStatus(selectedService?.warrantyStatus || 'not_applicable');
     setCustomFields([{ key: '', value: '' }]);
+    setSchemaName('');
     onClose();
   };
 
@@ -317,6 +328,14 @@ const SingleProductModal = ({ isOpen, onClose, onSuccess, categories, selectedCa
         <div className="p-3 bg-blue-50 rounded-xl border border-blue-100">
           <p className="text-xs text-blue-700 font-inter font-semibold">Required: Category &amp; Product Name. Add custom fields as needed.</p>
         </div>
+
+        <SchemaConfigSelect
+          orgId={user?.id}
+          spaceType={warrantyStatus !== 'not_applicable' ? 'warranty' : 'product'}
+          value={schemaName}
+          onChange={setSchemaName}
+          disabled={loading}
+        />
 
         {/* Category */}
         {selectedCategory?.categoryId ? (
@@ -425,9 +444,11 @@ const InviteResultCard = ({ result, onDismiss }) => (
 
 // ─── Human Bulk Upload Panel ───────────────────────────────────────────────────
 const HumanBulkPanel = ({ onResult, selectedIndustry, selectedVerifications, selectedPermission }) => {
+  const { user } = useAuth();
   const fileInputRef = useRef(null);
   const [batchName, setBatchName] = useState('');
   const [description, setDescription] = useState('');
+  const [schemaName, setSchemaName] = useState('');
   const [selectedFile, setSelectedFile] = useState(null);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -462,6 +483,7 @@ const HumanBulkPanel = ({ onResult, selectedIndustry, selectedVerifications, sel
           industryType: getIndustryTypeList(selectedIndustry),
           verificationTypes: getVerificationApiTypes(selectedVerifications),
           credentialVisibility: selectedPermission || 'private',
+          schemaName,
         },
         setUploadProgress
       );
@@ -599,6 +621,7 @@ const HumanBulkPanel = ({ onResult, selectedIndustry, selectedVerifications, sel
   return (
     <div className="space-y-5">
       <Input label="Batch Name *" placeholder="e.g. Driver Verification - May 2026" value={batchName} onChange={(e) => setBatchName(e.target.value)} icon={Layers} />
+      <SchemaConfigSelect orgId={user?.id} spaceType="human" value={schemaName} onChange={setSchemaName} disabled={loading} />
       <div>
         <label className="block text-sm font-medium text-gray-700 font-inter mb-1">Description (optional)</label>
         <textarea
@@ -665,11 +688,13 @@ const HumanBulkPanel = ({ onResult, selectedIndustry, selectedVerifications, sel
 
 // ─── Product Bulk Upload Panel ─────────────────────────────────────────────────
 const ProductBulkPanel = ({ categories, onResult, selectedCategory, selectedService, selectedPermission }) => {
+  const { user } = useAuth();
   const fileInputRef = useRef(null);
   const [batchName, setBatchName] = useState('');
   const [description, setDescription] = useState('');
   const [numberOfUnits, setNumberOfUnits] = useState('');
   const [visibility, setVisibility] = useState(selectedPermission || 'private');
+  const [schemaName, setSchemaName] = useState('');
   const [templateLoading, setTemplateLoading] = useState(false);
   // warrenty_report / product_details are never Excel columns — both are
   // document-URL destinations, attached post-batch via
@@ -731,6 +756,7 @@ const ProductBulkPanel = ({ categories, onResult, selectedCategory, selectedServ
           batchType: 'product',
           verificationTypes: getProductVerificationTypes(selectedService),
           credentialVisibility: visibility,
+          schemaName,
         },
         setUploadProgress
       );
@@ -845,6 +871,13 @@ const ProductBulkPanel = ({ categories, onResult, selectedCategory, selectedServ
   return (
     <div className="space-y-5">
       <Input label="Batch Name *" placeholder="e.g. Warranty Cards - May 2026" value={batchName} onChange={(e) => setBatchName(e.target.value)} icon={Layers} />
+      <SchemaConfigSelect
+        orgId={user?.id}
+        spaceType={selectedService?.id === 'warranty' ? 'warranty' : 'product'}
+        value={schemaName}
+        onChange={setSchemaName}
+        disabled={loading}
+      />
       <div>
         <label className="block text-sm font-medium text-gray-700 font-inter mb-1">Category *</label>
         {selectedCategory?.categoryId ? (

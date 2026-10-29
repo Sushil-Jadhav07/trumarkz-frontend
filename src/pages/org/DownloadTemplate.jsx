@@ -11,6 +11,8 @@ import { FileUpload } from '@/components/ui/FileUpload';
 import { ArrowRight, CheckCircle, Download, Eye, FileImage, Plus, RefreshCw, Upload, X, AlertTriangle, Camera, Layers, Images } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useApp } from '@/context/AppContext';
+import { useAuth } from '@/context/AuthContext';
+import { SchemaConfigSelect } from '@/components/shared/SchemaConfigSelect';
 import { HUMAN_VERIFICATION_STEPS, HUMAN_VERIFICATION_STEP_META, HUMAN_VERIFICATION_STEP_ROUTES } from '@/data/humanVerificationFlow';
 import { verificationAPI, triggerBlobDownload, getApiError } from '@/services/api';
 import { getVerificationApiTypes, getIndustryTypeList } from '@/utils/verificationFlow';
@@ -880,6 +882,12 @@ export const DownloadTemplate = () => {
   const location = useLocation();
   const inputRef  = useRef(null);
   const { selectedIndustry, selectedPermission, selectedVerifications, batchData, setBatchData, setSelectedHumanTemplate } = useApp();
+  const { user } = useAuth();
+  // Which configured dynamic schema (if any) this batch should use — see
+  // "Dynamic Schema change.md". '' means "use the organization's default
+  // (or the original fixed layout, if nothing is configured)" — the exact
+  // same behavior as before this feature existed.
+  const [schemaName, setSchemaName] = useState('');
 
   const baseFields = useMemo(() => BASE_FIELDS.map((field) => field.key === 'email'
     ? { ...field, required: humanEmailRequired(selectedPermission) }
@@ -1079,7 +1087,7 @@ export const DownloadTemplate = () => {
         .length;
       if (recordCount <= 0) { toast.error('The uploaded file has no data rows'); return; }
       setBatchData({
-        file: excelFile, batchName: batchNameValue,
+        file: excelFile, batchName: batchNameValue, schemaName,
         description: '', recordCount, templateHeaders,
         fileName: excelFile.name, costConfirmed: false, uploadResponse: null,
       });
@@ -1118,7 +1126,7 @@ export const DownloadTemplate = () => {
   const handleReviewDone = (draft) => {
     setReviewOpen(false);
     setBatchData({
-      batchName: batchNameValue.trim(), description: '', recordCount: draft.records.length,
+      batchName: batchNameValue.trim(), schemaName, description: '', recordCount: draft.records.length,
       costConfirmed: false, uploadResponse: null, ocrDraft: { ...draft, assignmentGroups: reviewAssignmentGroups },
       ocrSubmission: { response: null, completedIds: [], photoSavedIds: [], savedAttachments: {} },
     });
@@ -1166,6 +1174,13 @@ export const DownloadTemplate = () => {
                 className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3 font-inter text-sm font-medium text-brand-dark outline-none transition-all placeholder:text-gray-300 focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/15"
                 placeholder="e.g. Healthcare Batch June 2026"
               />
+              {/* Only appears once the organization has at least one active
+                  Human schema configured (see Profile → Schema
+                  Configurations) — otherwise this renders nothing and the
+                  batch uses the default layout, exactly as before. */}
+              <div className="mt-3 max-w-xs">
+                <SchemaConfigSelect orgId={user?.id} spaceType="human" value={schemaName} onChange={setSchemaName} />
+              </div>
             </div>
 
             {/* ══ BODY — Two columns ══════════════════════════════════════ */}

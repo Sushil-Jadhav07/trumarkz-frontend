@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { RefreshCw, AlertTriangle } from 'lucide-react';
 import { Input } from '@/components/ui/Input';
 import { DhiwaysDetailsEditor } from '@/components/shared/DhiwaysDetailsEditor';
+import { OrgSchemaConfigsPanel } from '@/components/shared/OrgSchemaConfigsPanel';
 import { SERVICE_TYPE_OPTIONS } from '@/data/serviceTypeOptions';
 import { normalizeDhiwayDetails } from '@/utils/dhiway';
 import { adminAPI, getApiError } from '@/services/api';
@@ -211,6 +212,17 @@ export const OrganizationEditor = ({ onClose, orgId, onSuccess }) => {
 
         </form>
       )}
+
+      {/* Separate, independent system from the Dhiway Spaces editor inside
+          the form above — each action here (create/version/set-default/
+          deactivate) is its own immediate API call, never part of the
+          "Save Changes" submit. See OrgSchemaConfigsPanel. */}
+      {org && !loading && !loadError && (
+        <div className="mt-6 border-t border-gray-100 pt-5">
+          <OrgSchemaConfigsPanel orgId={org.id} isSuperAdminViewer />
+        </div>
+      )}
+
       <div className="mt-6 border-t border-gray-100 pt-5">{org && !loading && !loadError ? (
         <div className="flex items-center justify-end gap-3">
           <button type="button" onClick={onClose} disabled={submitting} className="rounded-xl border border-gray-200 px-4 py-2.5 text-sm font-medium text-gray-600 font-inter hover:bg-gray-50 disabled:opacity-50">Cancel</button>

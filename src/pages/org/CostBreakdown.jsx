@@ -120,6 +120,7 @@ export const CostBreakdown = () => {
             batchType: 'human', industryType: getIndustryTypeList(selectedIndustry),
             verificationTypes: selectedVerifications.join(','),
             credentialVisibility: selectedPermission || 'private',
+            schemaName: batchData.schemaName,
           },
           api: verificationAPI, progress,
           checkpoint: (state) => setBatchData((current) => ({
@@ -146,6 +147,7 @@ export const CostBreakdown = () => {
           industryType: getIndustryTypeList(selectedIndustry),
           verificationTypes: selectedVerifications.join(','),
           credentialVisibility: selectedPermission || 'private',
+          schemaName: batchData.schemaName,
         }
       );
 

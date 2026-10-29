@@ -352,6 +352,35 @@ export const authAPI = {
   // surface is organization-scoped only, never the signup contact person's.
   updateOrganization: (orgId, payload) => api.patch(`/auth/organizations/${orgId}`, cleanObject(payload)),
 
+  // ── Dynamic organization-specific schema configs (org_schema_configs) ──
+  // Separate, additive system from dhiways_details/setDhiwayDefault above —
+  // see "Dynamic Schema change.md". SuperAdmin may target any org_id; an
+  // organization account may only target its own id (the backend 403s
+  // otherwise). Every call here is its own independent request — none of
+  // these are part of the updateOrganization PATCH payload.
+  // GET — active_only defaults true server-side; pass false to include
+  // deactivated/superseded versions (for a version-history view).
+  getSchemaConfigs: (orgId, { spaceType, activeOnly } = {}) =>
+    api.get(`/auth/organizations/${orgId}/schema-configs`, {
+      params: cleanObject({ space_type: spaceType, active_only: activeOnly }),
+    }),
+  // POST — registers version 1. payload: { space_type, schema_variant?,
+  // schema_id, space_id, label, local_fields?, input_map?, output_map?,
+  // is_default? }. Returns { config, warnings }.
+  createSchemaConfig: (orgId, payload) =>
+    api.post(`/auth/organizations/${orgId}/schema-configs`, cleanObject(payload)),
+  // POST .../versions — full-replace edit; always creates the next version,
+  // never patches in place. Same payload shape as create.
+  createSchemaConfigVersion: (orgId, configId, payload) =>
+    api.post(`/auth/organizations/${orgId}/schema-configs/${configId}/versions`, cleanObject(payload)),
+  // POST .../set-default — no body; config_id is the path param.
+  setSchemaConfigDefault: (orgId, configId) =>
+    api.post(`/auth/organizations/${orgId}/schema-configs/${configId}/set-default`),
+  // POST .../deactivate — no body. Never deletes; a batch that already
+  // froze this config's content stays reproducible forever.
+  deactivateSchemaConfig: (orgId, configId) =>
+    api.post(`/auth/organizations/${orgId}/schema-configs/${configId}/deactivate`),
+
   // PATCH /auth/superadmins/{user_id} — superadmin-only. Updates an existing
   // superadmin's own details (full_name, phone_number, email, password,
   // is_active). Every field optional — only send what's actually changing;
@@ -390,6 +419,11 @@ export const adminAPI = {
   getOrganizations: authAPI.getOrganizations,
   getOrganization: authAPI.getOrganization,
   updateOrganization: authAPI.updateOrganization,
+  getSchemaConfigs: authAPI.getSchemaConfigs,
+  createSchemaConfig: authAPI.createSchemaConfig,
+  createSchemaConfigVersion: authAPI.createSchemaConfigVersion,
+  setSchemaConfigDefault: authAPI.setSchemaConfigDefault,
+  deactivateSchemaConfig: authAPI.deactivateSchemaConfig,
   promoteSuperAdmin: authAPI.promoteSuperAdmin,
   createSuperAdmin: (payload) =>
     authAPI.createSuperAdmin(
@@ -436,6 +470,9 @@ export const verificationAPI = {
         verification_types: data.verification_types,
         credential_visibility: data.credential_visibility,
         template_id: data.template_id,
+        // Optional — picks one of the org's configured dynamic schemas (see
+        // "Dynamic Schema change.md"); omitted uses the org's default, if any.
+        schema_name: data.schema_name,
       })
     ),
 
@@ -450,6 +487,7 @@ export const verificationAPI = {
         verification_types: data.verification_types,
         credential_visibility: data.credential_visibility,
         template_id: data.template_id,
+        schema_name: data.schema_name,
       })
     ),
 
@@ -486,6 +524,7 @@ export const verificationAPI = {
     );
     appendFormValue(formData, 'fields', options.fields);
     appendFormValue(formData, 'doc_type', options.docType || options.doc_type);
+    appendFormValue(formData, 'schema_name', options.schemaName || options.schema_name);
 
     return verificationApi.post('/verification/bulk-upload/documents', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
@@ -556,6 +595,7 @@ export const verificationAPI = {
       options.credentialVisibility || options.credential_visibility
     );
     appendFormValue(formData, 'template_id', options.templateId || options.template_id);
+    appendFormValue(formData, 'schema_name', options.schemaName || options.schema_name);
 
     return verificationApi.post('/verification/bulk-upload', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
@@ -588,6 +628,7 @@ export const verificationAPI = {
     );
     appendFormValue(formData, 'verification_types', options.verificationTypes || options.verification_types);
     appendFormValue(formData, 'template_id', options.templateId || options.template_id);
+    appendFormValue(formData, 'schema_name', options.schemaName || options.schema_name);
 
     // No document attachments here — Product Excel upload no longer supports
     // row-level document attachment at all (doc_files/doc_sku_nos/doc_labels/
@@ -1005,7 +1046,10 @@ export const verificationAPI = {
   // doc_labels are each ONE comma-joined string, positionally aligned with
   // doc_files by array order — never repeated fields for those two. The
   // backend matches all three purely by index.
-  uploadWarrantyExcel: (file, batchName, description = '', reservedSerialNos = [], documents = [], maybeProgress) => {
+  // schemaName (new, trailing/optional so existing positional call sites are
+  // unaffected) — picks one of the org's configured dynamic Warranty
+  // schemas; omitted uses the org's default, if any.
+  uploadWarrantyExcel: (file, batchName, description = '', reservedSerialNos = [], documents = [], maybeProgress, schemaName) => {
     const formData = new FormData();
     const { onProgress } = normalizeUploadArgs(undefined, maybeProgress);
 
@@ -1013,6 +1057,7 @@ export const verificationAPI = {
     formData.append('batch_name', batchName);
     formData.append('batch_type', 'warranty');
     if (description) formData.append('description', description);
+    if (schemaName) formData.append('schema_name', schemaName);
     if (Array.isArray(reservedSerialNos) && reservedSerialNos.length > 0) {
       formData.append('reserved_serial_nos', reservedSerialNos.join(','));
       formData.append('use_reserved_serials', 'true');

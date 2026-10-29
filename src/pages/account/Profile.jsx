@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { SERVICE_TYPE_OPTIONS } from '@/data/serviceTypeOptions';
 import { DhiwaysDetailsEditor } from '@/components/shared/DhiwaysDetailsEditor';
+import { OrgSchemaConfigsPanel } from '@/components/shared/OrgSchemaConfigsPanel';
 import { normalizeDhiwayDetails, getDhiwaySpaceTypeLabel } from '@/utils/dhiway';
 import toast from 'react-hot-toast';
 
@@ -714,6 +715,25 @@ export const Profile = () => {
                     </>
                   )}
                 </div>
+              </Card>
+            )}
+
+            {/* Separate, additive system from the legacy Dhiway Spaces
+                editor above — see OrgSchemaConfigsPanel. Each action here is
+                its own immediate API call, not tied to this card's own
+                Edit/Save/Cancel state. */}
+            {isOrg && (
+              <Card className="p-6">
+                <div className="flex items-center gap-2 mb-5">
+                  <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center">
+                    <Database size={15} className="text-brand-blue" />
+                  </div>
+                  <div>
+                    <h3 className="font-sora font-bold text-brand-dark">Schema Configurations</h3>
+                    <p className="text-xs text-gray-400 font-inter mt-0.5">Use your own Dhiway schema(s) and field names for batches instead of the default layout</p>
+                  </div>
+                </div>
+                <OrgSchemaConfigsPanel orgId={user?.id} />
               </Card>
             )}
           </div>

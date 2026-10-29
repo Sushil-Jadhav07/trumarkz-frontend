@@ -144,6 +144,8 @@ export const ProductCostBreakdown = () => {
           productBatchData.description || '',
           reservedSerialNos,
           documents,
+          undefined,
+          productBatchData.schemaName,
         );
         setProductBatchData((current) => ({
           ...(current || {}),
@@ -183,6 +185,7 @@ export const ProductCostBreakdown = () => {
           verificationTypes: selectedProductVerifications,
           credentialVisibility,
           templateId: activeTemplate,
+          schemaName: productBatchData.schemaName,
         }
       );
 

@@ -33,7 +33,7 @@ const formatDate = (dateStr) => {
   }
 };
 
-const Badge = ({ tone, children }) => {
+const Badge = ({ tone, children, title }) => {
   const tones = {
     green: 'bg-green-50 text-green-600',
     amber: 'bg-amber-50 text-amber-600',
@@ -41,11 +41,16 @@ const Badge = ({ tone, children }) => {
     gray: 'bg-gray-100 text-gray-500',
   };
   return (
-    <span className={`px-2 py-0.5 rounded-full text-[11px] font-medium font-inter ${tones[tone] || tones.gray}`}>
+    <span title={title} className={`px-2 py-0.5 rounded-full text-[11px] font-medium font-inter ${tones[tone] || tones.gray}`}>
       {children}
     </span>
   );
 };
+
+// At least one Dhiway space_id/schema_id (dhiways_details) given to this
+// org — same check the org-side "Setup in progress" banner uses.
+const hasDhiwaySpace = (data) =>
+  Array.isArray(data?.dhiways_details) && data.dhiways_details.some((row) => row?.space_id);
 
 const ConfirmModal = ({ isOpen, onClose, title, message, confirmLabel, tone = 'red', onConfirm }) => {
   const [submitting, setSubmitting] = useState(false);
@@ -102,6 +107,14 @@ export const OrganizationList = () => {
   const [permanentDeleteTarget, setPermanentDeleteTarget] = useState(null);
   const [approvingId, setApprovingId] = useState(null);
 
+  // GET /auth/organizations (the list endpoint) doesn't include
+  // dhiways_details — confirmed live: a row that the single-org GET shows
+  // as fully configured still came back with nothing to check here. So this
+  // is resolved per-row instead, scoped to whichever page is currently on
+  // screen (not all 500 at once) — true/false once confirmed, 'loading'
+  // while in flight, null if that one row's fetch failed.
+  const [dhiwayStatus, setDhiwayStatus] = useState({});
+
   const fetchOrgs = useCallback(async () => {
     setLoading(true);
     try {
@@ -116,7 +129,7 @@ export const OrganizationList = () => {
 
   useEffect(() => { fetchOrgs(); }, [fetchOrgs]);
 
-  const refresh = () => fetchOrgs();
+  const refresh = () => { setDhiwayStatus({}); fetchOrgs(); };
 
   const handleApprove = async (org) => {
     setApprovingId(org.id);
@@ -145,8 +158,29 @@ export const OrganizationList = () => {
   const startIdx = filteredOrgs.length === 0 ? 0 : (safePage - 1) * pageSize + 1;
   const endIdx = Math.min(safePage * pageSize, filteredOrgs.length);
 
+  // Resolve Dhiway Setup status for whichever rows are actually on screen —
+  // one GET /auth/organizations/{id} per not-yet-checked row, never all of
+  // them at once. Re-runs when the page/search changes; already-resolved
+  // ids are skipped (dhiwayStatus is deliberately not a dependency here, or
+  // every resolve would re-trigger this).
+  useEffect(() => {
+    const idsToCheck = paginatedOrgs.map((o) => o.id).filter((id) => id && dhiwayStatus[id] === undefined);
+    if (idsToCheck.length === 0) return;
+    setDhiwayStatus((prev) => {
+      const next = { ...prev };
+      idsToCheck.forEach((id) => { next[id] = 'loading'; });
+      return next;
+    });
+    idsToCheck.forEach((id) => {
+      adminAPI.getOrganization(id)
+        .then(({ data }) => setDhiwayStatus((prev) => ({ ...prev, [id]: hasDhiwaySpace(data) })))
+        .catch(() => setDhiwayStatus((prev) => ({ ...prev, [id]: null })));
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filteredOrgs, safePage, pageSize]);
+
   // Six action buttons need 176px (26px each plus five 4px gaps).
-  const GRID = 'grid-cols-[minmax(240px,1.6fr)_110px_130px_110px_110px_110px_100px_110px_192px]';
+  const GRID = 'grid-cols-[minmax(240px,1.6fr)_110px_130px_110px_110px_110px_110px_100px_110px_192px]';
 
   return (
     <AuthLayout title="Organizations">
@@ -189,7 +223,7 @@ export const OrganizationList = () => {
           <div className="overflow-x-auto">
             <div className="min-w-[1360px]">
               <div className={`grid ${GRID} gap-3 px-5 py-3 bg-brand-bg border-b border-gray-100`}>
-                {['Organization', 'Service Type', 'Industry', 'GST Status', 'Approval', 'Onboarding', 'Account', 'Created', 'Actions'].map((h) => (
+                {['Organization', 'Service Type', 'Industry', 'GST Status', 'Approval', 'Onboarding', 'Dhiway Setup', 'Account', 'Created', 'Actions'].map((h) => (
                   <span key={h} className={`text-[11px] font-semibold text-gray-400 uppercase tracking-wide font-inter ${h === 'Actions' ? 'text-right' : ''}`}>{h}</span>
                 ))}
               </div>
@@ -246,6 +280,30 @@ export const OrganizationList = () => {
                       <div><Badge tone={org.gst_verified ? 'green' : 'gray'}>{org.gst_verified ? 'Verified' : 'Not Verified'}</Badge></div>
                       <div><Badge tone={org.org_approved ? 'blue' : 'amber'}>{org.org_approved ? 'Approved' : 'Pending'}</Badge></div>
                       <div><Badge tone={org.onboarding_completed ? 'green' : 'amber'}>{org.onboarding_completed ? 'Completed' : 'Pending'}</Badge></div>
+                      {/* Whether this org has been given at least one Dhiway
+                          space_id/schema_id yet (dhiways_details) — without
+                          this, the org can't generate SDC certificates at
+                          all. Flags freshly onboarded orgs still waiting on
+                          SuperAdmin to provision them (see the org-side
+                          "Setup in progress" banner, same underlying check).
+                          Resolved per-row above since the list endpoint
+                          itself doesn't carry this field. */}
+                      <div>
+                        {(() => {
+                          const status = dhiwayStatus[org.id];
+                          if (status === undefined || status === 'loading') {
+                            return <Badge tone="gray"><RefreshCw size={9} className="animate-spin" /></Badge>;
+                          }
+                          if (status === null) {
+                            return <Badge tone="gray" title="Could not check — try Refresh">Unknown</Badge>;
+                          }
+                          return (
+                            <Badge tone={status ? 'green' : 'amber'} title={status ? undefined : 'No Dhiway space_id/schema_id given yet — SDC generation is blocked for this org'}>
+                              {status ? 'Configured' : 'Needs Setup'}
+                            </Badge>
+                          );
+                        })()}
+                      </div>
                       <div><Badge tone={org.is_active ? 'green' : 'gray'}>{org.is_active ? 'Active' : 'Inactive'}</Badge></div>
                       <span className="whitespace-nowrap text-xs text-gray-400 font-inter">{formatDate(org.created_at)}</span>
 
