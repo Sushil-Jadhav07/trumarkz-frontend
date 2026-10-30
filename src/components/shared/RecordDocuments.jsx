@@ -1,10 +1,15 @@
 import React, { useEffect, useState } from 'react';
 import { LoadingSkeleton } from '@/components/shared/LoadingSkeleton';
 import { SkeletonLoader } from '@/components/ui/SkeletonLoader';
-import { Download, Eye, FileText, RefreshCw } from 'lucide-react';
+import { Download, FileText, RefreshCw } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { verificationAPI, getApiError, triggerBlobDownload } from '@/services/api';
+import { verificationAPI, getApiError, triggerBlobDownload, reportRequestHeaders } from '@/services/api';
+import { ViewReportButton } from '@/components/shared/ViewReportButton';
 import { fetchDocumentFile, getRecordDocuments } from '@/utils/recordDocuments';
+
+// Protected (holder_approval) batches only serve documents to the signed-in org / SuperAdmin,
+// so the session goes with TruMarkZ's own document route — never with a signed storage URL.
+const authedFetch = (url, init) => fetch(url, { ...init, headers: reportRequestHeaders(url) });
 
 const DocumentRow = ({ document, index }) => {
   const [downloading, setDownloading] = useState(false);
@@ -26,7 +31,7 @@ const DocumentRow = ({ document, index }) => {
     setPreviewError(false);
     setPreviewLoading(!!url);
     if (url) {
-      fetchDocumentFile(urls, fetch, controller.signal)
+      fetchDocumentFile(urls, authedFetch, controller.signal)
         .then(({ blob, viewUrl: workingUrl }) => {
           if (controller.signal.aborted) return;
           blobUrl = URL.createObjectURL(blob);
@@ -46,7 +51,7 @@ const DocumentRow = ({ document, index }) => {
     try {
       let blob = preview?.blob;
       if (!blob) {
-        ({ blob } = await fetchDocumentFile(urls, fetch));
+        ({ blob } = await fetchDocumentFile(urls, authedFetch));
       }
       const extension = blob.type === 'application/pdf' ? '.pdf'
         : blob.type.startsWith('image/') ? `.${blob.type.split('/')[1].replace('jpeg', 'jpg')}` : '';
@@ -62,7 +67,7 @@ const DocumentRow = ({ document, index }) => {
     <article className="min-w-0 overflow-hidden rounded-xl border border-gray-200 bg-white">
       <div className="border-b border-gray-100 bg-gray-50/60 p-2.5">
         {url && isImage ? (
-          <a href={viewUrl} target="_blank" rel="noopener noreferrer" className="shrink-0" title="View full-size document">
+          <a href={preview.url} target="_blank" rel="noopener noreferrer" className="shrink-0" title="View full-size document">
             <img src={preview.url} alt={label} className="h-28 w-full object-contain sm:h-36" />
           </a>
         ) : isPdf ? (
@@ -86,7 +91,7 @@ const DocumentRow = ({ document, index }) => {
         </div>
       {url && (
         <div className="flex flex-wrap items-center gap-1.5 border-t border-gray-100 p-2.5">
-          <a href={viewUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2.5 py-1 text-xs font-semibold text-brand-blue font-inter hover:bg-blue-50"><Eye size={13} /> View</a>
+          <ViewReportButton url={preview?.url || viewUrl} iconSize={13} className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2.5 py-1 text-xs font-semibold text-brand-blue font-inter hover:bg-blue-50 disabled:opacity-50">View</ViewReportButton>
           <button type="button" onClick={download} disabled={downloading} className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2.5 py-1 text-xs font-semibold text-brand-blue font-inter hover:bg-blue-50 disabled:opacity-50">
             {downloading ? <RefreshCw size={13} className="animate-spin" /> : <Download size={13} />} Download
           </button>

@@ -48,13 +48,19 @@ export const OTPVerification = () => {
     clearTimeout(redirectRef.current);
   }, []);
 
+  // OTPs are consumed atomically: a second submit of the same code after a success would
+  // show a spurious "Invalid or expired OTP", so only one verify is ever in flight.
+  const verifyingRef = useRef(false);
   const handleVerify = async () => {
+    if (verifyingRef.current || successState) return;
     if (otp.length !== 6) { setError('Please enter all 6 digits'); return; }
     if (!email) { setError('Session expired. Please go back and register again.'); return; }
 
+    verifyingRef.current = true;
     setSubmitting(true);
     const result = await verifyOTP(email, otp);
     setSubmitting(false);
+    verifyingRef.current = false;
 
     if (!result.success) {
       setError(result.error || 'Invalid or expired OTP. Please try again.');

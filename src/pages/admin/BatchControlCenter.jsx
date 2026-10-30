@@ -13,6 +13,8 @@ import { VerificationDetailsModal, VerificationCheckDetailsModal } from '@/compo
 import { TablePagination } from '@/components/shared/TablePagination';
 import { useAutomaticBatchRefresh } from '@/hooks/useAutomaticBatchRefresh';
 import { batchSdcSpaceId } from '@/utils/dhiway';
+import { CertificateAccessPanel, ReportsProtectedBadge } from '@/components/shared/CertificateAccessPanel';
+import { isHumanBatch, canRequireHolderApproval } from '@/utils/certificateAccess';
 import {
   useBatchList, WORKFLOW_STEPS, isProductRecord, recordTitle, getCertificateProductId,
   formatVerifTypeLabel, statusBadge,
@@ -91,6 +93,7 @@ export const BatchControlCenter = () => {
   const selectedBatch = batches.find((b) => b.id === batchId) || null;
 
   const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
+  const [accessMode, setAccessMode] = useState(null); // live certificate_access_mode from the access panel
   const [editBatchOpen, setEditBatchOpen] = useState(false);
   const [deleteBatchTarget, setDeleteBatchTarget] = useState(null);
 
@@ -847,6 +850,7 @@ export const BatchControlCenter = () => {
               <h1 className="font-sora text-2xl font-bold text-brand-dark truncate">{selectedBatch.name}</h1>
               <Badge status={selectedBatch.statusMeta.badge}>{selectedBatch.statusMeta.label}</Badge>
               {selectedBatch.sharedWithOrganization && <Badge status="success">Shared with Organization</Badge>}
+              <ReportsProtectedBadge mode={accessMode || batchDetail?.certificate_access_mode || selectedBatch.certificateAccessMode} />
             </div>
             <div className="flex items-center gap-2 shrink-0">
               <Button
@@ -1453,6 +1457,11 @@ export const BatchControlCenter = () => {
             )}
 
         </div>
+
+        {/* ── Report access (Human batches only — Product/Warranty stay public) ── */}
+        {isHumanBatch(batchDetail?.batch_type || selectedBatch.batchType) && (
+          <CertificateAccessPanel batchId={selectedBatch.id} onModeChange={setAccessMode} canProtect={canRequireHolderApproval(batchDetail?.credential_visibility)} />
+        )}
       </div>
 
       {/* ── Edit Batch Modal (local-only display rename) ────────────────── */}

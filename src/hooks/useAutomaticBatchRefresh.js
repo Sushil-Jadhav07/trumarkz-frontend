@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { verificationAPI } from '@/services/api';
 import { automaticChecks, missingAutomaticReports, startAutomaticPolling } from '@/utils/automaticVerification';
 
-// Authenticated batch views observe consent-triggered work; the public consent
+// Authenticated batch views observe automatic verification work; the public consent
 // page deliberately cannot read private reports with a consent token.
 export const useAutomaticBatchRefresh = ({ batchId, batchType, records, onUpdate }) => {
   const callback = useRef(onUpdate); callback.current = onUpdate;

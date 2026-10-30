@@ -1,17 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { motion } from 'framer-motion';
+import { motion, MotionConfig } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
-import { Cell, Pie, PieChart, ResponsiveContainer } from 'recharts';
 import { AuthLayout } from '@/components/layout/AuthLayout';
-import { PageHeader } from '@/components/shared/PageHeader';
-import { Card } from '@/components/ui/Card';
-import { Button } from '@/components/ui/Button';
-import { Badge } from '@/components/ui/Badge';
 import { SkeletonLoader } from '@/components/ui/SkeletonLoader';
+import { KpiCard, KpiSkeleton } from '@/components/shared/KpiCard';
 import { authAPI, verificationAPI, getApiError } from '@/services/api';
 import {
-  AlertTriangle, Building2, CheckCircle, Clock, Inbox,
-  Layers, RefreshCw, ShieldCheck, UserPlus, XCircle,
+  AlertTriangle, ArrowRight, Building2, CalendarDays, CheckCircle2, ChevronRight, CircleCheck,
+  Clock, Inbox, Layers, RefreshCw, UserPlus, Users, XCircle,
 } from 'lucide-react';
 
 // ── Status vocabulary ──────────────────────────────────────────────────────
@@ -30,18 +26,6 @@ const classifyRecordStatus = (status) => {
   if (FAILED_RECORD_STATUSES.has(value)) return 'failed';
   return 'pending';
 };
-
-// Batch-level `status` field vocabulary (from BatchMonitor.jsx's batchStatusMeta).
-// There is no batch-level "failed/rejected" status in the backend — failure is
-// only ever tracked per-record, which is why it isn't listed here.
-const BATCH_STATUS_META = {
-  pending:                   { label: 'Pending',       badge: 'pending' },
-  processing:                { label: 'Processing',    badge: 'in-progress' },
-  verification_in_progress:  { label: 'In Progress',   badge: 'in-progress' },
-  verification_completed:    { label: 'Completed',     badge: 'verified' },
-  sdc_generated:              { label: 'SDC Generated',  badge: 'verified' },
-};
-const getBatchStatusMeta = (status) => BATCH_STATUS_META[status] || BATCH_STATUS_META.pending;
 
 const PROCESSING_BATCH_STATUSES = new Set(['processing', 'verification_in_progress']);
 
@@ -116,68 +100,56 @@ const timeAgo = (value) => {
   return formatDate(value);
 };
 
-// ── Small presentational pieces ────────────────────────────────────────────
-const StatCard = ({ label, value, sub, icon: Icon, iconBg, iconColor, delay = 0 }) => (
-  <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay, duration: 0.3 }}>
-    <Card className="p-5">
-      <div className="flex items-start justify-between gap-3">
-        <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${iconBg} ${iconColor}`}>
-          <Icon size={19} />
-        </div>
-      </div>
-      <p className="mt-4 text-[11px] font-semibold uppercase tracking-wide text-gray-400 font-inter">{label}</p>
-      <p className="mt-1 font-sora font-bold text-3xl text-brand-dark leading-none">{value}</p>
-      {sub && <p className="mt-1.5 text-xs text-gray-400 font-inter truncate">{sub}</p>}
-    </Card>
-  </motion.div>
-);
+// ── Presentational pieces ─────────────────────────────────────────────────
+const fadeUp = (delay = 0) => ({
+  initial: { opacity: 0, y: 12 },
+  animate: { opacity: 1, y: 0 },
+  transition: { delay, duration: 0.35, ease: 'easeOut' },
+});
 
-const StatCardSkeleton = () => (
-  <Card className="p-5">
-    <SkeletonLoader width="44px" height="44px" className="rounded-xl" />
-    <div className="mt-4 space-y-2">
-      <SkeletonLoader width="70%" height="11px" />
-      <SkeletonLoader width="45%" height="28px" />
-      <SkeletonLoader width="60%" height="10px" />
-    </div>
-  </Card>
-);
-
-const SectionCard = ({ title, subtitle, action, children, className = '', bodyClassName = 'p-5' }) => (
-  <Card className={`p-0 overflow-hidden h-full ${className}`}>
-    <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-gray-100">
-      <div className="min-w-0">
-        <h3 className="font-sora font-semibold text-brand-dark text-[15px]">{title}</h3>
-        {subtitle && <p className="text-xs text-gray-400 font-inter mt-0.5">{subtitle}</p>}
-      </div>
-      {action}
-    </div>
-    <div className={bodyClassName}>{children}</div>
-  </Card>
+const Panel = ({ children, className = '' }) => (
+  <div className={`rounded-2xl border border-gray-100 bg-white ${className}`}>{children}</div>
 );
 
 const InlineEmpty = ({ icon: Icon = Inbox, text }) => (
   <div className="flex flex-col items-center justify-center py-10 text-center">
-    <div className="p-3 bg-gray-100 rounded-full mb-3">
+    <div className="mb-3 rounded-full bg-gray-100 p-3">
       <Icon size={22} className="text-gray-400" />
     </div>
     <p className="text-sm text-gray-500 font-inter">{text}</p>
   </div>
 );
 
-const TableSkeletonRows = ({ cols, rows = 5 }) => (
-  <>
-    {Array.from({ length: rows }).map((_, i) => (
-      <tr key={i} className="border-b border-gray-100 last:border-0">
-        {Array.from({ length: cols }).map((__, j) => (
-          <td key={j} className="px-4 py-3.5">
-            <SkeletonLoader height="14px" width={j === 0 ? '85%' : '60%'} />
-          </td>
-        ))}
-      </tr>
-    ))}
-  </>
-);
+const STATUS_PILL = {
+  sdc_generated:            { label: 'SDC generated', className: 'bg-green-50 text-green-700', icon: CircleCheck, iconClass: 'fill-green-500 text-white' },
+  verification_completed:   { label: 'Completed',     className: 'bg-green-50 text-green-700', icon: CircleCheck, iconClass: 'fill-green-500 text-white' },
+  processing:               { label: 'Processing',    className: 'bg-blue-50 text-brand-blue', icon: Layers,      iconClass: 'text-brand-blue' },
+  verification_in_progress: { label: 'In progress',   className: 'bg-blue-50 text-brand-blue', icon: Layers,      iconClass: 'text-brand-blue' },
+  pending:                  { label: 'Pending',       className: 'bg-orange-50 text-orange-600', icon: Clock,     iconClass: 'text-orange-500' },
+};
+
+const StatusPill = ({ status }) => {
+  const meta = STATUS_PILL[status] || STATUS_PILL.pending;
+  const Icon = meta.icon;
+  return (
+    <span className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-medium font-inter ${meta.className}`}>
+      <Icon size={15} className={meta.iconClass} />
+      {meta.label}
+    </span>
+  );
+};
+
+const AVATAR_TONES = [
+  'bg-blue-50 text-brand-blue',
+  'bg-purple-50 text-purple-600',
+  'bg-red-50 text-red-500',
+  'bg-gray-100 text-brand-dark',
+];
+
+const percent = (part, total) => (total > 0 ? `${((part / total) * 100).toFixed(1)}%` : '0%');
+
+const formatHeaderDate = (date) =>
+  `${date.getDate()} ${date.toLocaleDateString('en-US', { month: 'short' })}, ${date.getFullYear()}`;
 
 export const AdminDashboard = () => {
   const navigate = useNavigate();
@@ -275,266 +247,304 @@ export const AdminDashboard = () => {
   }, [batches]);
   const maxOrgBatches = topOrganizations[0]?.totalBatches || 1;
 
-  const todayLabel = useMemo(() => new Date().toLocaleDateString('en-US', {
-    day: '2-digit', month: 'short', year: 'numeric',
-  }), []);
+  const headerDate = useMemo(() => formatHeaderDate(new Date()), []);
+  const shownBatches = recentBatches.slice(0, 4);
+  const shownActivity = recentActivity.slice(0, 3);
+  const total = stats.totalRecords;
 
   const kpis = [
-    { label: 'Total Organizations', value: orgCount === null ? '—' : orgCount, sub: orgCount === null ? 'Unavailable' : 'Active organizations', icon: Building2, iconBg: 'bg-purple-100', iconColor: 'text-purple-600' },
-    { label: 'Total Batches', value: batches.length, sub: 'All verification batches', icon: Layers, iconBg: 'bg-blue-100', iconColor: 'text-brand-blue' },
-    { label: 'Pending', value: stats.pending, sub: 'Awaiting verification', icon: Clock, iconBg: 'bg-orange-100', iconColor: 'text-orange-600' },
-    { label: 'Verified', value: stats.verified, sub: 'Completed', icon: CheckCircle, iconBg: 'bg-green-100', iconColor: 'text-green-600' },
-    { label: 'Failed', value: stats.failed, sub: 'Require attention', icon: XCircle, iconBg: 'bg-red-100', iconColor: 'text-red-600' },
+    { label: 'Total batches', value: batches.length, sub: `${processingBatchCount} currently processing`, icon: Layers },
+    { label: 'Organizations', value: orgCount === null ? '—' : orgCount, sub: orgCount === null ? 'Unavailable' : 'Active organizations', icon: Building2 },
+    { label: 'Verified records', value: stats.verified, sub: 'Completed verification', icon: CheckCircle2 },
+    { label: 'Pending records', value: stats.pending, sub: 'Awaiting verification', icon: Clock },
   ];
 
-  const donutData = [
-    { name: 'Pending', value: stats.pending, color: '#f97316' },
-    { name: 'Verified', value: stats.verified, color: '#22c55e' },
-    { name: 'Failed', value: stats.failed, color: '#ef4444' },
+  const segments = [
+    { key: 'pending', label: 'Pending', value: stats.pending, bar: 'bg-gray-400', dot: 'bg-gray-400' },
+    { key: 'verified', label: 'Verified', value: stats.verified, bar: 'bg-brand-blue', dot: 'bg-brand-blue' },
+    { key: 'failed', label: 'Failed', value: stats.failed, bar: 'bg-red-500', dot: 'bg-red-500' },
   ];
 
-  const attentionMetrics = [
-    { label: 'Pending verifications', value: stats.pending, tone: 'bg-orange-50 text-orange-700 hover:bg-orange-100/70' },
-    { label: 'Failed / rejected', value: stats.failed, tone: 'bg-red-50 text-red-700 hover:bg-red-100/70' },
-    { label: 'Processing batches', value: processingBatchCount, tone: 'bg-purple-50 text-purple-700 hover:bg-purple-100/70' },
+  const actionTiles = [
+    { label: 'Pending review', value: stats.pending, icon: Clock, tile: 'bg-orange-50/70 hover:bg-orange-50', iconClass: 'text-orange-500', valueClass: 'text-orange-500' },
+    { label: 'Failed / rejected', value: stats.failed, icon: XCircle, tile: 'bg-red-50/70 hover:bg-red-50', iconClass: 'text-red-500', valueClass: 'text-red-500' },
+    { label: 'Processing batches', value: processingBatchCount, icon: Layers, tile: 'bg-blue-50/70 hover:bg-blue-50', iconClass: 'text-brand-blue', valueClass: 'text-brand-blue' },
   ];
-  const hasAttentionItems = attentionMetrics.some((m) => m.value > 0);
 
-  const headerAction = (
-    <div className="flex items-center gap-3">
-      <span className="hidden sm:inline-flex items-center rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-500 font-inter">
-        {todayLabel}
-      </span>
-      <Button variant="primary" size="sm" icon={RefreshCw} loading={refreshing} onClick={() => loadDashboard(true)}>
-        Refresh
-      </Button>
-    </div>
-  );
+  // Activity icon follows the event's own colour from ACTIVITY_META.
+  const activityIcon = (dot) => {
+    if (dot.includes('green')) return { icon: CircleCheck, wrap: 'bg-green-50', iconClass: 'fill-green-500 text-white', line: 'bg-green-500' };
+    if (dot.includes('red')) return { icon: XCircle, wrap: 'bg-red-50', iconClass: 'text-red-500', line: 'bg-red-500' };
+    if (dot.includes('orange')) return { icon: Clock, wrap: 'bg-orange-50', iconClass: 'text-orange-500', line: 'bg-orange-500' };
+    return { icon: Layers, wrap: 'bg-blue-50', iconClass: 'text-brand-blue', line: 'bg-brand-blue' };
+  };
 
   return (
-    <AuthLayout title="Admin Dashboard">
-      <div className="space-y-6">
-        <PageHeader
-          title="Super Admin Dashboard"
-          subtitle="Monitor platform activity, organizations and verification performance."
-          action={headerAction}
-        />
+    <AuthLayout title="Overview" breadcrumb={['Administration', 'Overview']}>
+      <MotionConfig reducedMotion="user">
+      <div className="space-y-5">
+        {/* Header */}
+        <motion.div {...fadeUp(0)} className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.08em] text-brand-blue font-inter">Admin workspace</p>
+            <h1 className="mt-1.5 font-sora text-xl font-bold leading-tight text-brand-dark sm:text-2xl">Verification command center</h1>
+            <p className="mt-1 text-sm text-gray-500 font-inter">A clear view of your platform&apos;s verification work.</p>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="inline-flex h-9 items-center gap-2 rounded-lg border border-gray-200 bg-white px-4 text-sm text-gray-600 font-inter">
+              <CalendarDays size={17} className="text-gray-400" /> {headerDate}
+            </span>
+            <button
+              type="button"
+              onClick={() => loadDashboard(true)}
+              disabled={refreshing}
+              className="inline-flex h-9 items-center gap-2 rounded-lg border-2 border-brand-blue/80 bg-white px-4 text-sm font-semibold text-brand-blue font-inter transition-colors hover:bg-blue-50 disabled:opacity-60"
+            >
+              <RefreshCw size={17} className={refreshing ? 'animate-spin motion-reduce:animate-none' : ''} /> {refreshing ? 'Refreshing…' : 'Refresh'}
+            </button>
+          </div>
+        </motion.div>
 
         {error && (
-          <Card className="p-5 border-red-100 bg-red-50">
-            <div className="flex items-start gap-3">
-              <AlertTriangle size={18} className="text-red-500 mt-0.5 shrink-0" />
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold text-red-700 font-inter">Couldn't load dashboard data</p>
-                <p className="text-xs text-red-500 font-inter mt-0.5">{error}</p>
-              </div>
-              <Button variant="outline" size="sm" onClick={() => loadDashboard(true)}>Retry</Button>
+          <div className="flex items-start gap-3 rounded-2xl border border-red-100 bg-red-50 p-4">
+            <AlertTriangle size={18} className="mt-0.5 shrink-0 text-red-500" />
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold text-red-700 font-inter">Couldn&apos;t load dashboard data</p>
+              <p className="mt-0.5 text-xs text-red-500 font-inter">{error}</p>
             </div>
-          </Card>
+            <button type="button" onClick={() => loadDashboard(true)} className="min-h-[40px] rounded-lg border border-red-200 bg-white px-4 text-xs font-semibold text-red-600 font-inter hover:bg-red-50">Retry</button>
+          </div>
         )}
 
-        {/* KPI row */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+        {/* KPI tiles */}
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
           {loading
-            ? Array.from({ length: 5 }).map((_, i) => <StatCardSkeleton key={i} />)
-            : kpis.map((k, i) => <StatCard key={k.label} {...k} delay={i * 0.04} />)}
+            ? Array.from({ length: 4 }).map((_, i) => <KpiSkeleton key={i} />)
+            : kpis.map((k, i) => <KpiCard key={k.label} {...k} delay={0.05 + i * 0.05} />)}
         </div>
 
-        {/* Verification Overview + Needs Attention + Recent Activity */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-          <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
-            <SectionCard title="Verification Overview" subtitle="Live verification distribution">
-              {loading ? (
-                <div className="flex items-center justify-center py-6">
-                  <SkeletonLoader width="180px" height="180px" circle />
+        {/* Verification overview + Top organizations */}
+        <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1.85fr)_minmax(0,1fr)]">
+          <motion.div {...fadeUp(0.15)}>
+            <Panel className="h-full p-5 sm:p-6">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <h2 className="font-sora text-base font-semibold text-brand-dark">Verification overview</h2>
+                  <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-brand-blue font-inter">{total} records</span>
                 </div>
-              ) : stats.totalRecords === 0 ? (
+                <p className="text-xs text-gray-500 font-inter">Review reports before taking action.</p>
+              </div>
+
+              {loading ? (
+                <div className="mt-6 space-y-4">
+                  <SkeletonLoader height="8px" />
+                  <div className="grid grid-cols-3 gap-4">{[1, 2, 3].map((i) => <SkeletonLoader key={i} height="44px" />)}</div>
+                </div>
+              ) : total === 0 ? (
                 <InlineEmpty text="No verification data yet. This will populate once batches are created." />
               ) : (
-                <div className="flex items-center gap-4">
-                  <div className="relative w-[150px] h-[150px] shrink-0">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <PieChart>
-                        <Pie data={donutData} dataKey="value" nameKey="name" innerRadius={48} outerRadius={70} strokeWidth={0} paddingAngle={2}>
-                          {donutData.map((d) => <Cell key={d.name} fill={d.color} />)}
-                        </Pie>
-                      </PieChart>
-                    </ResponsiveContainer>
-                    <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                      <span className="font-sora font-bold text-2xl text-brand-dark leading-none">{stats.totalRecords}</span>
-                      <span className="text-[11px] text-gray-400 font-inter mt-0.5">records</span>
-                    </div>
+                <>
+                  <div
+                    role="img"
+                    aria-label={segments.map((s) => `${s.label} ${s.value} (${percent(s.value, total)})`).join(', ')}
+                    className="mt-5 flex h-2 w-full gap-1 overflow-hidden rounded-full"
+                  >
+                    {segments.filter((s) => s.value > 0).map((s) => (
+                      <div key={s.key} className={`${s.bar} h-full rounded-full`} style={{ width: `${(s.value / total) * 100}%` }} />
+                    ))}
                   </div>
-                  <div className="flex-1 min-w-0 space-y-3">
-                    {donutData.map((d) => (
-                      <div key={d.name} className="flex items-center justify-between gap-3">
-                        <span className="flex items-center gap-2 text-sm text-brand-dark font-inter">
-                          <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: d.color }} />
-                          {d.name}
-                        </span>
-                        <span className="font-sora font-semibold text-brand-dark">{d.value}</span>
+                  <div className="mt-5 grid grid-cols-3 divide-x divide-gray-100">
+                    {segments.map((s) => (
+                      <div key={s.key} className="px-1 first:pl-0 sm:px-6 sm:first:pl-0">
+                        <p className="flex items-center gap-2 text-sm text-gray-500 font-inter">
+                          <span className={`h-3 w-3 rounded-full ${s.dot}`} /> {s.label}
+                        </p>
+                        <p className="mt-1.5 flex items-baseline gap-2 pl-5">
+                          <span className="font-sora text-xl font-bold tabular-nums text-brand-dark">{s.value}</span>
+                          <span className="text-sm text-gray-500 font-inter">{percent(s.value, total)}</span>
+                        </p>
                       </div>
                     ))}
                   </div>
-                </div>
+                </>
               )}
-            </SectionCard>
+
+              <div className="mt-5 grid grid-cols-1 gap-3 border-t border-gray-100 pt-4 sm:grid-cols-3">
+                {actionTiles.map((t) => (
+                  <button
+                    key={t.label}
+                    type="button"
+                    onClick={() => navigate('/admin/batch-monitor')}
+                    className={`group flex items-center gap-3 rounded-xl px-4 py-3.5 text-left transition-colors ${t.tile}`}
+                  >
+                    <t.icon size={20} strokeWidth={1.75} className={`shrink-0 ${t.iconClass}`} />
+                    <span className="flex-1 text-sm font-medium text-brand-dark font-inter">{t.label}</span>
+                    <span className={`font-sora text-sm font-semibold ${t.valueClass}`}>{loading ? '…' : t.value}</span>
+                    <ChevronRight size={16} className={`shrink-0 transition-transform group-hover:translate-x-0.5 ${t.iconClass}`} />
+                  </button>
+                ))}
+              </div>
+            </Panel>
           </motion.div>
 
-          <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.14 }}>
-            <SectionCard title="Needs Attention" subtitle="Items requiring admin action">
+          <motion.div {...fadeUp(0.2)}>
+            <Panel className="h-full p-5 sm:p-6">
+              <div className="flex items-center justify-between gap-3">
+                <h2 className="font-sora text-base font-semibold text-brand-dark">Top organizations</h2>
+                <span className="text-xs text-gray-500 font-inter">By total batches</span>
+              </div>
               {loading ? (
-                <div className="space-y-3">
-                  {[1, 2, 3].map((i) => <SkeletonLoader key={i} height="52px" />)}
-                </div>
-              ) : !hasAttentionItems ? (
-                <p className="text-sm text-gray-400 font-inter text-center py-8">No items currently require attention.</p>
+                <div className="mt-5 space-y-4">{[1, 2, 3, 4].map((i) => <SkeletonLoader key={i} height="36px" />)}</div>
+              ) : topOrganizations.length === 0 ? (
+                <InlineEmpty icon={Building2} text="No organization activity found yet." />
               ) : (
-                <div className="space-y-2.5">
-                  {attentionMetrics.filter((m) => m.value > 0).map((m) => (
-                    <button
-                      key={m.label}
-                      onClick={() => navigate('/admin/batch-monitor')}
-                      className={`w-full flex items-center justify-between gap-3 rounded-xl px-4 py-3.5 text-left transition-colors ${m.tone}`}
-                    >
-                      <span className="text-sm font-medium font-inter">{m.label}</span>
-                      <span className="font-sora font-bold text-lg">{m.value}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </SectionCard>
-          </motion.div>
-
-          <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.18 }}>
-            <SectionCard title="Recent Activity" subtitle="Latest platform events">
-              {loading ? (
-                <div className="space-y-4">
-                  {[1, 2, 3].map((i) => <SkeletonLoader key={i} height="16px" />)}
-                </div>
-              ) : recentActivity.length === 0 ? (
-                <p className="text-sm text-gray-400 font-inter text-center py-8">No recent activity yet.</p>
-              ) : (
-                <div className="space-y-4">
-                  {recentActivity.map((a) => (
-                    <div key={a.id} className="flex items-start gap-3">
-                      <span className={`mt-1.5 w-2 h-2 rounded-full shrink-0 ${a.dot}`} />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-brand-dark font-inter truncate">{a.label}</p>
-                        <p className="text-xs text-gray-400 font-inter truncate">{a.orgName}</p>
+                <ul className="mt-4 space-y-3.5">
+                  {topOrganizations.map((o, i) => (
+                    <li key={o.key} className="flex items-center gap-3">
+                      <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full font-sora text-base font-semibold ${AVATAR_TONES[i % AVATAR_TONES.length]}`}>
+                        {(o.orgName || '?').trim()[0]?.toUpperCase() || '?'}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="truncate text-sm font-medium text-brand-dark font-inter">{o.orgName}</span>
+                          <span className="shrink-0 text-xs text-gray-500 font-inter">{o.totalBatches} {o.totalBatches === 1 ? 'batch' : 'batches'}</span>
+                        </div>
+                        <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-gray-100">
+                          <div className="h-full rounded-full bg-brand-blue" style={{ width: `${Math.max(6, Math.round((o.totalBatches / maxOrgBatches) * 100))}%` }} />
+                        </div>
                       </div>
-                      <span className="text-xs text-gray-400 font-inter whitespace-nowrap">{timeAgo(a.time)}</span>
-                    </div>
+                    </li>
                   ))}
-                </div>
+                </ul>
               )}
-            </SectionCard>
+            </Panel>
           </motion.div>
         </div>
 
-        {/* Recent Batches + Top Organizations */}
-        <div className="grid grid-cols-1 xl:grid-cols-[1fr_320px] gap-5">
-          <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.22 }}>
-            <SectionCard
-              title="Recent Batches"
-              subtitle="Latest batch activity"
-              action={<Button variant="ghost" size="sm" onClick={() => navigate('/admin/batch-monitor')}>View All</Button>}
-              bodyClassName="p-0"
-            >
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
+        {/* Recent batches + Recent activity */}
+        <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1.85fr)_minmax(0,1fr)]">
+          <motion.div {...fadeUp(0.25)}>
+            <Panel className="h-full p-5 sm:p-6">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+                  <h2 className="font-sora text-base font-semibold text-brand-dark">Recent batches</h2>
+                  <span className="text-sm text-gray-500 font-inter">Latest {shownBatches.length} of {batches.length} batches</span>
+                </div>
+                <button type="button" onClick={() => navigate('/admin/batch-monitor')} className="-my-2 inline-flex min-h-[44px] items-center gap-1 rounded-lg px-2 text-sm font-medium text-brand-blue font-inter hover:underline">
+                  View all <ArrowRight size={15} />
+                </button>
+              </div>
+              <div className="mt-3 overflow-x-auto">
+                <table className="w-full min-w-[560px] text-sm">
                   <thead>
                     <tr className="border-b border-gray-100 text-left">
-                      <th className="px-4 py-3 font-inter font-medium text-gray-400 text-xs uppercase tracking-wide whitespace-nowrap">Batch Name</th>
-                      <th className="px-4 py-3 font-inter font-medium text-gray-400 text-xs uppercase tracking-wide whitespace-nowrap">Organization</th>
-                      <th className="px-4 py-3 font-inter font-medium text-gray-400 text-xs uppercase tracking-wide whitespace-nowrap">Type</th>
-                      <th className="px-4 py-3 font-inter font-medium text-gray-400 text-xs uppercase tracking-wide whitespace-nowrap">Records</th>
-                      <th className="px-4 py-3 font-inter font-medium text-gray-400 text-xs uppercase tracking-wide whitespace-nowrap">Status</th>
-                      <th className="px-4 py-3 font-inter font-medium text-gray-400 text-xs uppercase tracking-wide whitespace-nowrap">Created</th>
+                      {['Batch', 'Organization', 'Records', 'Status', 'Created'].map((h) => (
+                        <th key={h} className="py-2.5 pr-4 text-xs font-medium text-gray-500 font-inter">{h}</th>
+                      ))}
                     </tr>
                   </thead>
                   <tbody>
                     {loading ? (
-                      <TableSkeletonRows cols={6} rows={5} />
-                    ) : recentBatches.length === 0 ? (
-                      <tr>
-                        <td colSpan={6}>
-                          <InlineEmpty text="No verification batches found. Verification activity will appear here once batches are created." />
-                        </td>
-                      </tr>
+                      Array.from({ length: 4 }).map((_, i) => (
+                        <tr key={i} className="border-b border-gray-50 last:border-0">
+                          {Array.from({ length: 5 }).map((__, j) => (
+                            <td key={j} className="py-3 pr-4"><SkeletonLoader height="14px" width={j === 0 ? '85%' : '60%'} /></td>
+                          ))}
+                        </tr>
+                      ))
+                    ) : shownBatches.length === 0 ? (
+                      <tr><td colSpan={5}><InlineEmpty text="No verification batches yet." /></td></tr>
                     ) : (
-                      recentBatches.map((b) => {
-                        const meta = getBatchStatusMeta(b.status);
-                        return (
-                          <tr key={b.id} className="border-b border-gray-50 last:border-0 hover:bg-gray-50/60 transition-colors">
-                            <td className="px-4 py-3.5 font-inter text-brand-dark font-medium whitespace-nowrap max-w-[220px] truncate">{b.name}</td>
-                            <td className="px-4 py-3.5 font-inter text-gray-600 whitespace-nowrap max-w-[160px] truncate">{b.orgName}</td>
-                            <td className="px-4 py-3.5 font-inter text-gray-500 whitespace-nowrap">{b.type || '—'}</td>
-                            <td className="px-4 py-3.5 font-inter text-gray-600 whitespace-nowrap">{b.total}</td>
-                            <td className="px-4 py-3.5 whitespace-nowrap"><Badge status={meta.badge}>{meta.label}</Badge></td>
-                            <td className="px-4 py-3.5 font-inter text-gray-500 whitespace-nowrap">{formatDate(b.createdAt)}</td>
-                          </tr>
-                        );
-                      })
+                      shownBatches.map((b) => (
+                        <tr
+                          key={b.id}
+                          tabIndex={0}
+                          aria-label={`Open batch ${b.name}`}
+                          onClick={() => navigate(`/admin/batch-monitor/${encodeURIComponent(b.id)}`)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault();
+                              navigate(`/admin/batch-monitor/${encodeURIComponent(b.id)}`);
+                            }
+                          }}
+                          className="cursor-pointer border-b border-gray-50 transition-colors last:border-0 hover:bg-gray-50/70 focus-visible:bg-blue-50/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-blue"
+                        >
+                          <td className="max-w-[220px] truncate py-3 pr-4 text-brand-dark font-inter">{b.name}</td>
+                          <td className="max-w-[200px] truncate py-3 pr-4 text-gray-600 font-inter">{b.orgName}</td>
+                          <td className="py-3 pr-4 text-gray-600 font-inter">{b.total}</td>
+                          <td className="py-3 pr-4"><StatusPill status={b.status} /></td>
+                          <td className="whitespace-nowrap py-3 text-gray-500 font-inter">{formatDate(b.createdAt)}</td>
+                        </tr>
+                      ))
                     )}
                   </tbody>
                 </table>
               </div>
-            </SectionCard>
+            </Panel>
           </motion.div>
 
-          <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.26 }}>
-            <SectionCard title="Top Organizations" subtitle="Most active by batches">
+          <motion.div {...fadeUp(0.3)}>
+            <Panel className="h-full p-5 sm:p-6">
+              <div className="flex items-center justify-between gap-3">
+                <h2 className="font-sora text-base font-semibold text-brand-dark">Recent activity</h2>
+                <span className="text-xs text-gray-500 font-inter">Latest platform events</span>
+              </div>
               {loading ? (
-                <div className="space-y-4">
-                  {[1, 2, 3].map((i) => <SkeletonLoader key={i} height="38px" />)}
-                </div>
-              ) : topOrganizations.length === 0 ? (
-                <InlineEmpty icon={Building2} text="No organization activity found yet." />
+                <div className="mt-5 space-y-4">{[1, 2, 3].map((i) => <SkeletonLoader key={i} height="40px" />)}</div>
+              ) : shownActivity.length === 0 ? (
+                <InlineEmpty text="No recent activity yet." />
               ) : (
-                <div className="space-y-4">
-                  {topOrganizations.map((o) => (
-                    <div key={o.key}>
-                      <div className="flex items-center justify-between gap-2 mb-1.5">
-                        <span className="text-sm font-medium text-brand-dark font-inter truncate">{o.orgName}</span>
-                        <span className="text-xs text-gray-400 font-inter whitespace-nowrap">{o.totalBatches} {o.totalBatches === 1 ? 'batch' : 'batches'}</span>
-                      </div>
-                      <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden">
-                        <div
-                          className="h-2 bg-brand-blue rounded-full"
-                          style={{ width: `${Math.max(6, Math.round((o.totalBatches / maxOrgBatches) * 100))}%` }}
-                        />
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                <ol className="relative mt-4 space-y-4">
+                  <span aria-hidden="true" className="absolute bottom-3 left-[3px] top-3 w-px bg-gray-100" />
+                  {shownActivity.map((a) => {
+                    const meta = activityIcon(a.dot);
+                    return (
+                      <li key={a.id} className="relative flex items-start gap-3">
+                        <span className={`relative z-10 mt-4 h-[7px] w-[7px] shrink-0 rounded-full ${meta.line}`} />
+                        <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${meta.wrap}`}>
+                          <meta.icon size={20} strokeWidth={1.75} className={meta.iconClass} />
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-medium text-brand-dark font-inter">{a.label}</p>
+                          <p className="text-xs text-gray-500 font-inter">{a.orgName}</p>
+                        </div>
+                        <span className="shrink-0 text-xs text-gray-500 font-inter">{timeAgo(a.time)}</span>
+                      </li>
+                    );
+                  })}
+                </ol>
               )}
-            </SectionCard>
+            </Panel>
           </motion.div>
         </div>
 
-        {/* Quick Actions */}
-        <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}>
-          <SectionCard title="Quick Actions">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        {/* Admin access */}
+        <motion.div {...fadeUp(0.35)}>
+          <Panel className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+            <div>
+              <h2 className="font-sora text-base font-semibold text-brand-dark">Admin access</h2>
+              <p className="text-sm text-gray-500 font-inter">Manage administrative access and permissions.</p>
+            </div>
+            <div className="flex flex-col gap-3 sm:flex-row">
               <button
+                type="button"
                 onClick={() => navigate('/admin/promote-super-admin')}
-                className="flex items-center gap-3 rounded-xl border border-gray-100 hover:border-brand-blue/30 hover:bg-brand-blue/5 px-4 py-3.5 text-left transition-colors"
+                className="inline-flex h-11 items-center justify-center gap-2.5 rounded-xl border border-brand-blue/70 bg-white px-6 text-sm font-semibold text-brand-blue font-inter transition-colors hover:bg-blue-50"
               >
-                <ShieldCheck size={16} className="text-brand-blue shrink-0" />
-                <span className="text-sm font-medium text-brand-dark font-inter">Promote Existing User</span>
+                <UserPlus size={18} strokeWidth={1.75} /> Promote existing user
               </button>
               <button
+                type="button"
                 onClick={() => navigate('/admin/create-super-admin')}
-                className="flex items-center gap-3 rounded-xl border border-gray-100 hover:border-brand-blue/30 hover:bg-brand-blue/5 px-4 py-3.5 text-left transition-colors"
+                className="inline-flex h-11 items-center justify-center gap-2.5 rounded-xl border border-brand-blue/70 bg-white px-6 text-sm font-semibold text-brand-blue font-inter transition-colors hover:bg-blue-50"
               >
-                <UserPlus size={16} className="text-brand-blue shrink-0" />
-                <span className="text-sm font-medium text-brand-dark font-inter">Create New Super Admin</span>
+                <Users size={18} strokeWidth={1.75} /> Create Super Admin
               </button>
             </div>
-          </SectionCard>
+          </Panel>
         </motion.div>
       </div>
+      </MotionConfig>
     </AuthLayout>
   );
 };

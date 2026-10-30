@@ -3,6 +3,7 @@ import { useLocation } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import { useOrganizationNotifications } from '@/hooks/useOrganizationNotifications';
 import { isConsentPage } from '@/utils/consent';
+import { isCertificateAccessPage } from '@/utils/certificateAccess';
 import { usePushNotifications } from '@/hooks/usePushNotifications';
 import toast from 'react-hot-toast';
 
@@ -22,8 +23,8 @@ export const AppProvider = ({ children }) => {
   const persistedState = readStoredState();
   const { user, role, isAuthenticated } = useAuth();
   const { pathname } = useLocation();
-  const notificationState = useOrganizationNotifications(isAuthenticated && role === 'organization' && user?.id && !isConsentPage(pathname) ? `${user.id}:${user.organizationId || ''}` : null);
-  const publicTokenPage = isConsentPage(pathname) || pathname === '/upload' || pathname.startsWith('/verification/manual/upload/') || pathname.startsWith('/skills/verify/upload/');
+  const notificationState = useOrganizationNotifications(isAuthenticated && role === 'organization' && user?.id && !isConsentPage(pathname) && !isCertificateAccessPage(pathname) ? `${user.id}:${user.organizationId || ''}` : null);
+  const publicTokenPage = isConsentPage(pathname) || isCertificateAccessPage(pathname) || pathname === '/upload' || pathname.startsWith('/verification/manual/upload/') || pathname.startsWith('/skills/verify/upload/');
   const browserPush = usePushNotifications(isAuthenticated && user?.id && !publicTokenPage ? user.id : null, (payload) => {
     if (role !== 'organization') return;
     const body = typeof payload.notification?.body === 'string' ? payload.notification.body : 'A batch was deleted by the superadmin and is no longer available.';

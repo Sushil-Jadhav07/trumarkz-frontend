@@ -3,6 +3,7 @@ import { AlertTriangle, ExternalLink, RefreshCw, Users, Search, FolderOpen, Chec
 import { CustomSelect } from '@/components/ui/CustomSelect';
 import { TablePagination } from '@/components/shared/TablePagination';
 import { verificationAPI, getApiError } from '@/services/api';
+import { ViewReportButton } from '@/components/shared/ViewReportButton';
 import { emailRecipientBatchOptions, recipientReportUrl } from '@/utils/emailDraftRecipients';
 
 const recipientError = (err) => {
@@ -139,7 +140,7 @@ export const EmailDraftRecipients = ({ verificationType, verificationSelector })
                     <td className="whitespace-nowrap px-5 py-4 text-xs tabular-nums text-gray-600">{user.phone_number || '—'}</td>
                     <td className="px-5 py-4"><span className={`inline-flex whitespace-nowrap rounded-md px-2 py-1 text-xs font-medium capitalize ring-1 ring-inset ${tone}`}>{status.replaceAll('_', ' ')}</span></td>
                     <td className="max-w-xs break-words px-5 py-4 text-xs leading-5 text-gray-500">{user.rejection_reason || user.reason || '—'}</td>
-                    <td className="px-5 py-3.5">{reportUrl ? <a href={reportUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs font-medium text-brand-blue transition-colors hover:border-blue-200 hover:bg-blue-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40">View report<ExternalLink size={13} /></a> : <span className="text-xs text-gray-400">{user.report_url ? 'Unavailable' : '—'}</span>}</td>
+                    <td className="px-5 py-3.5">{reportUrl ? <ViewReportButton url={reportUrl} icon={ExternalLink} iconSize={13} className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs font-medium text-brand-blue transition-colors hover:border-blue-200 hover:bg-blue-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40 disabled:opacity-60">View report</ViewReportButton> : <span className="text-xs text-gray-400">{user.report_url ? 'Unavailable' : '—'}</span>}</td>
                   </tr>;
                 })}
                 {filteredUsers.length === 0 && <tr><td colSpan={6} className="px-5 py-8 text-center text-sm text-gray-500">No recipients match “{search}”.</td></tr>}

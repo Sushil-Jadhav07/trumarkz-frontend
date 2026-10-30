@@ -28,6 +28,16 @@ export const SCHEMA_SEMANTIC_FIELDS = {
 // Human configs are always the 5-QR layout; the legacy variant is no longer offered.
 export const HUMAN_SCHEMA_VARIANT = 'human_5qr';
 
+// The backend keeps the full nested schema record under this reserved custom_fields key.
+// It is never shown or edited as a flat field, and never sent back on a PATCH.
+export const RESERVED_CUSTOM_FIELD_KEYS = new Set(['__schema_record__']);
+
+export const visibleCustomFields = (customFields) => (
+  customFields && typeof customFields === 'object' && !Array.isArray(customFields)
+    ? Object.fromEntries(Object.entries(customFields).filter(([key]) => !RESERVED_CUSTOM_FIELD_KEYS.has(key)))
+    : {}
+);
+
 export const emptySchemaConfigForm = (spaceType = 'human') => ({
   space_type: spaceType,
   schema_variant: spaceType === 'human' ? HUMAN_SCHEMA_VARIANT : '',

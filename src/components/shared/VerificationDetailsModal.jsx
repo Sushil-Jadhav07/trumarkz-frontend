@@ -3,6 +3,7 @@ import { CheckCircle, Clock, FileDown, Eye, RefreshCw, XCircle } from 'lucide-re
 import { Modal } from '@/components/ui/Modal';
 import { Badge } from '@/components/ui/Badge';
 import { RecordDocuments } from '@/components/shared/RecordDocuments';
+import { ViewReportButton } from '@/components/shared/ViewReportButton';
 import { ConsentBadge } from '@/components/shared/ConsentBadge';
 import { AutomaticVerificationStatus } from '@/components/shared/AutomaticVerificationStatus';
 import { useAutomaticVerification } from '@/hooks/useAutomaticVerification';
@@ -193,13 +194,10 @@ export const VerificationCheckDetailsModal = ({ selection, title, verifierEmail,
                 <dt className="text-xs text-gray-400">Report</dt>
                 <dd>
                   {canViewReport ? (
-                    <button
-                      type="button"
-                      onClick={() => window.open(reportUrl, '_blank', 'noopener,noreferrer')}
-                      className="flex items-center gap-1.5 rounded-lg border border-blue-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-brand-blue hover:bg-blue-50 transition-colors"
-                    >
-                      <Eye size={12} /> View Report
-                    </button>
+                    <ViewReportButton
+                      url={reportUrl}
+                      className="flex items-center gap-1.5 rounded-lg border border-blue-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-brand-blue hover:bg-blue-50 transition-colors disabled:opacity-60"
+                    />
                   ) : (
                     <span className="text-xs text-gray-400">
                       {isVerified ? 'No report available' : 'Awaiting verifier decision'}

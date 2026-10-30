@@ -18,15 +18,15 @@ const options = [
     title: 'Open Search',
     subtitle: 'Public registry access',
     description: 'Let anyone search and view these credentials without requesting permission from the person.',
-    details: ['No permission request before verification', 'Email is optional for bulk uploads'],
+    details: ['Anyone with a report link can view the reports', 'Email is optional for bulk uploads'],
   },
   {
     id: 'private',
     icon: Fingerprint,
     title: 'Permission Required',
-    subtitle: 'Consent before verification',
-    description: 'Each person reviews an emailed permission request before their Human verification can continue.',
-    details: ['A valid email is required for each person', 'The request shows the response deadline'],
+    subtitle: 'Holder approves who views reports',
+    description: 'Verification starts straight away. Outside your organization, people must get the person’s approval before they can view their certificate reports.',
+    details: ['A valid email is required for each person, so they can approve access requests', 'Verifier assignment and emails are never delayed'],
   }
 ];
 

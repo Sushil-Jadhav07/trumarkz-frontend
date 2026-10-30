@@ -6,7 +6,8 @@ import { NotificationBell } from '@/components/shared/NotificationBell';
 import { Menu, ChevronDown, LogOut, User, Wallet } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
-export const Navbar = ({ onMenuToggle, title }) => {
+// `breadcrumb` (e.g. ['Administration', 'Overview']) replaces the plain title when given.
+export const Navbar = ({ onMenuToggle, title, breadcrumb }) => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const [showDropdown, setShowDropdown] = React.useState(false);
@@ -35,7 +36,18 @@ export const Navbar = ({ onMenuToggle, title }) => {
           <div className="lg:hidden">
             <Logo size="sm" />
           </div>
-          <h1 className="hidden lg:block font-sora font-semibold text-lg text-brand-dark">{title}</h1>
+          {Array.isArray(breadcrumb) && breadcrumb.length ? (
+            <nav aria-label="Breadcrumb" className="hidden lg:flex items-center gap-2 text-[15px] font-inter">
+              {breadcrumb.map((part, i) => (
+                <React.Fragment key={part}>
+                  {i > 0 && <span className="text-gray-300">/</span>}
+                  <span className={i === breadcrumb.length - 1 ? 'font-medium text-brand-dark' : 'text-gray-500'}>{part}</span>
+                </React.Fragment>
+              ))}
+            </nav>
+          ) : (
+            <h1 className="hidden lg:block font-sora font-semibold text-lg text-brand-dark">{title}</h1>
+          )}
         </div>
 
         <div className="flex items-center gap-3">

@@ -60,8 +60,11 @@ export const ResetPassword = () => {
   };
 
   // ── Step 2: submit everything to the API ───────────────────────────────────
+  // The reset OTP is single-use: block a double submit while the first is in flight.
+  const resettingRef = useRef(false);
   const handleResetPassword = async (e) => {
     e.preventDefault();
+    if (resettingRef.current) return;
     const e2 = {};
     if (!password) e2.password = 'New password is required';
     else if (password.length < 8) e2.password = 'Minimum 8 characters required';
@@ -70,9 +73,11 @@ export const ResetPassword = () => {
     setPasswordErrors(e2);
     if (Object.keys(e2).length) return;
 
+    resettingRef.current = true;
     setSubmitting(true);
     const result = await resetPassword(email.trim(), otp, password);
     setSubmitting(false);
+    resettingRef.current = false;
 
     if (!result.success) {
       const msg = result.error || 'Reset failed. Please try again.';

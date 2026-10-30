@@ -278,3 +278,10 @@ test('upload column check: exact names without a schema; mapped and aliased name
   assert.deepEqual(missingRequiredColumns(['Gender', 'Nationality'], required, config), ['full_name', 'dob']);
   assert.equal(normalizeColumnName('  Employee-Name '), 'employee_name');
 });
+
+test('reserved __schema_record__ is never shown or sent back', async () => {
+  const { visibleCustomFields } = await import('./schemaConfig.js');
+  assert.deepEqual(visibleCustomFields({ city: 'Pune', __schema_record__: { a: 1 } }), { city: 'Pune' });
+  assert.deepEqual(visibleCustomFields(null), {});
+  assert.deepEqual(visibleCustomFields(['x']), {});
+});

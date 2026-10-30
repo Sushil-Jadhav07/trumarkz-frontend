@@ -1,19 +1,14 @@
 import axios from 'axios';
 import { getDocumentViewCandidates } from '@/utils/recordDocuments';
 import { isConsentPage } from '@/utils/consent';
-import { createConsentGuard } from './consentGuard.js';
+import { isCertificateAccessPage } from '@/utils/certificateAccess';
 import { automaticRecordId, canRetryAutomatic } from '@/utils/automaticVerification';
 import { validateOcrAssignments } from '@/utils/ocrAssignments';
 import { withSampleRecord } from '@/utils/schemaConfig';
+import { fetchReport, isGatedReportUrl, reportAuthHeaders } from '@/utils/reportAccess';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
 const VERIFICATION_BASE_URL = import.meta.env.VITE_VERIFICATION_API_URL || API_BASE_URL;
-const consentGuard = createConsentGuard({
-  getBatch: (id) => verificationAPI.getBatchDetails(id),
-  getUsers: (filters) => verificationAPI.getAllVerifications(filters),
-  getUser: (id) => verificationAPI.getUserVerification(id),
-  getAssignments: (id) => verificationAPI.getManualAssignments(id),
-});
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -142,7 +137,7 @@ api.interceptors.response.use(
     // interceptor so only a REAL authenticated-request 401 triggers this.
     if (error.response?.status === 401 && !isPublicAuthEndpoint(error.config?.url)) {
       clearAuthStorage();
-      if (window.location.pathname !== '/login' && !isConsentPage(window.location.pathname)) window.location.replace('/login');
+      if (window.location.pathname !== '/login' && !isConsentPage(window.location.pathname) && !isCertificateAccessPage(window.location.pathname)) window.location.replace('/login');
     }
     return Promise.reject(error);
   }
@@ -178,7 +173,7 @@ verificationApi.interceptors.response.use(
     const isPublicRoute = isPublicManualVerificationEndpoint(error.config?.url) || isPublicConsentEndpoint(error.config?.url);
     if (error.response?.status === 401 && !isPublicRoute) {
       clearAuthStorage();
-      if (window.location.pathname !== '/login' && !isConsentPage(window.location.pathname)) window.location.replace('/login');
+      if (window.location.pathname !== '/login' && !isConsentPage(window.location.pathname) && !isCertificateAccessPage(window.location.pathname)) window.location.replace('/login');
     }
     return Promise.reject(error);
   }
@@ -719,7 +714,9 @@ export const verificationAPI = {
 
   getUserVerification: (userId) => verificationApi.get(`/verification/user/${userId}`),
   retryAutomaticVerification: async (userId) => {
-    const { user, batch } = await consentGuard.assertUser(userId);
+    // Retry eligibility follows the verification rules only — holder consent is not a condition.
+    const { data: user } = await verificationApi.get(`/verification/user/${userId}`);
+    const { data: batch } = await verificationApi.get(`/verification/batches/${user?.batch_id}`);
     const row = batch.users?.find((item) => automaticRecordId(item) === String(userId));
     if (!row || !canRetryAutomatic({ ...row, ...user, verification_type_status: row.verification_type_status }, batch)) {
       throw new Error('Retry is unavailable: automatic verification must have no report and no approved or rejected automatic checks. Refresh the status.');
@@ -729,7 +726,6 @@ export const verificationAPI = {
   getDocumentViewCandidates: (document) => getDocumentViewCandidates(document, VERIFICATION_BASE_URL),
 
   generateQRAndCertificate: async (userId) => {
-    await consentGuard.assertUser(userId);
     return verificationApi.post(`/verification/user/${userId}/generate-qr`);
   },
 
@@ -740,7 +736,6 @@ export const verificationAPI = {
       params: batchType ? { batch_type: batchType } : undefined,
     }),
   getBatchDetails: (batchId, config) => verificationApi.get(`/verification/batches/${batchId}`, config),
-  getBatchConsentDetails: async (batchId) => ({ data: await consentGuard.loadBatch(batchId) }),
 
   // POST /verification/batches/{batch_id}/share-with-organization —
   // Superadmin only. The real, persisted "Send to Organization" action:
@@ -838,7 +833,6 @@ export const verificationAPI = {
 
   // Manual verification request — returns { request_id, token, expires_at, verifier_email }
   requestManualVerification: async (payload) => {
-    await consentGuard.assertBatch(payload.batch_id);
     return verificationApi.post('/verification/verification/manual/request', payload);
   },
 
@@ -891,7 +885,6 @@ export const verificationAPI = {
 
   // ── Bulk manual verification emails ───────────────────────────────────────
   sendBulkManualVerification: async (payload) => {
-    await consentGuard.assertBatch(payload.batch_id);
     return verificationApi.post('/verification/manual/send-bulk', payload);
   },
 
@@ -900,14 +893,11 @@ export const verificationAPI = {
   // exact resulting user_ids are sent in the payload; the backend never
   // splits or reorders them itself. ──────────────────────────────────────
   smartSendManualVerification: async (payload) => {
-    const ids = (payload.verification_assignments || []).flatMap((type) => (type.verifiers || []).flatMap((verifier) => verifier.user_ids || []));
-    await consentGuard.assertBatch(payload.batch_id, ids);
     return verificationApi.post('/verification/manual/smart-send', payload);
   },
 
   // ── Resend manual verification link ───────────────────────────────────────
   resendManualVerification: async (requestId, batchId) => {
-    await consentGuard.assertRequest(requestId, batchId);
     return verificationApi.post(`/verification/manual/resend/${requestId}`);
   },
 
@@ -921,7 +911,6 @@ export const verificationAPI = {
   // new request is decided. 409 if a pending resend already exists for one
   // of these users/this type — never retry blindly on that.
   resendRejectedForVerification: async (payload) => {
-    await consentGuard.assertBatch(payload.batch_id, payload.batch_user_ids);
     return verificationApi.post('/verification/manual/resend-rejected', {
       batch_id: payload.batch_id,
       verification_type_name: payload.verification_type_name,
@@ -1031,7 +1020,6 @@ export const verificationAPI = {
 
   // ── Run automatic verification ────────────────────────────────────────────
   runAutoVerification: async (verificationTypeName, userId) => {
-    await consentGuard.assertUser(userId);
     return verificationApi.post(`/verification/verification/automatic/${verificationTypeName}/${userId}`);
   },
 
@@ -1138,7 +1126,6 @@ export const sdcAPI = {
   // behavior — cleanObject already drops an empty array, so passing [] here
   // is always safe and never accidentally narrows the request.
   generateBatchSDC: async (batchId, payload = {}) => {
-    await consentGuard.assertBatch(batchId, Array.isArray(payload.user_ids) && payload.user_ids.length ? payload.user_ids : undefined);
     return verificationApi.post(
       `/sdc/batches/${batchId}/generate`,
       cleanObject({
@@ -1194,7 +1181,6 @@ export const sdcAPI = {
   // 409 = drafts still not ready — retry. 400 = generate wasn't called first.
   // 502 = Dhiway issue failed — not retried automatically.
   issueBatchSDC: async (batchId, payload = {}) => {
-    await consentGuard.assertBatch(batchId);
     return verificationApi.post(
       `/sdc/batches/${batchId}/issue`,
       cleanObject({
@@ -1330,8 +1316,13 @@ const appendErrors = (message, errors) => {
   return message ? `${message}: ${items.join('; ')}` : items.join('; ');
 };
 
-export const getApiError = (err, fallback = 'Something went wrong. Please try again.') => {
-  const data = err?.response?.data;
+// Unexpected 500s carry {"detail": "Internal server error", "error_id": "<12 hex>"}; the id is
+// what support needs to find the log line, so it is always shown alongside the message.
+const withErrorId = (message, data) => (
+  data?.error_id ? `${message} (Error ID: ${data.error_id})` : message
+);
+
+const readApiError = (data, fallback) => {
   const detail = data?.detail;
   if (typeof detail === 'string') return appendErrors(detail, data?.errors);
   if (Array.isArray(detail)) {
@@ -1339,6 +1330,81 @@ export const getApiError = (err, fallback = 'Something went wrong. Please try ag
   }
   if (detail && typeof detail === 'object') return appendErrors(detail.message || detail.error || '', detail.errors) || fallback;
   return appendErrors(data?.message || '', data?.errors) || fallback;
+};
+
+export const getApiError = (err, fallback = 'Something went wrong. Please try again.') => {
+  const data = err?.response?.data;
+  return withErrorId(readApiError(data, fallback), data);
+};
+
+// ── Human Secure Certificate Access (web change report §4) ───────────────
+// Visitor and holder pages have no account: requests go out with no session
+// at all, so an org user testing them is never mistaken for the holder.
+const publicVerificationApi = axios.create({ baseURL: VERIFICATION_BASE_URL, timeout: 30000 });
+const REPORT_ORIGINS = [VERIFICATION_BASE_URL, API_BASE_URL];
+
+export const reportApiBaseUrl = VERIFICATION_BASE_URL;
+
+export const certificateAccessAPI = {
+  // Organization (own batches) / SuperAdmin (any batch).
+  getBatchAccess: (batchId) =>
+    verificationApi.get(`/verification/batches/${encodeURIComponent(batchId)}/certificate-access`),
+  setBatchAccessMode: (batchId, mode) =>
+    verificationApi.put(`/verification/batches/${encodeURIComponent(batchId)}/certificate-access`, { mode }),
+  revokeGrant: (batchId, grantId) =>
+    verificationApi.post(`/verification/batches/${encodeURIComponent(batchId)}/certificate-access/grants/${encodeURIComponent(grantId)}/revoke`),
+
+  // Visitor (§4d).
+  requestAccess: (body) =>
+    publicVerificationApi.post('/verification/certificate-access/requests', body),
+  verifyRequest: (requestId, otpCode) =>
+    publicVerificationApi.post(`/verification/certificate-access/requests/${encodeURIComponent(requestId)}/verify`, { otp_code: otpCode }),
+  getRequestStatus: (requestId, accessToken) =>
+    publicVerificationApi.get(`/verification/certificate-access/requests/${encodeURIComponent(requestId)}/status`, {
+      headers: { 'X-Certificate-Access-Token': accessToken },
+    }),
+
+  // Holder (§4e).
+  getApproval: (token) =>
+    publicVerificationApi.get(`/verification/certificate-access/approvals/${encodeURIComponent(token)}`),
+  decideApproval: (token, body) =>
+    publicVerificationApi.post(`/verification/certificate-access/approvals/${encodeURIComponent(token)}`, body),
+};
+
+// Fetch a report with the signed-in session (or a visitor token) — only ever sent
+// to TruMarkZ's own report routes, never to storage or any other host.
+export const fetchReportBlob = (url, { accessToken, signal } = {}) =>
+  fetchReport(url, { sessionToken: accessToken ? undefined : getStoredToken(), accessToken, allowedOrigins: REPORT_ORIGINS, signal });
+
+export const reportRequestHeaders = (url) =>
+  reportAuthHeaders(url, { sessionToken: getStoredToken(), allowedOrigins: REPORT_ORIGINS });
+
+// Opens a report in a new tab. On a holder_approval batch a plain link has no
+// session and gets 403, so TruMarkZ report routes are fetched with the session
+// and shown as a blob; anything else opens directly, as before. The tab is
+// opened synchronously so the browser doesn't treat it as a pop-up.
+export const openReport = async (url) => {
+  if (!isGatedReportUrl(url, REPORT_ORIGINS)) {
+    window.open(url, '_blank', 'noopener,noreferrer');
+    return;
+  }
+  const tab = window.open('', '_blank');
+  if (tab) {
+    tab.opener = null;
+    tab.document.title = 'Loading report…';
+    tab.document.body.style.font = '14px system-ui, sans-serif';
+    tab.document.body.textContent = 'Loading report…';
+  }
+  try {
+    const blob = await fetchReportBlob(url);
+    const objectUrl = URL.createObjectURL(blob);
+    if (tab) tab.location.href = objectUrl;
+    else window.open(objectUrl, '_blank', 'noopener,noreferrer');
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+  } catch (error) {
+    tab?.close();
+    throw error;
+  }
 };
 
 export const triggerBlobDownload = (blob, fileName) => {

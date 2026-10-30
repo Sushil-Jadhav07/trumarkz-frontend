@@ -518,6 +518,11 @@ export const GenerateSDCModal = ({ batch, onClose, onGenerated, liveStatus, poll
       if (!data.issue_pending) {
         toast.success(nothingNew ? 'Nothing to generate — selected records already have SDCs' : 'SDC created');
       }
+      // Advisory notes from the batch's dynamic schema mapping — shown as written, never parsed.
+      const mappingWarnings = Array.isArray(data.schema_mapping_warnings) ? data.schema_mapping_warnings.filter(Boolean) : [];
+      if (mappingWarnings.length) {
+        toast(`Schema mapping notes:\n${mappingWarnings.map((w) => `• ${w}`).join('\n')}`, { icon: 'ℹ️', duration: 9000 });
+      }
       // "already_generated" only means a DRAFT was created earlier for this
       // id — confirmed from the backend source — never that it was actually
       // issued (anchored into a real, retrievable certificate). That draft/

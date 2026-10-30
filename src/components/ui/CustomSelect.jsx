@@ -16,7 +16,9 @@ import { Check, ChevronDown, Search } from 'lucide-react';
 // in, well short of its own max-height). The portal sidesteps that
 // entirely, matching the same technique already used by SmartSendModal's
 // VerifierRow dropdown elsewhere in this app.
-export const CustomSelect = ({ value, onChange, options, placeholder, className = '', disabled = false, ariaLabel, title, searchable = false, searchPlaceholder = 'Search options…', allowCustomValue = false }) => {
+// `icon` (optional) renders a leading icon inside the trigger, used by the
+// labelled filter bars (e.g. Batch Monitor).
+export const CustomSelect = ({ value, onChange, options, placeholder, className = '', disabled = false, ariaLabel, title, searchable = false, searchPlaceholder = 'Search options…', allowCustomValue = false, icon: Icon }) => {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [menuPos, setMenuPos] = useState(null);
@@ -96,9 +98,12 @@ export const CustomSelect = ({ value, onChange, options, placeholder, className 
           setOpen(true);
           requestAnimationFrame(() => menuRef.current?.querySelector('[aria-selected="true"], [role="option"]')?.focus());
         }}
-        className="w-full flex items-center justify-between gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-semibold font-inter text-gray-600 hover:border-gray-300 focus:outline-none focus:ring-2 focus:ring-brand-blue/20 transition-colors disabled:cursor-not-allowed disabled:bg-gray-50 disabled:text-gray-400"
+        className={Icon
+          ? 'w-full h-9 flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 text-xs font-medium font-inter text-gray-700 hover:border-gray-300 focus:outline-none focus:ring-2 focus:ring-brand-blue/20 transition-colors disabled:cursor-not-allowed disabled:bg-gray-50 disabled:text-gray-400'
+          : 'w-full flex items-center justify-between gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-semibold font-inter text-gray-600 hover:border-gray-300 focus:outline-none focus:ring-2 focus:ring-brand-blue/20 transition-colors disabled:cursor-not-allowed disabled:bg-gray-50 disabled:text-gray-400'}
       >
-        <span className={searchable ? 'min-w-0 truncate text-left text-sm font-medium' : 'truncate'}>{selected?.label ?? placeholder}</span>
+        {Icon && <Icon size={15} strokeWidth={1.75} className="shrink-0 text-gray-500" />}
+        <span className={Icon ? 'min-w-0 flex-1 truncate text-left' : searchable ? 'min-w-0 truncate text-left text-sm font-medium' : 'truncate'}>{selected?.label ?? placeholder}</span>
         <ChevronDown size={12} className={`text-gray-400 shrink-0 transition-transform duration-200 ${open ? 'rotate-180' : ''}`} />
       </button>
       {open && !disabled && menuPos && createPortal(

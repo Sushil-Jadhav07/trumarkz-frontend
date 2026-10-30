@@ -42,7 +42,7 @@ export const useAutomaticVerification = ({ record, batchId, batchType, onUpdate 
         const next = { ...row, ...user, batch_type: batch.batch_type, verification_type_status: row.verification_type_status };
         const checks = automaticChecks(next);
         return { record: next, batch, watch: batch.batch_type === 'human' && checks.length > 0 &&
-          missingAutomaticReports(next).length > 0 && !['rejected'].includes(next.consent_status) };
+          missingAutomaticReports(next).length > 0 };
       },
       onValue: (value) => {
         setSnapshot({ key, ...value }); setChecking(value.watch);

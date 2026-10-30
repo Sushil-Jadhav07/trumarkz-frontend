@@ -12,6 +12,8 @@ import { AutomaticVerificationStatus } from '@/components/shared/AutomaticVerifi
 import { useAutomaticVerification } from '@/hooks/useAutomaticVerification';
 import { Modal } from '@/components/ui/Modal';
 import { verificationAPI, getApiError } from '@/services/api';
+import { ViewReportButton } from '@/components/shared/ViewReportButton';
+import { visibleCustomFields } from '@/utils/schemaConfig';
 import {
   AlertTriangle,
   ArrowLeft,
@@ -182,9 +184,8 @@ export const RecordDetail = () => {
   const productRecord = isProductRecord(record);
   const recordTitle = record.product_name || record.full_name || record.email || record.id;
   const recordTypeLabel = productRecord ? 'Product' : 'Human';
-  const customFields = record.custom_fields && typeof record.custom_fields === 'object'
-    ? Object.entries(record.custom_fields).filter(([, value]) => value !== null && value !== undefined && value !== '')
-    : [];
+  const customFields = Object.entries(visibleCustomFields(record.custom_fields))
+    .filter(([, value]) => value !== null && value !== undefined && value !== '');
   const detailRows = productRecord
     ? [
         { label: 'Category', value: record.category_name || record.category_id },
@@ -305,14 +306,11 @@ export const RecordDetail = () => {
                       </p>
                     )}
                     {canView && (
-                      <a
-                        href={reportUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="mt-2 inline-flex items-center gap-1.5 text-xs font-semibold text-brand-blue font-inter hover:underline"
-                      >
-                        <ExternalLink size={12} /> View Report
-                      </a>
+                      <ViewReportButton
+                        url={reportUrl}
+                        icon={ExternalLink}
+                        className="mt-2 inline-flex items-center gap-1.5 text-xs font-semibold text-brand-blue font-inter hover:underline disabled:opacity-60"
+                      />
                     )}
                   </div>
                 );

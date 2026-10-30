@@ -3,13 +3,11 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom';
 import { useNavigate, useParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Area, AreaChart, ResponsiveContainer } from 'recharts';
 import * as XLSX from 'xlsx';
 import { AuthLayout } from '@/components/layout/AuthLayout';
-import { PageHeader } from '@/components/shared/PageHeader';
-import { Card } from '@/components/ui/Card';
+import { KpiCard, KpiSkeleton } from '@/components/shared/KpiCard';
+import { ReportsProtectedBadge } from '@/components/shared/CertificateAccessPanel';
 import { Badge } from '@/components/ui/Badge';
-import { ProgressBar } from '@/components/ui/ProgressBar';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
 import { CustomSelect } from '@/components/ui/CustomSelect';
@@ -18,11 +16,10 @@ import { GenerateSDCModal } from '@/pages/admin/SDCVerification';
 import { TablePagination } from '@/components/shared/TablePagination';
 import { normalizeDhiwayDetails, resolveDhiwaySpaceId, batchSdcSpaceId } from '@/utils/dhiway';
 import { pendingManualUsers } from '@/utils/pendingManualVerifications';
-import { consentAllowsProcessing } from '@/utils/consent';
 import { batchMatchesDate, batchDateError, batchDatePresets } from '@/utils/batchFilters';
 import { useBatchVerificationFilter } from '@/hooks/useBatchVerificationFilter';
 import {
-  AlertCircle, AlertTriangle, ArrowRight, Building2, Calendar, CheckCircle, ChevronDown, ChevronLeft, ChevronRight, Clock, Download, Eye, FileText, Info,
+  AlertCircle, AlertTriangle, ArrowRight, Building2, Calendar, CheckCircle, ChevronDown, ChevronLeft, ChevronRight, ChevronsUpDown, Clock, Download, Eye, FileText, Info,
   Layers, Mail, MoreVertical, Package, Plus, RefreshCw, Save, Search, Send, ShieldCheck, Sparkles, Trash2, User, Users, X, XCircle, Zap,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -233,7 +230,19 @@ export const formatVerifTypeLabel = (report) =>
 
 const formatCreatedAt = (value) => {
   if (!value) return 'date unavailable';
-  return new Date(value).toLocaleString([], { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  return new Date(value).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+};
+
+// "Verification In Progress" → "Verification in progress"; acronyms like SDC stay upper-case.
+const sentenceCase = (label) => String(label || '').split(' ')
+  .map((word, i) => (i === 0 || word === word.toUpperCase() ? word : word.toLowerCase())).join(' ');
+
+// Page buttons with an ellipsis: 1 2 3 4 5 … 10.
+const pageItems = (current, count) => {
+  if (count <= 7) return Array.from({ length: count }, (_, i) => i + 1);
+  if (current <= 4) return [1, 2, 3, 4, 5, '…', count];
+  if (current >= count - 3) return [1, '…', count - 4, count - 3, count - 2, count - 1, count];
+  return [1, '…', current - 1, current, current + 1, '…', count];
 };
 
 // Batch aggregates come straight from GET /verification/batches — each entry
@@ -273,6 +282,8 @@ const normaliseApiBatch = (b) => {
     // — the actual security gate for certificate visibility, not a local
     // notify-action. See handleSendToOrganization / shareWithOrganization.
     sharedWithOrg: !!b.shared_with_org,
+    // "public" | "holder_approval" — Human Secure Certificate Access (fixed at creation).
+    certificateAccessMode: b.certificate_access_mode || null,
     sharedAt: b.shared_at || null,
     sharedBy: b.shared_by || null,
   };
@@ -558,8 +569,9 @@ export const SmartSendModal = ({ isOpen, onClose, onSent, batch }) => {
   // is keyed by `user_id`, not `id` (that field name only appears elsewhere,
   // e.g. the bulk-upload response's `entity_id`) — check all three so this
   // doesn't silently send `null` again if the shape varies by caller.
-  const consentBlockedCount = batchRecords.filter((record) => !consentAllowsProcessing(record)).length;
-  const batchUsers = batchRecords.filter((record) => consentAllowsProcessing(record)).map((r) => ({
+  // Eligibility follows the verification rules only: holder consent (Permission Required)
+  // controls who may view reports, never whether an org can assign or email verifiers.
+  const batchUsers = batchRecords.map((r) => ({
     id: r.id || r.user_id || r.entity_id,
     name: r.full_name || r.product_name || r.email || r.id || r.user_id || r.entity_id,
   }));
@@ -599,7 +611,7 @@ export const SmartSendModal = ({ isOpen, onClose, onSent, batch }) => {
     // party" — confirmed by the Manual Verification API docs, not a stale
     // endpoint. Its type list does not carry user status, so intersect it
     // with fresh per-user checks before offering assignments.
-    Promise.all([verificationAPI.getThirdPartyVerifiers(batch.id), verificationAPI.getBatchConsentDetails(batch.id)])
+    Promise.all([verificationAPI.getThirdPartyVerifiers(batch.id), verificationAPI.getBatchDetails(batch.id)])
       .then(async ([{ data }, { data: details }]) => {
         if (!active) return;
         if (!Array.isArray(details?.users) || details.users.some((user) => !user.verification_type_status || typeof user.verification_type_status !== 'object')) {
@@ -828,7 +840,7 @@ export const SmartSendModal = ({ isOpen, onClose, onSent, batch }) => {
 
     setSending(true);
     try {
-      const { data: latest } = await verificationAPI.getBatchConsentDetails(batch.id);
+      const { data: latest } = await verificationAPI.getBatchDetails(batch.id);
       if (!Array.isArray(latest?.users) || latest.users.some((user) => !user.verification_type_status || typeof user.verification_type_status !== 'object')) {
         throw new Error('Could not confirm the latest verification statuses. No emails were sent.');
       }
@@ -838,7 +850,7 @@ export const SmartSendModal = ({ isOpen, onClose, onSent, batch }) => {
         return assignedIds.length === eligibleIds.size && assignedIds.every((id) => eligibleIds.has(id));
       });
       if (!statusesUnchanged) {
-        toast.error('Verification or consent statuses changed. Review the refreshed eligible assignments before sending.');
+        toast.error('Verification statuses changed. Review the refreshed eligible assignments before sending.');
         setReloadAssignments((value) => value + 1);
         return;
       }
@@ -978,11 +990,9 @@ export const SmartSendModal = ({ isOpen, onClose, onSent, batch }) => {
         <div className="flex items-start gap-2 rounded-xl border border-amber-100 bg-amber-50 px-3 py-2.5">
           <Info size={13} className="text-amber-500 mt-0.5 shrink-0" />
           <p className="text-xs text-amber-700 font-inter leading-relaxed">
-            Assign <strong>each eligible pending verification</strong> to a verifier. Completed checks are excluded. Permission Required Human users must accept consent first. Each verifier receives an Excel of their assigned users and a secure upload link.
+            Assign <strong>each eligible pending verification</strong> to a verifier. Completed checks are excluded. Each verifier receives an Excel of their assigned users and a secure upload link.
           </p>
         </div>
-
-        {consentBlockedCount > 0 && !loading && <p role="status" className="rounded-xl border border-amber-100 bg-amber-50 p-3 text-xs leading-5 text-amber-800">Waiting for consent: {consentBlockedCount} user(s) cannot be assigned or emailed until they accept. Reopen this dialog to refresh their consent status.</p>}
 
         {loading ? (
           <LoadingSkeleton variant="form" label="Loading verification types & verifiers" />
@@ -990,7 +1000,7 @@ export const SmartSendModal = ({ isOpen, onClose, onSent, batch }) => {
           <div role="alert" className="space-y-3 rounded-xl border border-red-100 bg-red-50 p-4 text-sm text-red-700 font-inter"><p>{loadError}</p><button type="button" onClick={() => setReloadAssignments((value) => value + 1)} className="font-semibold underline">Try again</button></div>
         ) : verificationTypes.length === 0 ? (
           <div className="py-10 text-center">
-            <p className="text-sm text-gray-500 font-inter">{consentBlockedCount > 0 ? 'No eligible manual verifications yet. User consent is required before sending verifier emails.' : 'No pending manual verifications remain for this batch.'}</p>
+            <p className="text-sm text-gray-500 font-inter">No pending manual verifications remain for this batch.</p>
           </div>
         ) : (
           <div className="min-w-0">
@@ -2630,45 +2640,32 @@ export const BatchMonitor = () => {
     setSearchTerm(''); setDateFrom(''); setDateTo(''); setVerificationFilterId('');
   };
 
+  // Column sort (Batch name / Created on); null keeps the API's own order.
+  const [sort, setSort] = useState({ key: null, dir: 'asc' });
+  const toggleSort = (key) => setSort((s) => (s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: key === 'createdAt' ? 'desc' : 'asc' }));
+  const sortedBatches = sort.key
+    ? [...visibleBatches].sort((a, b) => {
+      const cmp = sort.key === 'createdAt'
+        ? new Date(a.createdAt || 0) - new Date(b.createdAt || 0)
+        : String(a.name).localeCompare(String(b.name));
+      return sort.dir === 'asc' ? cmp : -cmp;
+    })
+    : visibleBatches;
+
   const totalPages = Math.max(1, Math.ceil(visibleBatches.length / pageSize));
   const safePage = Math.min(currentPage, totalPages);
-  const paginatedBatches = visibleBatches.slice((safePage - 1) * pageSize, safePage * pageSize);
+  const paginatedBatches = sortedBatches.slice((safePage - 1) * pageSize, safePage * pageSize);
 
   const total    = batches.reduce((s, b) => s + b.total,    0);
   const pending  = batches.reduce((s, b) => s + b.pending,  0);
   const verified = batches.reduce((s, b) => s + b.verified, 0);
   const failed   = batches.reduce((s, b) => s + b.failed,   0);
 
-  // Real 7-day trend per metric, bucketed by each batch's actual created_at.
-  // (There's no per-status-transition timestamp in the API, so this reflects
-  // "records on batches created that day", not a true state-change history.)
-  const sparkSeries = useMemo(() => {
-    const days = Array.from({ length: 7 }).map((_, i) => {
-      const d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - (6 - i)); return d;
-    });
-    const bucket = (selector) => days.map((day, i) => {
-      const next = new Date(day); next.setDate(day.getDate() + 1);
-      const value = batches.reduce((sum, b) => {
-        if (!b.createdAt) return sum;
-        const t = new Date(b.createdAt).getTime();
-        return (t >= day.getTime() && t < next.getTime()) ? sum + selector(b) : sum;
-      }, 0);
-      return { i, value };
-    });
-    return {
-      total: bucket((b) => b.total),
-      pending: bucket((b) => b.pending),
-      verified: bucket((b) => b.verified),
-      failed: bucket((b) => b.failed),
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [batches]);
-
   const statCards = [
-    { key: 'total',    label: 'Total Records', value: total,    sub: 'Across all batches',    icon: Users,       surface: 'bg-blue-50',   text: 'text-brand-blue', stroke: '#2563eb', spark: sparkSeries.total },
-    { key: 'pending',  label: 'Pending Review', value: pending, sub: 'Awaiting verification',  icon: Clock,       surface: 'bg-orange-50', text: 'text-orange-500', stroke: '#f97316', spark: sparkSeries.pending },
-    { key: 'verified', label: 'Verified',       value: verified, sub: 'Successfully verified', icon: CheckCircle, surface: 'bg-green-50',  text: 'text-green-500',  stroke: '#22c55e', spark: sparkSeries.verified },
-    { key: 'failed',   label: 'Failed',         value: failed,   sub: 'Verification failed',   icon: XCircle,     surface: 'bg-red-50',    text: 'text-red-500',    stroke: '#ef4444', spark: sparkSeries.failed },
+    { key: 'total',    label: 'Total records',  value: total,    sub: 'Across all batches',    icon: Layers },
+    { key: 'pending',  label: 'Pending review', value: pending,  sub: 'Awaiting verification', icon: Clock },
+    { key: 'verified', label: 'Verified',       value: verified, sub: 'Completed checks',      icon: CheckCircle },
+    { key: 'failed',   label: 'Failed',         value: failed,   sub: 'Require attention',     icon: XCircle },
   ];
 
   // "View Details" — every batch type opens its own dedicated page. Warranty
@@ -2746,104 +2743,93 @@ export const BatchMonitor = () => {
   };
 
   return (
-    <AuthLayout title="Batch Monitor">
-      <PageHeader
-        title="Verification Batch Monitor"
-        subtitle="Review live human and product verification records"
-        action={
-          <div className="flex items-center gap-3">
-            <Button variant="outline" size="sm" icon={RefreshCw} loading={refreshing} onClick={async () => { await fetchData(true); setMetadataVersion((value) => value + 1); }}>
-              Refresh
-            </Button>
-            <div className="relative">
-              <Button variant="primary" size="sm" icon={Download} disabled={filtersBusy || Boolean(verificationFilter.error || dateError)} onClick={() => setShowExportMenu((v) => !v)}>
-                Export
-              </Button>
-              {showExportMenu && (
-                <>
-                  <div className="fixed inset-0 z-40" onClick={() => setShowExportMenu(false)} />
-                  <div className="absolute right-0 top-full mt-2 w-48 rounded-xl border border-gray-200 bg-white p-1 shadow-xl z-50">
-                    <button
-                      type="button"
-                      onClick={() => handleExport('xlsx')}
-                      className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-inter text-gray-700 hover:bg-gray-50"
-                    >
-                      <Download size={14} /> Export as Excel (.xlsx)
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleExport('csv')}
-                      className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-inter text-gray-700 hover:bg-gray-50"
-                    >
-                      <Download size={14} /> Export as CSV
-                    </button>
-                  </div>
-                </>
-              )}
-            </div>
+    <AuthLayout title="Batch Monitor" breadcrumb={['Administration', 'Batch Monitor']}>
+      {/* Header */}
+      <div className="mb-4 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.08em] text-brand-blue font-inter">Verification operations</p>
+          <h1 className="mt-1.5 font-sora text-xl font-bold leading-tight text-brand-dark sm:text-2xl">Batch monitor</h1>
+          <p className="mt-1 text-sm text-gray-500 font-inter">Review verification progress, reports and organization handoffs.</p>
+        </div>
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            disabled={refreshing}
+            onClick={async () => { await fetchData(true); setMetadataVersion((value) => value + 1); }}
+            className="inline-flex h-9 items-center gap-2 rounded-lg border-2 border-brand-blue/80 bg-white px-4 text-sm font-semibold text-brand-blue font-inter transition-colors hover:bg-blue-50 disabled:opacity-60"
+          >
+            <RefreshCw size={16} className={refreshing ? 'animate-spin motion-reduce:animate-none' : ''} /> {refreshing ? 'Refreshing…' : 'Refresh'}
+          </button>
+          <div className="relative">
+            <button
+              type="button"
+              disabled={filtersBusy || Boolean(verificationFilter.error || dateError)}
+              onClick={() => setShowExportMenu((v) => !v)}
+              aria-expanded={showExportMenu}
+              className="inline-flex h-9 items-center gap-2 rounded-lg bg-brand-blue px-4 text-sm font-semibold text-white font-inter transition-colors hover:bg-brand-blue-hover disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <Download size={16} /> Export
+            </button>
+            {showExportMenu && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setShowExportMenu(false)} />
+                <div className="absolute right-0 top-full z-50 mt-2 w-48 rounded-xl border border-gray-200 bg-white p-1 shadow-xl">
+                  <button
+                    type="button"
+                    onClick={() => handleExport('xlsx')}
+                    className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-inter text-gray-700 hover:bg-gray-50"
+                  >
+                    <Download size={14} /> Export as Excel (.xlsx)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleExport('csv')}
+                    className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-inter text-gray-700 hover:bg-gray-50"
+                  >
+                    <Download size={14} /> Export as CSV
+                  </button>
+                </div>
+              </>
+            )}
           </div>
-        }
-      />
-
-      {/* Stat Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-5">
-        {statCards.map((stat) => {
-          const Icon = stat.icon;
-          return (
-            <Card key={stat.key} className="p-4 overflow-hidden">
-              <div className="flex items-start justify-between gap-3">
-                <div className={`w-11 h-11 rounded-xl ${stat.surface} flex items-center justify-center shrink-0`}>
-                  <Icon size={20} className={stat.text} />
-                </div>
-                <div className="w-20 h-10 -mr-1 -mt-1">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={stat.spark} margin={{ top: 2, right: 0, left: 0, bottom: 0 }}>
-                      <defs>
-                        <linearGradient id={`spark-${stat.key}`} x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="0%" stopColor={stat.stroke} stopOpacity={0.35} />
-                          <stop offset="100%" stopColor={stat.stroke} stopOpacity={0} />
-                        </linearGradient>
-                      </defs>
-                      <Area type="monotone" dataKey="value" stroke={stat.stroke} strokeWidth={1.75} fill={`url(#spark-${stat.key})`} isAnimationActive={false} />
-                    </AreaChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
-              <p className="text-xs text-gray-500 font-inter mt-3">{stat.label}</p>
-              <p className="font-sora font-bold text-2xl text-brand-dark mt-0.5">{stat.value}</p>
-              <p className="text-[11px] text-gray-400 font-inter mt-0.5">{stat.sub}</p>
-            </Card>
-          );
-        })}
+        </div>
       </div>
 
+      {/* KPI tiles */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        {loading
+          ? statCards.map((stat) => <KpiSkeleton key={stat.key} />)
+          : statCards.map((stat, i) => <KpiCard key={stat.key} label={stat.label} value={stat.value} sub={stat.sub} icon={stat.icon} delay={0.05 + i * 0.05} />)}
+      </div>
+      <p className="mb-4 mt-2 text-xs text-gray-500 font-inter">Summary across all loaded batches.</p>
+
       {/* Filter bar */}
-      <Card className="p-4 mb-4 overflow-visible">
-        <div className="grid min-w-0 grid-cols-1 items-center gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.3fr)_minmax(0,2fr)_auto]">
-          <div className="flex items-center gap-2">
-            <Building2 size={14} className="text-gray-400 shrink-0" />
+      <div className="mb-4 rounded-xl border border-gray-100 bg-white p-4">
+        <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.35fr)_minmax(0,0.8fr)]">
+          <div className="min-w-0">
+            <p className="mb-1.5 text-xs text-gray-600 font-inter">Organization</p>
             <CustomSelect
               value={orgFilter}
               ariaLabel="Filter by organization"
               searchable
+              icon={Building2}
               onChange={setOrgFilter}
-              className="min-w-0 flex-1"
               options={[
-                { value: '', label: 'All Organizations' },
+                { value: '', label: 'All organizations' },
                 ...orgOptions.map((org) => ({ value: org, label: org })),
               ]}
             />
           </div>
 
-          <div className="flex items-center gap-2">
-            <Layers size={14} className="text-gray-400 shrink-0" />
+          <div className="min-w-0">
+            <p className="mb-1.5 text-xs text-gray-600 font-inter">Batch type</p>
             <CustomSelect
               value={batchTypeFilter}
               ariaLabel="Filter by batch type"
+              icon={Layers}
               onChange={setBatchTypeFilter}
-              className="min-w-0 flex-1"
               options={[
-                { value: '', label: 'All Batch Types' },
+                { value: '', label: 'All batch types' },
                 { value: 'human', label: 'Human' },
                 { value: 'product', label: 'Product' },
                 { value: 'warranty', label: 'Warranty' },
@@ -2851,33 +2837,46 @@ export const BatchMonitor = () => {
             />
           </div>
 
-          <CustomSelect value={verificationFilterId} onChange={setVerificationFilterId} ariaLabel="Filter by verification type" searchable
-            disabled={verificationOptionsLoading || Boolean(verificationOptionsError)}
-            options={[{ value: '', label: verificationOptionsLoading ? 'Loading verification types…' : 'All Verification Types' }, ...verificationOptions.map((type) => ({ value: type.id, label: type.name })), ...(verificationFilterId && !verificationOptions.some((type) => type.id === verificationFilterId) ? [{ value: verificationFilterId, label: 'Selected verification (unavailable)' }] : [])]} />
-
-          <div className="relative min-w-0">
-            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-            <input
-              type="text"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Search by batch name or ID..."
-              aria-label="Search batches"
-              className="w-full rounded-lg border border-gray-200 bg-white pl-9 pr-3 py-2 text-xs font-inter text-gray-600 focus:outline-none focus:ring-2 focus:ring-brand-blue/20"
+          <div className="min-w-0">
+            <p className="mb-1.5 text-xs text-gray-600 font-inter">Verification type</p>
+            <CustomSelect
+              value={verificationFilterId}
+              onChange={setVerificationFilterId}
+              ariaLabel="Filter by verification type"
+              searchable
+              icon={FileText}
+              disabled={verificationOptionsLoading || Boolean(verificationOptionsError)}
+              options={[{ value: '', label: verificationOptionsLoading ? 'Loading verification types…' : 'All verification types' }, ...verificationOptions.map((type) => ({ value: type.id, label: type.name })), ...(verificationFilterId && !verificationOptions.some((type) => type.id === verificationFilterId) ? [{ value: verificationFilterId, label: 'Selected verification (unavailable)' }] : [])]}
             />
           </div>
 
-          <div className="relative">
+          <div className="min-w-0">
+            <label htmlFor="batch-search" className="mb-1.5 block text-xs text-gray-600 font-inter">Search batch name or ID</label>
+            <div className="relative">
+              <Search size={15} strokeWidth={1.75} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
+              <input
+                id="batch-search"
+                type="text"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder="Search batch name or ID"
+                className="h-9 w-full rounded-lg border border-gray-200 bg-white pl-9 pr-3 text-xs font-inter text-gray-700 placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-brand-blue/20"
+              />
+            </div>
+          </div>
+
+          <div className="relative min-w-0">
+            <p className="mb-1.5 text-xs text-gray-600 font-inter">Created date</p>
             <button
               type="button"
               onClick={() => setShowDateRange((v) => !v)}
               aria-label="Filter by batch creation date"
               aria-expanded={showDateRange}
-              className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-semibold font-inter text-gray-600 hover:border-gray-300 whitespace-nowrap"
+              className="flex h-9 w-full items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 text-xs font-medium font-inter text-gray-700 hover:border-gray-300"
             >
-              <Calendar size={14} className="text-gray-400" />
-              {dateFrom || dateTo ? `${dateFrom || '…'} → ${dateTo || '…'}` : 'Created Date'}
-              <ChevronDown size={12} className="text-gray-400" />
+              <Calendar size={15} strokeWidth={1.75} className="shrink-0 text-gray-500" />
+              <span className="min-w-0 flex-1 truncate text-left">{dateFrom || dateTo ? `${dateFrom || '…'} → ${dateTo || '…'}` : 'All dates'}</span>
+              <ChevronDown size={12} className="shrink-0 text-gray-400" />
             </button>
             {showDateRange && (
               <>
@@ -2887,15 +2886,15 @@ export const BatchMonitor = () => {
                   <div className="grid grid-cols-2 gap-2">{batchDatePresets().map((preset) => <button type="button" key={preset.label} onClick={() => { setDateFrom(preset.from); setDateTo(preset.to); setShowDateRange(false); }} className="rounded-md border border-gray-200 px-2 py-1.5 text-xs text-gray-600 hover:border-blue-300 hover:bg-blue-50">{preset.label}</button>)}</div>
                   <div>
                     <label className="text-[11px] font-semibold text-gray-500 font-inter">From</label>
-                    <input aria-label="Created from date" type="date" max={dateTo || undefined} value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="w-full mt-1 rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs font-inter text-gray-600" />
+                    <input aria-label="Created from date" type="date" max={dateTo || undefined} value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="mt-1 w-full rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs font-inter text-gray-600" />
                   </div>
                   <div>
                     <label className="text-[11px] font-semibold text-gray-500 font-inter">To</label>
-                    <input aria-label="Created to date" type="date" min={dateFrom || undefined} value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="w-full mt-1 rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs font-inter text-gray-600" />
+                    <input aria-label="Created to date" type="date" min={dateFrom || undefined} value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="mt-1 w-full rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs font-inter text-gray-600" />
                   </div>
                   <div className="flex justify-between pt-1">
                     {dateError && <p role="alert" className="text-xs text-red-600">{dateError}</p>}
-                    <button type="button" onClick={() => { setDateFrom(''); setDateTo(''); }} className="text-xs text-gray-400 font-inter hover:text-gray-600">Clear</button>
+                    <button type="button" onClick={() => { setDateFrom(''); setDateTo(''); }} className="text-xs text-gray-500 font-inter hover:text-gray-700">Clear</button>
                     <button type="button" onClick={() => setShowDateRange(false)} className="text-xs font-semibold text-brand-blue font-inter hover:underline">Done</button>
                   </div>
                 </div>
@@ -2905,42 +2904,48 @@ export const BatchMonitor = () => {
         </div>
 
         {/* Quick status pills */}
-        <div className="flex flex-wrap items-center gap-2 mt-4 pt-4 border-t border-gray-100">
+        <div className="mt-4 flex flex-wrap items-center gap-2">
           {[
             { key: 'all', label: 'All' },
-            { key: 'in_progress', label: 'In Progress' },
+            { key: 'in_progress', label: 'In progress' },
             { key: 'pending', label: 'Pending' },
-            { key: 'completed', label: 'Verification Completed' },
+            { key: 'completed', label: 'Verification completed' },
             { key: 'failed', label: 'Failed' },
           ].map((pill) => (
             <button
               key={pill.key}
               type="button"
+              aria-pressed={statusFilter === pill.key}
               onClick={() => setStatusFilter(pill.key)}
-              className={`rounded-lg px-3.5 py-1.5 text-xs font-semibold font-inter transition-colors ${
-                statusFilter === pill.key ? 'bg-brand-blue text-white' : 'bg-gray-50 text-gray-500 hover:bg-gray-100 border border-gray-200'
+              className={`h-8 rounded-lg px-4 text-xs font-medium font-inter transition-colors ${
+                statusFilter === pill.key ? 'bg-brand-blue text-white' : 'border border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
               }`}
             >
               {pill.label}
             </button>
           ))}
-          {hasActiveFilters && (
-            <button type="button" onClick={clearAllFilters} className="text-xs font-semibold text-brand-blue font-inter hover:underline ml-1">
-              Clear All
+          <div className="ml-auto flex items-center gap-5">
+            <span role="status" className="text-xs text-gray-500 font-inter">{filtersBusy ? 'Checking verification types…' : `${visibleBatches.length} of ${batches.length} batches`}</span>
+            <button type="button" onClick={clearAllFilters} disabled={!hasActiveFilters} className="text-xs font-semibold text-brand-blue font-inter hover:underline disabled:cursor-default disabled:no-underline">
+              Clear all
             </button>
-          )}
-          <span role="status" className="ml-auto text-xs text-gray-500">{filtersBusy ? 'Checking verification types…' : `${visibleBatches.length} of ${batches.length} batches`}</span>
+          </div>
         </div>
         {dateError && <p role="alert" className="mt-3 text-xs text-red-600">{dateError}</p>}
         {verificationOptionsError && <p role="alert" className="mt-3 text-xs text-red-600">{verificationOptionsError} <button type="button" onClick={() => setMetadataVersion((value) => value + 1)} className="font-semibold underline">Retry loading filters</button></p>}
-      </Card>
+      </div>
 
-      {/* Batch Table */}
-      {verificationFilter.error ? <Card className="p-6"><p role="alert" className="text-sm text-red-600">{verificationFilter.error}</p><button type="button" onClick={verificationFilter.retry} className="mt-3 text-sm font-semibold text-brand-blue">Retry verification filter</button></Card> : loading || filtersBusy ? (
-        <LoadingSkeleton variant="table" label="Loading batches" columns={7}/>
+      {/* Batch table */}
+      {verificationFilter.error ? (
+        <div className="rounded-xl border border-gray-100 bg-white p-6">
+          <p role="alert" className="text-sm text-red-600">{verificationFilter.error}</p>
+          <button type="button" onClick={verificationFilter.retry} className="mt-3 text-sm font-semibold text-brand-blue">Retry verification filter</button>
+        </div>
+      ) : loading || filtersBusy ? (
+        <LoadingSkeleton variant="table" label="Loading batches" columns={7} />
       ) : visibleBatches.length === 0 ? (
-        <Card className="p-10 text-center">
-          <p className="text-sm text-gray-400 font-inter">
+        <div className="rounded-xl border border-gray-100 bg-white p-10 text-center">
+          <p className="text-sm text-gray-500 font-inter">
             {batches.length === 0 ? 'No verification records found' : 'No batches match the current filters'}
           </p>
           {hasActiveFilters && batches.length > 0 && (
@@ -2948,90 +2953,96 @@ export const BatchMonitor = () => {
               Clear filters
             </button>
           )}
-        </Card>
+        </div>
       ) : (
         <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }}>
-          <Card className="p-0 overflow-visible border border-gray-200 shadow-sm">
-            <div className="px-6 py-5 border-b border-gray-100 bg-gradient-to-r from-white to-gray-50/70 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="overflow-hidden rounded-xl border border-gray-100 bg-white">
+            <div className="flex flex-col justify-between gap-3 px-5 pb-3 pt-4 sm:flex-row sm:items-center">
               <div>
-                <h3 className="font-sora font-semibold text-brand-dark text-lg">Verification Batches</h3>
-                <p className="text-sm text-gray-500 font-inter mt-1">Manage verifier handoff, uploads, and organization sharing.</p>
+                <h2 className="flex items-center gap-2 font-sora text-base font-semibold text-brand-dark">
+                  <Layers size={18} strokeWidth={1.75} className="text-brand-blue" /> Verification batches
+                </h2>
+                <p className="mt-0.5 text-xs text-gray-500 font-inter">Manage verifier handoff, uploads and organization sharing.</p>
               </div>
-              <Badge status="default" className="bg-gray-900 text-white">{visibleBatches.length} batches</Badge>
+              <span className="self-start rounded-full bg-gray-100 px-3 py-1 text-xs font-semibold text-brand-dark font-inter sm:self-auto">{visibleBatches.length} batches</span>
             </div>
-            <div className="overflow-x-auto scrollbar-hidden bg-white">
-              <table className="w-full min-w-[1180px] border-collapse">
+            <div className="overflow-x-auto scrollbar-hidden">
+              <table className="w-full min-w-[1080px] border-collapse">
                 <thead>
-                  <tr className="bg-gray-50 border-b border-gray-100">
-                    <th className="px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-500 font-inter">Batch Name</th>
-                    <th className="px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-500 font-inter">Organization</th>
-                    <th className="px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-500 font-inter">Progress</th>
-                    <th className="px-5 py-3 text-center text-[11px] font-semibold uppercase tracking-wide text-gray-500 font-inter">Records</th>
-                    <th className="px-5 py-3 text-center text-[11px] font-semibold uppercase tracking-wide text-gray-500 font-inter">Pending</th>
-                    <th className="px-5 py-3 text-center text-[11px] font-semibold uppercase tracking-wide text-gray-500 font-inter">Verified</th>
-                    <th className="px-5 py-3 text-center text-[11px] font-semibold uppercase tracking-wide text-gray-500 font-inter">Failed</th>
-                    <th className="px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-500 font-inter">Status</th>
-                    <th className="px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-500 font-inter">Created On</th>
-                    <th className="px-5 py-3 text-center text-[11px] font-semibold uppercase tracking-wide text-gray-500 font-inter">Actions</th>
+                  <tr className="bg-gray-50/80 text-xs font-medium text-gray-600 font-inter">
+                    {[
+                      { label: 'Batch name', sortKey: 'name', align: 'text-left' },
+                      { label: 'Organization', align: 'text-left' },
+                      { label: 'Progress', align: 'text-left', divider: true },
+                      { label: 'Records', align: 'text-center' },
+                      { label: 'Pending', align: 'text-center' },
+                      { label: 'Verified', align: 'text-center' },
+                      { label: 'Failed', align: 'text-center' },
+                      { label: 'Status', align: 'text-left', divider: true },
+                      { label: 'Created on', sortKey: 'createdAt', align: 'text-left' },
+                      { label: 'Actions', align: 'text-center' },
+                    ].map((col) => (
+                      <th
+                        key={col.label}
+                        aria-sort={col.sortKey && sort.key === col.sortKey ? (sort.dir === 'asc' ? 'ascending' : 'descending') : undefined}
+                        className={`px-4 py-2.5 font-medium ${col.align} ${col.divider ? 'border-l border-gray-200' : ''}`}
+                      >
+                        {col.sortKey ? (
+                          <button type="button" onClick={() => toggleSort(col.sortKey)} className="inline-flex items-center gap-1.5 hover:text-brand-dark">
+                            {col.label}
+                            <ChevronsUpDown size={13} className={sort.key === col.sortKey ? 'text-brand-blue' : 'text-gray-400'} />
+                          </button>
+                        ) : col.label}
+                      </th>
+                    ))}
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-100 bg-white">
+                <tbody className="divide-y divide-gray-100">
                   {paginatedBatches.map((batch) => {
                     const complete = batch.total ? Math.round(((batch.verified + batch.failed) / batch.total) * 100) : 0;
                     return (
                       <tr
                         key={batch.id}
+                        tabIndex={0}
+                        aria-label={`Open batch ${batch.name}`}
                         onClick={() => handleOpenBatchDetails(batch)}
-                        className="cursor-pointer hover:bg-blue-50/30 transition-colors"
+                        onKeyDown={(event) => {
+                          if (event.target !== event.currentTarget) return;
+                          if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); handleOpenBatchDetails(batch); }
+                        }}
+                        className="cursor-pointer text-xs font-inter transition-colors hover:bg-blue-50/30 focus-visible:bg-blue-50/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-blue"
                       >
-                        <td className="px-5 py-4">
-                          <div className="flex items-start gap-3">
-                            <div className="w-10 h-10 rounded-xl bg-brand-blue/10 text-brand-blue flex items-center justify-center shrink-0">
-                              <Package size={18} />
+                        <td className="px-4 py-1.5">
+                          <p title={batch.id} className="max-w-[240px] truncate text-[13px] text-brand-dark">{batch.name}</p>
+                        </td>
+                        <td className="px-4 py-1.5">
+                          <p className="max-w-[210px] truncate text-gray-500">{batch.orgName}</p>
+                        </td>
+                        <td className="px-4 py-1.5">
+                          <div className="flex items-center gap-3">
+                            <div className="h-1.5 w-20 overflow-hidden rounded-full bg-gray-200">
+                              <div className="h-full rounded-full bg-brand-blue" style={{ width: `${complete}%` }} />
                             </div>
-                            <div className="min-w-0">
-                              <p className="font-sora font-semibold text-sm leading-5 text-brand-dark truncate max-w-[220px]">{batch.name}</p>
-                              <p className="text-[11px] text-gray-400 font-inter font-mono mt-1 truncate max-w-[220px]">{batch.id}</p>
-                            </div>
+                            <span className="w-9 shrink-0 text-gray-500 tabular-nums">{complete}%</span>
                           </div>
                         </td>
-                        <td className="px-5 py-4">
-                          <div className="flex items-center gap-1.5 text-sm text-gray-600 font-inter">
-                            <Building2 size={13} className="text-gray-400 shrink-0" />
-                            <span className="truncate max-w-[140px]">{batch.orgName}</span>
-                          </div>
+                        <td className="px-4 py-1.5 text-center text-gray-700 tabular-nums">{batch.total}</td>
+                        <td className="px-4 py-1.5 text-center text-gray-700 tabular-nums">{batch.pending}</td>
+                        <td className="px-4 py-1.5 text-center text-gray-700 tabular-nums">{batch.verified}</td>
+                        <td className="px-4 py-1.5 text-center text-gray-700 tabular-nums">{batch.failed}</td>
+                        <td className="px-4 py-1.5">
+                          <span className={`inline-flex rounded-md border px-2 py-0.5 text-[11px] font-medium ${batch.statusMeta.tone}`}>{sentenceCase(batch.statusMeta.label)}</span>
+                          {batch.sharedWithOrganization && <p className="mt-0.5 text-[11px] text-gray-500">Shared with org</p>}
+                          <ReportsProtectedBadge mode={batch.certificateAccessMode} className="mt-1" />
                         </td>
-                        <td className="px-5 py-4 w-40">
-                          <div className="flex items-center gap-2">
-                            <div className="flex-1"><ProgressBar progress={complete} height="h-2" showLabel={false} /></div>
-                            <span className="text-xs font-semibold text-gray-500 font-inter w-9 text-right shrink-0">{complete}%</span>
-                          </div>
-                        </td>
-                        <td className="px-5 py-4 text-center">
-                          <span className="inline-flex min-w-10 justify-center rounded-lg bg-gray-100 px-2.5 py-1 text-sm font-bold text-brand-dark font-inter border border-gray-200">{batch.total}</span>
-                        </td>
-                        <td className="px-5 py-4 text-center">
-                          <span className="inline-flex min-w-9 justify-center rounded-lg bg-orange-50 px-2.5 py-1 text-sm font-bold text-orange-600 font-inter border border-orange-100">{batch.pending}</span>
-                        </td>
-                        <td className="px-5 py-4 text-center">
-                          <span className="inline-flex min-w-9 justify-center rounded-lg bg-green-50 px-2.5 py-1 text-sm font-bold text-green-600 font-inter border border-green-100">{batch.verified}</span>
-                        </td>
-                        <td className="px-5 py-4 text-center">
-                          <span className="inline-flex min-w-9 justify-center rounded-lg bg-red-50 px-2.5 py-1 text-sm font-bold text-red-600 font-inter border border-red-100">{batch.failed}</span>
-                        </td>
-                        <td className="px-5 py-4">
-                          <div className={`inline-flex flex-col gap-1 rounded-xl border px-3 py-2 ${batch.statusMeta.tone}`}>
-                            <span className="text-xs font-semibold font-inter">{batch.statusMeta.label}</span>
-                            {batch.sharedWithOrganization && <span className="text-[11px] opacity-80 font-inter">Shared with org</span>}
-                          </div>
-                        </td>
-                        <td className="px-5 py-4">
-                          <p className="text-xs text-gray-500 font-inter whitespace-nowrap">{formatCreatedAt(batch.createdAt)}</p>
-                        </td>
-                        <td className="px-5 py-4">
-                          <div className="relative flex items-center justify-center min-w-[80px]">
+                        <td className="whitespace-nowrap px-4 py-1.5 text-gray-500">{formatCreatedAt(batch.createdAt)}</td>
+                        <td className="px-4 py-1.5">
+                          <div className="flex justify-center">
                             <button
                               type="button"
+                              aria-label={`Actions for ${batch.name}`}
+                              aria-haspopup="menu"
+                              aria-expanded={actionMenu.batchId === batch.id}
                               onClick={(event) => {
                                 event.stopPropagation();
                                 const rect = event.currentTarget.getBoundingClientRect();
@@ -3041,7 +3052,7 @@ export const BatchMonitor = () => {
                                     : { batchId: batch.id, anchorRect: rect }
                                 ));
                               }}
-                              className="p-2 rounded-lg border border-gray-200 text-gray-500 hover:text-brand-dark hover:bg-gray-50 shadow-sm"
+                              className="flex h-6 w-6 items-center justify-center rounded-md border border-gray-200 text-gray-500 hover:bg-gray-50 hover:text-brand-dark"
                             >
                               <MoreVertical size={14} />
                             </button>
@@ -3055,53 +3066,56 @@ export const BatchMonitor = () => {
             </div>
 
             {/* Pagination */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-6 py-4 border-t border-gray-100">
-              <p className="text-xs text-gray-400 font-inter">
+            <div className="flex flex-col justify-between gap-3 border-t border-gray-100 px-5 py-3 sm:flex-row sm:items-center">
+              <p className="text-xs text-gray-500 font-inter">
                 Showing {(safePage - 1) * pageSize + 1} to {Math.min(safePage * pageSize, visibleBatches.length)} of {visibleBatches.length} results
               </p>
-              <div className="flex items-center gap-3">
-                <div className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    disabled={safePage <= 1}
-                    onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                    className="p-1.5 rounded-lg border border-gray-200 text-gray-500 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50"
-                  >
-                    <ChevronLeft size={14} />
-                  </button>
-                  {Array.from({ length: totalPages }).slice(0, 5).map((_, i) => {
-                    const pageNum = i + 1;
-                    return (
-                      <button
-                        key={pageNum}
-                        type="button"
-                        onClick={() => setCurrentPage(pageNum)}
-                        className={`w-7 h-7 rounded-lg text-xs font-semibold font-inter ${
-                          safePage === pageNum ? 'bg-brand-blue text-white' : 'text-gray-500 hover:bg-gray-50 border border-gray-200'
-                        }`}
-                      >
-                        {pageNum}
-                      </button>
-                    );
-                  })}
-                  <button
-                    type="button"
-                    disabled={safePage >= totalPages}
-                    onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-                    className="p-1.5 rounded-lg border border-gray-200 text-gray-500 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50"
-                  >
-                    <ChevronRight size={14} />
-                  </button>
-                </div>
+              <div className="flex flex-wrap items-center gap-3">
                 <CustomSelect
                   value={pageSize}
                   onChange={setPageSize}
-                  className="w-24"
+                  ariaLabel="Rows per page"
+                  className="w-28"
                   options={[10, 25, 50].map((n) => ({ value: n, label: `${n} / page` }))}
                 />
+                <nav aria-label="Pagination" className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    aria-label="Previous page"
+                    disabled={safePage <= 1}
+                    onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                    className="flex h-7 w-7 items-center justify-center rounded-md border border-gray-200 text-gray-500 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    <ChevronLeft size={14} />
+                  </button>
+                  {pageItems(safePage, totalPages).map((item, i) => (item === '…' ? (
+                    <span key={`gap-${i}`} className="w-5 text-center text-xs text-gray-400">…</span>
+                  ) : (
+                    <button
+                      key={item}
+                      type="button"
+                      aria-current={safePage === item ? 'page' : undefined}
+                      onClick={() => setCurrentPage(item)}
+                      className={`h-7 min-w-7 rounded-md px-2 text-xs font-medium font-inter ${
+                        safePage === item ? 'bg-brand-blue text-white' : 'border border-gray-200 text-gray-600 hover:bg-gray-50'
+                      }`}
+                    >
+                      {item}
+                    </button>
+                  )))}
+                  <button
+                    type="button"
+                    aria-label="Next page"
+                    disabled={safePage >= totalPages}
+                    onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                    className="flex h-7 w-7 items-center justify-center rounded-md border border-gray-200 text-gray-500 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    <ChevronRight size={14} />
+                  </button>
+                </nav>
               </div>
             </div>
-          </Card>
+          </div>
         </motion.div>
       )}
 

@@ -12,6 +12,8 @@ import { verificationAPI, sdcAPI, getApiError, triggerBlobDownload } from '@/ser
 import { useAuth } from '@/context/AuthContext';
 import { CertificateDetailModal } from '@/pages/admin/SDCVerification';
 import { VerificationDetailsModal, VerificationCheckDetailsModal } from '@/components/shared/VerificationDetailsModal';
+import { CertificateAccessPanel, ReportsProtectedBadge } from '@/components/shared/CertificateAccessPanel';
+import { isHumanBatch, canRequireHolderApproval } from '@/utils/certificateAccess';
 import { WarrantyDocumentCell } from '@/components/shared/WarrantyDocumentCell';
 import { TablePagination } from '@/components/shared/TablePagination';
 import { loadWarrantyCertificates } from '@/utils/warrantyCertificates';
@@ -247,6 +249,8 @@ const normaliseBatch = (b) => {
     industryType:         Array.isArray(b.industry_type) ? b.industry_type : [],
     verificationTypes,
     credentialVisibility: b.credential_visibility || '',
+    // "public" | "holder_approval" — Human Secure Certificate Access (fixed at creation).
+    certificateAccessMode: b.certificate_access_mode || null,
     verificationProgress: b.verification_progress || {},
     // Only present on the single-batch detail response (GET
     // /verification/batches/{batch_id}), not the list endpoint — null there,
@@ -1531,6 +1535,8 @@ export const BatchStatusDetail = () => {
   const { batchId } = useParams();
   const navigate = useNavigate();
   const [batchName, setBatchName] = useState('');
+  const [loadedBatch, setLoadedBatch] = useState(null);
+  const [accessMode, setAccessMode] = useState(null);
 
   return (
     <AuthLayout title="Batch Status">
@@ -1543,15 +1549,22 @@ export const BatchStatusDetail = () => {
           >
             <ChevronLeft size={14} /> Back to Batch Status
           </button>
-          <h1 className="font-sora text-2xl font-bold text-brand-dark">{batchName || 'Batch Details'}</h1>
+          <div className="flex flex-wrap items-center gap-2.5">
+            <h1 className="font-sora text-2xl font-bold text-brand-dark">{batchName || 'Batch Details'}</h1>
+            <ReportsProtectedBadge mode={accessMode || loadedBatch?.certificateAccessMode} />
+          </div>
         </div>
         <BatchDetailModal
           asPage
           batchId={batchId}
           batchName={batchName}
-          onLoaded={(detail) => setBatchName(detail?.name || '')}
+          onLoaded={(detail) => { setBatchName(detail?.name || ''); setLoadedBatch(detail || null); }}
           onClose={() => navigate('/org/batch-status')}
         />
+        {/* Report access — Human batches only; Product/Warranty reports stay public. */}
+        {loadedBatch && isHumanBatch(loadedBatch.batchType) && (
+          <CertificateAccessPanel batchId={batchId} onModeChange={setAccessMode} canProtect={canRequireHolderApproval(loadedBatch.credentialVisibility)} />
+        )}
       </div>
     </AuthLayout>
   );
@@ -2204,6 +2217,7 @@ export const BatchStatus = () => {
                               <div className={`h-1.5 w-1.5 rounded-full ${bm.dot}`} />
                               <span className="font-inter text-xs font-semibold">{bm.label}</span>
                             </div>
+                            <ReportsProtectedBadge mode={batch.certificateAccessMode} className="mt-1.5 flex w-fit" />
                           </td>
                           <td className="px-5 py-4 text-right">
                             <button

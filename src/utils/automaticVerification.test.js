@@ -4,10 +4,11 @@ import { automaticChecks, canRetryAutomatic, missingAutomaticReports, retryOutco
 
 const batch = { batch_type: 'human', credential_visibility: 'private' };
 const record = { consent_status: 'accepted', verification_type_status: { licence: { label: 'automatic', status: 'pending', report_url: null }, address: { label: 'manual', status: 'pending' } } };
-test('retry eligibility uses the actual check category, report and Human consent', () => {
+test('retry eligibility uses the actual check category and report — never holder consent', () => {
   assert.equal(automaticChecks(record).length, 1);
   assert.equal(canRetryAutomatic(record, batch), true);
-  for (const consent_status of ['pending', 'rejected', null, undefined]) assert.equal(canRetryAutomatic({ ...record, consent_status }, batch), false);
+  // Permission Required controls report access only; it never blocks verification work.
+  for (const consent_status of ['pending', 'rejected', 'expired', null, undefined]) assert.equal(canRetryAutomatic({ ...record, consent_status }, batch), true);
   for (const batch_type of ['product', 'warranty']) assert.equal(canRetryAutomatic(record, { ...batch, batch_type }), false);
   assert.equal(canRetryAutomatic({ verification_type_status: { address: { label: 'manual', status: 'failed' } } }, { ...batch, credential_visibility: 'public' }), false);
   assert.equal(canRetryAutomatic(record, { ...batch, credential_visibility: 'public' }), true);

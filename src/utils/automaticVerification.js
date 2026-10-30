@@ -1,5 +1,3 @@
-import { consentAllowsProcessing } from './consent.js';
-
 export const automaticRecordId = (record) => String(record?.id || record?.user_id || record?.entity_id || '');
 export const automaticChecks = (record) => Object.entries(record?.verification_type_status || {})
   .filter(([, check]) => check?.label === 'automatic');
@@ -8,14 +6,13 @@ const isFinal = (check) => finalStatuses.has(String(check?.status || '').trim().
 export const missingAutomaticReports = (record) => automaticChecks(record)
   .filter(([, check]) => !check.report_url && !isFinal(check));
 export const canRetryAutomatic = (record, batch) => batch?.batch_type === 'human' &&
-  consentAllowsProcessing(record, batch) && missingAutomaticReports(record).length > 0 &&
+  missingAutomaticReports(record).length > 0 &&
   // This endpoint retries a person, not one named check. Do not resubmit a
   // person whose other automatic check already has a final decision/report.
   automaticChecks(record).every(([, check]) => !isFinal(check) && !check.report_url);
 
 export const automaticRetryDisabledReason = (record, batch) => {
   if (!batch) return 'Confirming the latest verification status.';
-  if (!consentAllowsProcessing(record, batch)) return 'Consent must be accepted first.';
   if (automaticChecks(record).some(([, check]) => isFinal(check))) return 'Automatic verification already has a final decision. Retry is disabled.';
   if (automaticChecks(record).some(([, check]) => check.report_url)) return 'An automatic report has already been generated. Retry is disabled.';
   return '';

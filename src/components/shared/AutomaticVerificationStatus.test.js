@@ -44,11 +44,19 @@ test('approved or rejected automatic verification keeps a visible disabled retry
     assert.match(html, /final decision/);
   }
 });
-test('existing report, consent gate, scheduling and in-progress disable the action', () => {
-  for (const props of [{ report_url: 'report.pdf' }, { status: 'failed', report_url: 'report.pdf' }, { consent_status: 'pending' }, { consent_status: 'rejected' }, { waiting: true }, { busy: true }]) {
+test('existing report, scheduling and in-progress disable the action', () => {
+  for (const props of [{ report_url: 'report.pdf' }, { status: 'failed', report_url: 'report.pdf' }, { waiting: true }, { busy: true }]) {
     assert.match(retryButton(render(props)), / disabled=/);
   }
 });
 test('manual-only, organization, Product and Warranty do not expose retry', () => {
   for (const props of [{ label: 'manual' }, { role: 'organization' }, { batchType: 'product' }, { batchType: 'warranty' }]) assert.equal(retryButton(render(props)), undefined);
+});
+
+test('pending, rejected or missing holder consent never disables retry or shows a consent warning', () => {
+  for (const consent_status of ['pending', 'rejected', undefined]) {
+    const html = render({ consent_status });
+    assert.doesNotMatch(retryButton(html), / disabled=/);
+    assert.doesNotMatch(html, /[Cc]onsent/);
+  }
 });

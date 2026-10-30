@@ -33,6 +33,7 @@ import toast from 'react-hot-toast';
 import { humanEmailRequired, validateHumanExcelEmails } from '@/utils/humanEmail';
 import { SchemaConfigSelect } from '@/components/shared/SchemaConfigSelect';
 import { schemaSourceColumns } from '@/utils/schemaConfig';
+import { uploadErrorText } from '@/utils/uploadErrors';
 
 const parseTemplateHeaders = (value) =>
   String(value || '')
@@ -612,7 +613,7 @@ const HumanBulkPanel = ({ onResult, selectedIndustry, selectedVerifications, sel
             <div className="space-y-2">
               {uploadResult.errors.map((e, i) => (
                 <div key={i} className="p-3 bg-red-50 rounded-lg border border-red-100">
-                  <p className="text-xs font-medium text-red-800 font-inter">Row {e.row} — {e.field}: {e.error}</p>
+                  <p className="text-xs font-medium text-red-800 font-inter">{uploadErrorText(e)}</p>
                 </div>
               ))}
             </div>

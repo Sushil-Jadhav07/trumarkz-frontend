@@ -29,8 +29,8 @@ export const submitOcrDraft = async ({ draft, batchName, options, api, progress,
   validateOcrDraftEmails(draft, options);
   if (!progress.response) {
     const assignments = buildOcrAssignments(draft.assignmentGroups || [], draft.records);
-    // Creation must receive each reviewed email before consent eligibility is
-    // evaluated. Never spread one person's email across a demographic group.
+    // Creation must receive each reviewed email (Permission Required holders use it to
+    // approve report access). Never spread one person's email across a demographic group.
     if ((options?.batchType || options?.batch_type || 'human') === 'human') {
       draft.records.forEach((record, index) => {
         const email = String(record.payload?.email ?? '').trim();

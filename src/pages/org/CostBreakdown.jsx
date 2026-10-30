@@ -16,6 +16,7 @@ import { getIndustryTypeList } from '@/utils/verificationFlow';
 import { submitOcrDraft } from '@/utils/ocrSubmission';
 import { BulkHumanResolvedUsers } from '@/components/shared/BulkHumanResolvedUsers';
 import { validateHumanExcelEmails } from '@/utils/humanEmail';
+import { uploadErrorText } from '@/utils/uploadErrors';
 
 const formatCurrency = (value) => `₹${Number(value).toLocaleString('en-IN')}`;
 
@@ -196,8 +197,8 @@ export const CostBreakdown = () => {
       <Card className="space-y-4 p-5">
         <PageHeader title="Batch upload complete" subtitle={`${batchData.uploadResponse.total_uploaded ?? 0} users saved. Values below are confirmed by the server.`} />
         <BulkHumanResolvedUsers users={batchData.uploadResponse.successful_users || []} />
-        {(batchData.uploadResponse.skipped_users || []).map((row, index) => <p key={`skip-${index}`} className="text-sm text-amber-700">Row {row.row}: {row.reason}</p>)}
-        {(batchData.uploadResponse.errors || []).map((row, index) => <p key={`error-${index}`} className="text-sm text-red-600">Row {row.row}: {row.error}</p>)}
+        {(batchData.uploadResponse.skipped_users || []).map((row, index) => <p key={`skip-${index}`} className="text-sm text-amber-700">{uploadErrorText(row)}</p>)}
+        {(batchData.uploadResponse.errors || []).map((row, index) => <p key={`error-${index}`} className="text-sm text-red-600">{uploadErrorText(row)}</p>)}
         <Button onClick={() => navigate('/org/batch-status')} icon={ArrowRight}>View Batch Status</Button>
       </Card>
     </AuthLayout>

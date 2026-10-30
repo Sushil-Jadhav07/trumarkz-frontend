@@ -21,7 +21,8 @@ import { OcrAssignmentGroups, OcrAppliedAssignments, OcrNationalitySelect } from
 import { CustomSelect } from '@/components/ui/CustomSelect';
 import { OCR_GENDERS, buildOcrAssignments, applyOcrAssignmentsToPreview } from '@/utils/ocrAssignments';
 import { humanEmailRequired, humanEmailError, withHumanEmailField, validateHumanExcelEmails } from '@/utils/humanEmail';
-import { missingRequiredColumns, schemaSourceColumns } from '@/utils/schemaConfig';
+import { missingRequiredColumns, schemaSourceColumns, visibleCustomFields } from '@/utils/schemaConfig';
+import { uploadErrorText } from '@/utils/uploadErrors';
 
 // photo is appended automatically by the API — never pass it in headers.
 // required: true matches PATCH /verification/batch-users/{user_id}'s own
@@ -170,7 +171,8 @@ const buildInitialForms = (result) => {
   const map = {};
   users.forEach((u) => {
     const extracted = (u.extracted && typeof u.extracted === 'object') ? u.extracted : {};
-    const existingCustom = (u.custom_fields && typeof u.custom_fields === 'object') ? u.custom_fields : {};
+    // __schema_record__ is the backend's own nested copy — never shown, never PATCHed back.
+    const existingCustom = visibleCustomFields(u.custom_fields);
     const docType = normalizeDocType(u.document_type);
     const fields = getReviewFields(docType);
     const consumedKeys = new Set();
@@ -295,7 +297,7 @@ const ReviewOcrModal = ({ isOpen, ocrResult, sourceEntries = {}, onClose, onDone
     if ('email' in topLevel) topLevel.email = String(topLevel.email ?? '').trim();
     return {
       ...topLevel,
-      custom_fields: { ...(_customFields || {}), ...customFromForm,
+      custom_fields: { ...visibleCustomFields(_customFields), ...customFromForm,
         ...Object.fromEntries(['gender', 'nationality'].filter((key) => String(allFields[key] ?? '').trim()).map((key) => [key, allFields[key]])) },
       mark_reviewed: true,
     };
@@ -396,7 +398,7 @@ const ReviewOcrModal = ({ isOpen, ocrResult, sourceEntries = {}, onClose, onDone
             ? `${users.length} confirmed record${users.length === 1 ? '' : 's'}. Check the details and attachments before costing. Your batch will be created only after you approve the total cost.`
             : 'Review the extracted details and attach any additional documents. Confirmation saves your local draft; the batch and attachments are submitted after costing approval.'}
         </p>
-        <p className="font-inter text-xs text-slate-500">{humanEmailRequired(permission) ? 'Email is required for every user so they can receive the consent request.' : 'Email is optional for Open Search. You can continue without it.'}</p>
+        <p className="font-inter text-xs text-slate-500">{humanEmailRequired(permission) ? 'Email is required for every user so they can approve who views their reports.' : 'Email is optional for Open Search. You can continue without it.'}</p>
 
         <div className="flex items-center justify-between gap-3 border-b border-slate-100 pb-3 font-inter text-xs text-slate-500">
           <span>{users.length} record{users.length === 1 ? '' : 's'}</span>
@@ -571,7 +573,7 @@ const ReviewOcrModal = ({ isOpen, ocrResult, sourceEntries = {}, onClose, onDone
             </h4>
             <div className="mt-2 space-y-1.5">
               {errors.map((e, i) => (
-                <p key={i} className="font-inter text-xs text-red-700">{e.error || JSON.stringify(e)}</p>
+                <p key={i} className="font-inter text-xs text-red-700">{uploadErrorText(e)}</p>
               ))}
             </div>
           </div>

@@ -3,7 +3,7 @@ import { motion } from 'framer-motion';
 import { Navbar } from './Navbar';
 import { Sidebar } from './Sidebar';
 
-export const AuthLayout = ({ children, title = 'Dashboard' }) => {
+export const AuthLayout = ({ children, title = 'Dashboard', breadcrumb }) => {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
@@ -29,6 +29,7 @@ export const AuthLayout = ({ children, title = 'Dashboard' }) => {
       `}>
         <Navbar
           title={title}
+          breadcrumb={breadcrumb}
           onMenuToggle={() => setMobileMenuOpen(!mobileMenuOpen)}
         />
         <main className="p-4 lg:p-8 pb-6 lg:pb-8">
