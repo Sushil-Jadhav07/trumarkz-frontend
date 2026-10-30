@@ -1,4 +1,5 @@
 import { humanEmailError } from './humanEmail.js';
+import { humanPhoneError } from './humanPhone.js';
 
 export const OCR_GENDERS = ['Male', 'Female', 'Other'];
 // Only examples explicitly supplied by the backend documentation. This is
@@ -19,6 +20,14 @@ export const validateOcrAssignments = (assignments, fileCount) => {
   if (assignments == null) return [];
   if (!Array.isArray(assignments)) throw new Error('Assignments must be an array of groups.');
   return assignments.map((group) => {
+    // Phone overrides use the backend's per-holder contract; demographic/email
+    // groups retain file_indices. Do not silently translate ambiguous targets.
+    if (group && Object.prototype.hasOwnProperty.call(group, 'phone_number')) {
+      if (!Number.isInteger(group.file_index) || group.file_index < 0 || group.file_index >= fileCount) throw new Error('A Phone Number assignment must reference one valid file_index in this upload.');
+      if (['file_indices', 'email', 'gender', 'nationality'].some((key) => Object.prototype.hasOwnProperty.call(group, key))) throw new Error('Keep each Phone Number in a separate file_index assignment.');
+      if (typeof group.phone_number !== 'string' || !group.phone_number.trim() || humanPhoneError(group.phone_number, 'public')) throw new Error('Enter a valid Phone Number for the assigned document (10–15 digits).');
+      return { file_index: group.file_index, phone_number: group.phone_number.trim() };
+    }
     if (!group || !Array.isArray(group.file_indices) || !group.file_indices.length) throw new Error('Choose at least one document for each assignment group.');
     if (group.file_indices.some((index) => !Number.isInteger(index) || index < 0 || index >= fileCount)) throw new Error('An assignment references a document outside this upload. Review your selections.');
     const gender = normalizeAssignmentValue(group.gender, 'gender');

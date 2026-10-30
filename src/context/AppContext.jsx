@@ -6,6 +6,7 @@ import { isConsentPage } from '@/utils/consent';
 import { isCertificateAccessPage } from '@/utils/certificateAccess';
 import { usePushNotifications } from '@/hooks/usePushNotifications';
 import toast from 'react-hot-toast';
+import { resolveHumanPermission } from '@/utils/humanPhone';
 
 const AppContext = createContext(null);
 const STORAGE_KEY = 'trumarkz_app_state';
@@ -35,7 +36,15 @@ export const AppProvider = ({ children }) => {
   const [batchEntityType, setBatchEntityType]   = useState(persistedState.batchEntityType ?? 'human');
   const [selectedIndustry, setSelectedIndustry] = useState(persistedState.selectedIndustry ?? null);
   const [selectedVerifications, setSelectedVerifications] = useState(persistedState.selectedVerifications ?? []);
-  const [selectedPermission, setSelectedPermission] = useState(persistedState.selectedPermission ?? 'private');
+  const [selectedPermission, setSelectedPermissionState] = useState(persistedState.selectedPermission ?? 'private');
+  // Human default comes from this organization unless the operator explicitly
+  // chooses another mode. Keep the existing Product/Warranty preference intact.
+  const [humanPermissionChoice, setHumanPermissionChoice] = useState(persistedState.humanPermissionChoice ?? null);
+  const humanPermission = resolveHumanPermission(humanPermissionChoice?.ownerId === user?.id && user?.id ? humanPermissionChoice.value : undefined, user?.permissionMode);
+  const setSelectedPermission = (value) => {
+    setSelectedPermissionState(value);
+    setHumanPermissionChoice({ ownerId: user?.id, value });
+  };
   const [selectedHumanTemplate, setSelectedHumanTemplate] = useState(persistedState.selectedHumanTemplate ?? 'classic-blue');
   const [selectedTemplate, setSelectedTemplate] = useState(null);
   const [selectedFields, setSelectedFields] = useState([]);
@@ -60,6 +69,7 @@ export const AppProvider = ({ children }) => {
           selectedIndustry,
           selectedVerifications,
           selectedPermission,
+          humanPermissionChoice,
           selectedHumanTemplate,
           selectedProductSector,
           selectedProductVerifications,
@@ -70,7 +80,7 @@ export const AppProvider = ({ children }) => {
     } catch {
       // Ignore persistence failures.
     }
-  }, [batchEntityType, selectedIndustry, selectedVerifications, selectedPermission, selectedHumanTemplate, selectedProductSector, selectedProductVerifications, selectedProductService, selectedProductTemplate]);
+  }, [batchEntityType, selectedIndustry, selectedVerifications, selectedPermission, humanPermissionChoice, selectedHumanTemplate, selectedProductSector, selectedProductVerifications, selectedProductService, selectedProductTemplate]);
 
   return (
     <AppContext.Provider value={{
@@ -78,6 +88,7 @@ export const AppProvider = ({ children }) => {
       selectedIndustry, setSelectedIndustry,
       selectedVerifications, setSelectedVerifications,
       selectedPermission, setSelectedPermission,
+      humanPermission,
       selectedHumanTemplate, setSelectedHumanTemplate,
       selectedTemplate, setSelectedTemplate,
       selectedFields, setSelectedFields,

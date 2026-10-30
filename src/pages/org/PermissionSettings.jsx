@@ -26,13 +26,14 @@ const options = [
     title: 'Permission Required',
     subtitle: 'Holder approves who views reports',
     description: 'Verification starts straight away. Outside your organization, people must get the person’s approval before they can view their certificate reports.',
-    details: ['A valid email is required for each person, so they can approve access requests', 'Verifier assignment and emails are never delayed'],
+    details: ['A valid email and mobile number are required for each person', 'Verifier assignment and emails are never delayed'],
   }
 ];
 
 export const PermissionSettings = () => {
   const navigate = useNavigate();
-  const { selectedPermission, setSelectedPermission } = useApp();
+  const { selectedPermission: storedPermission, humanPermission, setSelectedPermission } = useApp();
+  const selectedPermission = humanPermission ?? storedPermission;
 
   const handleContinue = () => {
     if (!selectedPermission) {

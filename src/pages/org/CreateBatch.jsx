@@ -31,6 +31,7 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { humanEmailRequired, validateHumanExcelEmails } from '@/utils/humanEmail';
+import { humanPhoneRequired, humanPhoneError, validateHumanExcelPhones, humanPhoneBackendMessage } from '@/utils/humanPhone';
 import { SchemaConfigSelect } from '@/components/shared/SchemaConfigSelect';
 import { schemaSourceColumns } from '@/utils/schemaConfig';
 import { uploadErrorText } from '@/utils/uploadErrors';
@@ -165,6 +166,8 @@ const SingleHumanModal = ({ isOpen, onClose, onSuccess, selectedIndustry, select
   const { user } = useAuth();
   const [loading, setLoading] = useState(false);
   const [schemaName, setSchemaName] = useState('');
+  const [phoneTouched, setPhoneTouched] = useState(false);
+  const [backendPhoneError, setBackendPhoneError] = useState('');
   const [form, setForm] = useState({
     full_name: '', phone_number: '', email: '',
     dob: '', aadhar_number: '', pan_number: '',
@@ -172,11 +175,18 @@ const SingleHumanModal = ({ isOpen, onClose, onSuccess, selectedIndustry, select
     pincode: '', state: '', country: '',
   });
 
-  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+  const set = (k) => (e) => {
+    if (k === 'phone_number') { setPhoneTouched(true); setBackendPhoneError(''); }
+    setForm((f) => ({ ...f, [k]: e.target.value }));
+  };
+  const phoneError = (phoneTouched ? humanPhoneError(form.phone_number, selectedPermission) : '') || backendPhoneError;
+  useEffect(() => { setBackendPhoneError(''); }, [selectedPermission]);
 
   const handleSubmit = async () => {
     if (!form.full_name.trim()) { toast.error('Full name is required'); return; }
-    if (!form.phone_number.trim()) { toast.error('Phone number is required'); return; }
+    setPhoneTouched(true);
+    const invalidPhone = humanPhoneError(form.phone_number, selectedPermission);
+    if (invalidPhone) { toast.error(invalidPhone); return; }
     if (!form.email.trim()) { toast.error('Email is required'); return; }
 
     setLoading(true);
@@ -193,7 +203,9 @@ const SingleHumanModal = ({ isOpen, onClose, onSuccess, selectedIndustry, select
       onSuccess(data);
       onClose();
     } catch (err) {
-      toast.error(getApiError(err, 'Failed to create human record'));
+      const phoneMessage = humanPhoneBackendMessage(err);
+      setBackendPhoneError(phoneMessage);
+      toast.error(phoneMessage || getApiError(err, 'Failed to create human record'));
     } finally {
       setLoading(false);
     }
@@ -207,6 +219,7 @@ const SingleHumanModal = ({ isOpen, onClose, onSuccess, selectedIndustry, select
       pincode: '', state: '', country: '',
     });
     setSchemaName('');
+    setPhoneTouched(false); setBackendPhoneError('');
     onClose();
   };
 
@@ -214,7 +227,7 @@ const SingleHumanModal = ({ isOpen, onClose, onSuccess, selectedIndustry, select
     <Modal isOpen={isOpen} onClose={handleClose} title="Add Single Human for Verification" size="lg">
       <div className="space-y-4 max-h-[65vh] overflow-y-auto pr-1">
         <div className="p-3 bg-blue-50 rounded-xl border border-blue-100">
-          <p className="text-xs text-blue-700 font-inter font-semibold">Required fields: Full Name, Phone Number, Email</p>
+          <p className="text-xs text-blue-700 font-inter font-semibold">Required fields: Full Name, Email{humanPhoneRequired(selectedPermission) ? ', Phone Number' : ''}</p>
         </div>
 
         <SchemaConfigSelect orgId={user?.id} spaceType="human" value={schemaName} onChange={setSchemaName} disabled={loading} />
@@ -222,7 +235,8 @@ const SingleHumanModal = ({ isOpen, onClose, onSuccess, selectedIndustry, select
         {/* Required */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Input label="Full Name *" placeholder="John Doe" value={form.full_name} onChange={set('full_name')} icon={User} />
-          <Input label="Phone Number *" placeholder="+91 9876543210" value={form.phone_number} onChange={set('phone_number')} />
+          <Input label={<>Phone Number{humanPhoneRequired(selectedPermission) && <span className="text-red-500"> *</span>}</>} type="tel" inputMode="tel" aria-label="Phone Number" required={humanPhoneRequired(selectedPermission)} aria-required={humanPhoneRequired(selectedPermission)} aria-invalid={!!phoneError} aria-describedby={phoneError ? 'single-human-phone-error' : undefined} placeholder="+91 9876543210" value={form.phone_number} onChange={set('phone_number')} />
+          {phoneError && <p id="single-human-phone-error" role="alert" className="text-xs text-red-600 sm:col-span-2">{phoneError}</p>}
         </div>
         <Input label="Email *" placeholder="john@example.com" value={form.email} onChange={set('email')} type="email" />
 
@@ -452,7 +466,9 @@ const HumanBulkPanel = ({ onResult, selectedIndustry, selectedVerifications, sel
   const [description, setDescription] = useState('');
   const [schemaName, setSchemaName] = useState('');
   const [schemaConfig, setSchemaConfig] = useState(null);
+  const [phoneError, setPhoneError] = useState('');
   const [selectedFile, setSelectedFile] = useState(null);
+  useEffect(() => { setPhoneError(''); }, [selectedPermission, selectedFile]);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [loading, setLoading] = useState(false);
   const [templateLoading, setTemplateLoading] = useState(false);
@@ -481,6 +497,7 @@ const HumanBulkPanel = ({ onResult, selectedIndustry, selectedVerifications, sel
         emailColumns: schemaSourceColumns(schemaConfig).email || [],
         schemaApplies: !!schemaConfig,
       });
+      validateHumanExcelPhones(rows, selectedPermission, { phoneColumns: schemaSourceColumns(schemaConfig).phone_number || [] });
       const { data } = await verificationAPI.bulkUpload(
         selectedFile,
         batchName.trim(),
@@ -498,7 +515,9 @@ const HumanBulkPanel = ({ onResult, selectedIndustry, selectedVerifications, sel
       onResult && onResult(data);
       toast.success(`Uploaded ${data.total_uploaded} records. Batch: ${data.batch_id}`);
     } catch (err) {
-      toast.error(getApiError(err, err?.message || 'Batch upload failed. Please try again.'));
+      const phoneMessage = humanPhoneBackendMessage(err);
+      setPhoneError(phoneMessage);
+      toast.error(phoneMessage || getApiError(err, err?.message || 'Batch upload failed. Please try again.'));
     } finally {
       setLoading(false); setUploadProgress(0);
     }
@@ -599,7 +618,7 @@ const HumanBulkPanel = ({ onResult, selectedIndustry, selectedVerifications, sel
             <div className="space-y-2">
               {uploadResult.skipped_users.map((s, i) => (
                 <div key={i} className="p-3 bg-orange-50 rounded-lg border border-orange-100">
-                  <p className="text-xs font-medium text-orange-800 font-inter">Row {s.row}: {s.reason}</p>
+                  <p className="text-xs font-medium text-orange-800 font-inter">Row {s.row}: {String(s.reason || '').replace(/phone_number/g, 'Phone Number')}</p>
                 </div>
               ))}
             </div>
@@ -613,7 +632,7 @@ const HumanBulkPanel = ({ onResult, selectedIndustry, selectedVerifications, sel
             <div className="space-y-2">
               {uploadResult.errors.map((e, i) => (
                 <div key={i} className="p-3 bg-red-50 rounded-lg border border-red-100">
-                  <p className="text-xs font-medium text-red-800 font-inter">{uploadErrorText(e)}</p>
+                  <p className="text-xs font-medium text-red-800 font-inter">{uploadErrorText(e).replace(/phone_number/g, 'Phone Number')}</p>
                 </div>
               ))}
             </div>
@@ -643,8 +662,9 @@ const HumanBulkPanel = ({ onResult, selectedIndustry, selectedVerifications, sel
           <div>
             <p className="text-xs font-semibold text-blue-700 font-inter mb-1">Required Excel columns</p>
             <p className="text-xs text-blue-600 font-inter">
-              full_name, dob, gender, nationality{humanEmailRequired(selectedPermission) ? ', email' : ''}. Other verification-specific columns remain optional. The backend template also appends the locked Photo column.
+              full_name, dob, gender, nationality{humanEmailRequired(selectedPermission) ? ', email' : ''}{humanPhoneRequired(selectedPermission) ? ', phone_number' : ''}. Other verification-specific columns remain optional. The backend template also appends the locked Photo column.
             </p>
+            {humanPhoneRequired(selectedPermission) && <p className="mt-1 text-xs text-blue-700">Phone Number <span className="text-red-500">*</span> is required for every holder. Accepted headers: phone_number, phone, mobile, mobile_number.</p>}
           </div>
           <Button variant="outline" size="sm" icon={Download} onClick={handleGenerateTemplate} loading={templateLoading}>
             Template
@@ -687,6 +707,7 @@ const HumanBulkPanel = ({ onResult, selectedIndustry, selectedVerifications, sel
           </div>
         </div>
       )}
+      {phoneError && <p role="alert" className="text-sm text-red-600">{phoneError}</p>}
       <Button variant="primary" size="lg" className="w-full" onClick={handleSubmit} icon={ArrowRight} disabled={loading || !selectedFile || !batchName.trim()}>
         {loading ? 'Uploading…' : 'Submit Batch'}
       </Button>
@@ -1045,6 +1066,7 @@ export const CreateBatch = () => {
     selectedVerifications,
     setSelectedVerifications,
     selectedPermission,
+    humanPermission,
     setSelectedTemplate,
     setSelectedFields,
     setSelectedProductSector,
@@ -1465,7 +1487,7 @@ export const CreateBatch = () => {
             onSuccess={handleSingleSuccess}
             selectedIndustry={selectedIndustry}
             selectedVerifications={selectedVerifications}
-            selectedPermission={selectedPermission}
+            selectedPermission={humanPermission ?? selectedPermission}
           />
           <SingleProductModal
             isOpen={showSingleProductModal}
@@ -1541,7 +1563,7 @@ export const CreateBatch = () => {
 
         <Card className="p-6">
           {isHuman
-            ? <HumanBulkPanel onResult={() => {}} selectedIndustry={selectedIndustry} selectedVerifications={selectedVerifications} selectedPermission={selectedPermission} />
+            ? <HumanBulkPanel onResult={() => {}} selectedIndustry={selectedIndustry} selectedVerifications={selectedVerifications} selectedPermission={humanPermission ?? selectedPermission} />
             : (categoriesLoading
               ? <LoadingSkeleton variant="form" label="Loading categories" />
               : <ProductBulkPanel categories={categories} onResult={() => {}} selectedCategory={selectedProductSector} selectedService={activeProductService} selectedPermission={selectedPermission} />

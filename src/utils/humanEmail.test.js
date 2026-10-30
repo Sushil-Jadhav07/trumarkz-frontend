@@ -40,6 +40,7 @@ test('OCR submission fails before any write for a missing private email; Open pr
   assert.equal(uploads, 0); assert.equal(edits, 0);
   await submitOcrDraft(request('public')); assert.equal(uploads, 1); assert.equal(edits, 1);
   draft.records[0].payload.email = 'user@example.test';
+  draft.records[0].payload.phone_number = '9876543210';
   await submitOcrDraft(request('private')); assert.equal(uploads, 2); assert.equal(edits, 2);
 });
 

@@ -6,7 +6,7 @@ const makeProgress = () => ({ response: null, completedIds: [], photoSavedIds: [
 const makeDraft = () => ({ records: [1, 2, 3].map((index) => ({
   localId: `local-${index}`, file: { name: `source-${index}.png` }, photo: { name: `photo-${index}.png` },
   attachment: { label: 'supporting_document', file: { name: `extra-${index}.pdf` } },
-  payload: { full_name: `Corrected ${index}`, email: `user${index}@example.test`, mark_reviewed: true, custom_fields: { gender: 'Male' } },
+  payload: { full_name: `Corrected ${index}`, email: `user${index}@example.test`, phone_number: `900000000${index}`, mark_reviewed: true, custom_fields: { gender: 'Male' } },
 })) });
 
 test('review extraction reads three documents without creating a batch or uploading attachments', async () => {
@@ -79,9 +79,9 @@ test('assignment groups travel with final files in draft order and checkpoint re
       assert.deepEqual(files.map((file) => file.name), ['source-3.png', 'source-1.png', 'source-2.png']);
       assert.deepEqual(options.assignments, [
         { file_indices: [1, 0], gender: 'Male' }, { file_indices: [0], nationality: 'Indian' },
-        { file_indices: [0], email: 'user3@example.test' },
-        { file_indices: [1], email: 'user1@example.test' },
-        { file_indices: [2], email: 'user2@example.test' },
+        { file_indices: [0], email: 'user3@example.test' }, { file_index: 0, phone_number: '9000000003' },
+        { file_indices: [1], email: 'user1@example.test' }, { file_index: 1, phone_number: '9000000001' },
+        { file_indices: [2], email: 'user2@example.test' }, { file_index: 2, phone_number: '9000000002' },
       ]);
       // Model creation-time eligibility: ID images themselves contain no email.
       return { data: { successful_users: files.map((file, i) => ({ id: `server-${i}`, file: file.name, email: options.assignments.find((a) => a.email && a.file_indices[0] === i).email, gender: 'Male', nationality: 'Indian' })) } };
@@ -99,6 +99,7 @@ test('assignment groups travel with final files in draft order and checkpoint re
 
 test('Open OCR omits blank email assignments and sends each provided email only with its own file', async () => {
   const draft = makeDraft();
+  draft.records.forEach((record) => { delete record.payload.phone_number; });
   delete draft.records[0].payload.email;
   draft.records[1].payload.email = '  second@example.test  ';
   draft.records[2].payload.email = '';

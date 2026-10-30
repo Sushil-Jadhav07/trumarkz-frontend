@@ -58,6 +58,20 @@ test('email assignments require a valid individual address and exactly one file,
     ...['', ' ', 'bad', 'a@example.test,b@example.test', null, 123].map((email) => ({ file_indices: [0], email })),
   ]) assert.throws(() => validateOcrAssignments([group], 2));
 });
+
+test('phone assignments accept the documented format only for one exact file', () => {
+  assert.deepEqual(validateOcrAssignments([{ file_index: 0, phone_number: ' +91 (98765) 43210 ' }], 2), [{ file_index: 0, phone_number: '+91 (98765) 43210' }]);
+  for (const entry of [
+    ...[-1, 2, '0', 0.5, null, undefined].map((file_index) => ({ file_index, phone_number: '9876543210' })),
+    { file_index: 0, file_indices: [1], phone_number: '9876543210' },
+    { file_index: 0, email: 'a@example.test', phone_number: '9876543210' },
+    { file_index: 0, phone_number: '' }, { file_index: 0, phone_number: 'invalid' },
+    { file_index: 0, phone_number: 9876543210 },
+    { file_indices: [0, 1], phone_number: '9876543210' },
+    { file_indices: [0, 0], phone_number: '9876543210' },
+    { file_indices: [0], phone_number: '' }, { file_indices: [0], phone_number: 'invalid' },
+  ]) assert.throws(() => validateOcrAssignments([entry], 2));
+});
 test('actual API includes assignments and ordered images together, omits empty groups, and never sends removed Excel fields', async () => {
   const require = createRequire(import.meta.url), axios = require('axios'), calls = [];
   const old = axios.defaults.adapter;
@@ -69,6 +83,7 @@ test('actual API includes assignments and ordered images together, omits empty g
   const files = ['a', 'b', 'c'].map((name) => new File([name], `${name}.png`));
   const assignments = [...buildOcrAssignments(groups, entries),
     { file_indices: [0], email: 'first@example.test' },
+    { file_index: 0, phone_number: '+91 98765 43210' },
     { file_indices: [1], email: 'second@example.test' },
   ];
   const response = await api.bulkUploadDocuments(files, 'Batch', { batchType: 'human', credentialVisibility: 'private', assignments });

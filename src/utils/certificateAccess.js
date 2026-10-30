@@ -37,10 +37,40 @@ export const validateAccessRequestCreated = (data) => {
   return data;
 };
 
+const ACCESS_NEXT_STEPS = {
+  organization_password: 'organization', holder_credentials: 'holder', holder_approval: 'third_party',
+};
+
+export const accessNextStep = (data) => {
+  // Older deployed backends return neither additive field. Their visitor flow
+  // remains approval-based; never infer a direct identity from the typed email.
+  if (data?.next_step == null && data?.identity_type == null) return 'holder_approval';
+  if (!Object.hasOwn(ACCESS_NEXT_STEPS, data?.next_step)
+    || ACCESS_NEXT_STEPS[data.next_step] !== data.identity_type) {
+    throw new Error('The next identity check could not be confirmed. Start a new access request.');
+  }
+  return data.next_step;
+};
+
 export const validateAccessRequestStatus = (data, requestId, { verified = false } = {}) => {
   if (data?.request_id !== requestId || !Object.hasOwn(GRANT_STATUS_META, data?.status)
     || (verified && (typeof data.access_token !== 'string' || !data.access_token.trim()))) {
     throw new Error('The access response could not be confirmed. Please check the request again.');
+  }
+  if (verified) {
+    const nextStep = accessNextStep(data);
+    if (nextStep !== 'holder_approval' && data.status !== 'pending_approval') {
+      throw new Error('The required identity check could not be confirmed. Start a new access request.');
+    }
+  }
+  return data;
+};
+
+export const validateDirectAccess = (data, requestId, nextStep) => {
+  const expectedScope = nextStep === 'organization_password' ? 'report' : nextStep === 'holder_credentials' ? 'holder' : null;
+  if (!expectedScope || data?.request_id !== requestId || data?.status !== 'approved'
+    || data.scope !== expectedScope || !Number.isFinite(Date.parse(data.expires_at))) {
+    throw new Error('Access could not be confirmed. Check the request status before trying again.');
   }
   return data;
 };

@@ -1,6 +1,7 @@
 import { matchOcrEntries, saveOcrReviewRecord } from './ocrReview.js';
 import { buildOcrAssignments } from './ocrAssignments.js';
 import { validateOcrDraftEmails } from './humanEmail.js';
+import { validateOcrDraftPhones } from './humanPhone.js';
 
 export const buildOcrDraftRecord = (entry, data) => {
   const extracted = data?.extracted || data?.extracted_data || data?.fields || data;
@@ -27,6 +28,7 @@ export const extractOcrDraft = async (entries, api) => {
 // the batch upload response.
 export const submitOcrDraft = async ({ draft, batchName, options, api, progress, checkpoint }) => {
   validateOcrDraftEmails(draft, options);
+  validateOcrDraftPhones(draft, options);
   if (!progress.response) {
     const assignments = buildOcrAssignments(draft.assignmentGroups || [], draft.records);
     // Creation must receive each reviewed email (Permission Required holders use it to
@@ -34,7 +36,9 @@ export const submitOcrDraft = async ({ draft, batchName, options, api, progress,
     if ((options?.batchType || options?.batch_type || 'human') === 'human') {
       draft.records.forEach((record, index) => {
         const email = String(record.payload?.email ?? '').trim();
+        const phone = String(record.payload?.phone_number ?? '').trim();
         if (email) assignments.push({ file_indices: [index], email });
+        if (phone) assignments.push({ file_index: index, phone_number: phone });
       });
     }
     const { data } = await api.bulkUploadDocuments(draft.records.map((record) => record.file), batchName,

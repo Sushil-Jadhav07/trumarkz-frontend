@@ -23,6 +23,8 @@ test('public access APIs preserve reference/visitor ID separation and never atta
   await api.getRequestStatus('visitor-request-id', 'scoped-token');
   await api.getApproval('holder-token');
   await api.decideApproval('holder-token', { decision: 'approve', dob: '1990-01-01', phone_number: '9876543210' });
+  await api.authenticateOrganization('visitor-request-id', 'scoped-token', 'test-password');
+  await api.authenticateHolder('visitor-request-id', 'scoped-token', { dob: '1990-01-31', phone_number: '+91 98765 43210' });
   assert.deepEqual(JSON.parse(calls[0].data), { visitor_email: 'visitor@example.test', request_id: 'manual-report-id', file_index: 0 });
   assert.deepEqual(JSON.parse(calls[1].data), { visitor_email: 'visitor@example.test', document_id: 'auto-document-id' });
   assert.equal(calls[2].url, '/verification/certificate-access/requests/visitor-request-id/verify');
@@ -31,6 +33,11 @@ test('public access APIs preserve reference/visitor ID separation and never atta
   assert.equal(calls[3].headers.get('X-Certificate-Access-Token'), 'scoped-token');
   assert.equal(calls[4].url, '/verification/certificate-access/approvals/holder-token');
   assert.deepEqual(JSON.parse(calls[5].data), { decision: 'approve', dob: '1990-01-01', phone_number: '9876543210' });
+  assert.equal(calls[6].url, '/verification/certificate-access/requests/visitor-request-id/organization-auth');
+  assert.deepEqual(JSON.parse(calls[6].data), { password: 'test-password' });
+  assert.equal(calls[7].url, '/verification/certificate-access/requests/visitor-request-id/holder-auth');
+  assert.deepEqual(JSON.parse(calls[7].data), { dob: '1990-01-31', phone_number: '+91 98765 43210' });
+  for (const call of [calls[6], calls[7]]) assert.equal(call.headers.get('X-Certificate-Access-Token'), 'scoped-token');
   for (const call of calls) {
     assert.equal(call.headers.get('Authorization'), undefined);
     assert.equal(call.url.includes('scoped-token'), false);

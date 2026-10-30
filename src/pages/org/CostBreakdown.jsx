@@ -16,6 +16,7 @@ import { getIndustryTypeList } from '@/utils/verificationFlow';
 import { submitOcrDraft } from '@/utils/ocrSubmission';
 import { BulkHumanResolvedUsers } from '@/components/shared/BulkHumanResolvedUsers';
 import { validateHumanExcelEmails } from '@/utils/humanEmail';
+import { validateHumanExcelPhones, humanPhoneBackendMessage } from '@/utils/humanPhone';
 import { uploadErrorText } from '@/utils/uploadErrors';
 
 const formatCurrency = (value) => `₹${Number(value).toLocaleString('en-IN')}`;
@@ -30,14 +31,18 @@ export const CostBreakdown = () => {
     batchEntityType,
     selectedIndustry,
     selectedVerifications,
-    selectedPermission,
+    selectedPermission: storedPermission,
+    humanPermission,
     batchData,
     setBatchData,
   } = useApp();
+  const selectedPermission = batchEntityType === 'product' || batchEntityType === 'warranty' ? storedPermission : humanPermission ?? storedPermission;
   const [agreed,      setAgreed]      = useState(Boolean(batchData?.costConfirmed));
   const [allTypes,    setAllTypes]    = useState([]);
   const [typesLoading, setTypesLoading] = useState(true);
   const [submitting,  setSubmitting]  = useState(false);
+  const [phoneError, setPhoneError] = useState('');
+  useEffect(() => { setPhoneError(''); }, [selectedPermission, batchData?.file]);
 
   useEffect(() => {
     // Both Excel and OCR remain drafts until the total cost is approved.
@@ -139,7 +144,9 @@ export const CostBreakdown = () => {
         return;
       }
       const workbook = XLSX.read(await batchData.file.arrayBuffer(), { type: 'array' });
-      validateHumanExcelEmails(XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { header: 1 }), selectedPermission);
+      const rows = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { header: 1 });
+      validateHumanExcelEmails(rows, selectedPermission);
+      validateHumanExcelPhones(rows, selectedPermission, { phoneColumns: batchData.phoneColumns || [], batchType: batchEntityType || 'human' });
       const { data } = await verificationAPI.bulkUpload(
         batchData.file,
         batchData.batchName.trim(),
@@ -186,7 +193,9 @@ export const CostBreakdown = () => {
         toast.success('Batch created successfully');
       }
     } catch (error) {
-      toast.error(getApiError(error, error?.message || 'Failed to create batch'));
+      const phoneMessage = humanPhoneBackendMessage(error);
+      setPhoneError(phoneMessage);
+      toast.error(phoneMessage || getApiError(error, error?.message || 'Failed to create batch'));
     } finally {
       setSubmitting(false);
     }
@@ -197,8 +206,8 @@ export const CostBreakdown = () => {
       <Card className="space-y-4 p-5">
         <PageHeader title="Batch upload complete" subtitle={`${batchData.uploadResponse.total_uploaded ?? 0} users saved. Values below are confirmed by the server.`} />
         <BulkHumanResolvedUsers users={batchData.uploadResponse.successful_users || []} />
-        {(batchData.uploadResponse.skipped_users || []).map((row, index) => <p key={`skip-${index}`} className="text-sm text-amber-700">{uploadErrorText(row)}</p>)}
-        {(batchData.uploadResponse.errors || []).map((row, index) => <p key={`error-${index}`} className="text-sm text-red-600">{uploadErrorText(row)}</p>)}
+        {(batchData.uploadResponse.skipped_users || []).map((row, index) => <p key={`skip-${index}`} className="text-sm text-amber-700">{uploadErrorText(row).replace(/phone_number/g, 'Phone Number')}</p>)}
+        {(batchData.uploadResponse.errors || []).map((row, index) => <p key={`error-${index}`} className="text-sm text-red-600">{uploadErrorText(row).replace(/phone_number/g, 'Phone Number')}</p>)}
         <Button onClick={() => navigate('/org/batch-status')} icon={ArrowRight}>View Batch Status</Button>
       </Card>
     </AuthLayout>
@@ -294,6 +303,7 @@ export const CostBreakdown = () => {
             </div>
 
             <div className="mt-5">
+              {phoneError && <p role="alert" className="mb-3 text-sm text-red-600">{phoneError}</p>}
               {batchData?.ocrDraft && !batchData?.ocrSubmission?.response && <Button
                 variant="outline" className="mb-3 w-full" disabled={submitting}
                 onClick={() => navigate('/org/template', { state: { restoreOcrDraft: true } })}

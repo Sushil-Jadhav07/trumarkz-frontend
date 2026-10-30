@@ -1359,6 +1359,14 @@ export const certificateAccessAPI = {
     publicVerificationApi.post('/verification/certificate-access/requests', body),
   verifyRequest: (requestId, otpCode) =>
     publicVerificationApi.post(`/verification/certificate-access/requests/${encodeURIComponent(requestId)}/verify`, { otp_code: otpCode }),
+  authenticateOrganization: (requestId, accessToken, password) =>
+    publicVerificationApi.post(`/verification/certificate-access/requests/${encodeURIComponent(requestId)}/organization-auth`, { password }, {
+      headers: { 'X-Certificate-Access-Token': accessToken },
+    }),
+  authenticateHolder: (requestId, accessToken, { dob, phone_number }) =>
+    publicVerificationApi.post(`/verification/certificate-access/requests/${encodeURIComponent(requestId)}/holder-auth`, { dob, phone_number }, {
+      headers: { 'X-Certificate-Access-Token': accessToken },
+    }),
   getRequestStatus: (requestId, accessToken) =>
     publicVerificationApi.get(`/verification/certificate-access/requests/${encodeURIComponent(requestId)}/status`, {
       headers: { 'X-Certificate-Access-Token': accessToken },

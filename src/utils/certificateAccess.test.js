@@ -62,6 +62,36 @@ test('holder details and decisions never assume success from incomplete or contr
   for (const data of [{}, { status: 'pending_approval' }, { status: 'rejected' }]) assert.throws(() => validateHolderDecision(data, 'approve'));
 });
 
+test('OTP routing uses only the server next_step, with a legacy approval-only fallback', async () => {
+  const { accessNextStep, validateAccessRequestStatus } = await import('./certificateAccess.js');
+  assert.equal(accessNextStep({}), 'holder_approval');
+  for (const [identity_type, next_step] of [
+    ['organization', 'organization_password'], ['holder', 'holder_credentials'], ['third_party', 'holder_approval'],
+  ]) {
+    const data = { request_id: 'visitor', status: 'pending_approval', access_token: 'scoped', identity_type, next_step };
+    assert.equal(accessNextStep(data), next_step);
+    assert.equal(validateAccessRequestStatus(data, 'visitor', { verified: true }), data);
+  }
+  for (const data of [
+    { identity_type: 'organization' }, { next_step: 'organization_password' },
+    { identity_type: 'organization', next_step: 'holder_credentials' },
+    { identity_type: 'third_party', next_step: 'unknown' },
+  ]) assert.throws(() => accessNextStep(data));
+  assert.throws(() => validateAccessRequestStatus({ request_id: 'visitor', access_token: 'scoped', status: 'approved', identity_type: 'organization', next_step: 'organization_password' }, 'visitor', { verified: true }));
+});
+
+test('direct authentication confirms the same request and exact report/holder scope, not OTP alone', async () => {
+  const { validateDirectAccess } = await import('./certificateAccess.js');
+  const approved = { request_id: 'visitor', status: 'approved', scope: 'report', expires_at: '2030-01-01T00:00:00Z' };
+  assert.equal(validateDirectAccess(approved, 'visitor', 'organization_password'), approved);
+  assert.equal(validateDirectAccess({ ...approved, scope: 'holder' }, 'visitor', 'holder_credentials').scope, 'holder');
+  for (const data of [
+    { ...approved, status: 'pending_approval' }, { ...approved, request_id: 'other' },
+    { ...approved, scope: 'holder' }, { ...approved, expires_at: undefined },
+  ]) assert.throws(() => validateDirectAccess(data, 'visitor', 'organization_password'));
+  assert.throws(() => validateDirectAccess(approved, 'visitor', 'holder_approval'));
+});
+
 test('email check and date formatting', () => {
   assert.equal(isValidEmail(' a@b.co '), true);
   assert.equal(isValidEmail('a@b'), false);

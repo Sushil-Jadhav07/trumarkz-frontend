@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
-  AlertTriangle, CheckCircle2, Clock, Download, FileText, Hourglass, Link2, Lock, Mail, RefreshCw, ShieldX, XCircle,
+  AlertTriangle, CheckCircle2, Clock, Download, FileText, Hourglass, KeyRound, Link2, Lock, Mail, RefreshCw, ShieldX, UserCheck, XCircle,
 } from 'lucide-react';
 import { OTPInput } from '@/components/ui/OTPInput';
 import {
@@ -9,11 +9,11 @@ import {
 } from '@/components/shared/PublicAccessShell';
 import { certificateAccessAPI, fetchReportBlob, getApiError, reportApiBaseUrl } from '@/services/api';
 import { parseReportReference, referenceFromParams, reportUrlFromReference, retryAfterText } from '@/utils/reportAccess';
-import { isValidEmail, visitorStatusView, validateAccessRequestCreated, validateAccessRequestStatus } from '@/utils/certificateAccess';
+import { isValidEmail, visitorStatusView, validateAccessRequestCreated, validateAccessRequestStatus, accessNextStep, validateDirectAccess, normalisePhoneInput } from '@/utils/certificateAccess';
 
 // Visitor flow for a protected (holder_approval) report — web change report §4d.
-// 1. ask for access with an email  2. enter the emailed code  3. wait for the
-// certificate holder  4. view the report with the visitor access token.
+// Email + OTP, then the server-selected identity check or holder approval.
+// Organization grants cover one report; holder/visitor grants stay server scoped.
 // The token is shown once by the server and kept only in this tab's session.
 
 const STORAGE_KEY = 'trumarkz_cert_access_request';
@@ -74,6 +74,10 @@ const CertificateAccessRequestContent = ({ params }) => {
   // Visitor access-request ID; the report's ID stays in reference.request_id.
   const [requestId, setRequestId] = useState(resume?.requestId || null);
   const [accessToken, setAccessToken] = useState(resume?.accessToken || null);
+  const [nextStep, setNextStep] = useState(resume?.nextStep || 'holder_approval');
+  const [password, setPassword] = useState('');
+  const [holderDob, setHolderDob] = useState('');
+  const [holderPhone, setHolderPhone] = useState('');
   const [sentMessage, setSentMessage] = useState(resume?.message || '');
   const [otp, setOtp] = useState('');
   const [status, setStatus] = useState(null);
@@ -113,6 +117,7 @@ const CertificateAccessRequestContent = ({ params }) => {
     setBusy(false); setPollPaused(false);
     writeStored(null);
     setRequestId(null); setAccessToken(null); setStatus(null); setOtp(''); setSentMessage('');
+    setNextStep('holder_approval'); setPassword(''); setHolderDob(''); setHolderPhone('');
     setReport(null); setError(null);
     if (!keepEmail) setEmail('');
     setStep('email');
@@ -154,10 +159,12 @@ const CertificateAccessRequestContent = ({ params }) => {
         const { data } = await certificateAccessAPI.verifyRequest(requestId, otp);
         if (!current()) return;
         validateAccessRequestStatus(data, requestId, { verified: true });
+        const selectedStep = accessNextStep(data);
         setAccessToken(data.access_token);
+        setNextStep(selectedStep);
         setStatus(data.status);
         setStep('status');
-        writeStored({ requestId, email: email.trim(), reference, accessToken: data.access_token });
+        writeStored({ requestId, email: email.trim(), reference, accessToken: data.access_token, nextStep: selectedStep });
       } catch (err) {
         if (!current()) return;
         const described = describeError(err, 'Invalid or expired code');
@@ -188,18 +195,47 @@ const CertificateAccessRequestContent = ({ params }) => {
     });
   }, [requestId, accessToken, run]);
 
+  const authenticateDirect = (event) => {
+    event.preventDefault();
+    if (!requestId || !accessToken || status !== 'pending_approval') return;
+    if (nextStep === 'organization_password' && !password.length) {
+      setError({ message: 'Enter your organization account password.' }); return;
+    }
+    if (nextStep === 'holder_credentials' && (!/^\d{4}-\d{2}-\d{2}$/.test(holderDob) || holderPhone.replace(/\D/g, '').length < 10)) {
+      setError({ message: 'Enter your date of birth and registered mobile number.' }); return;
+    }
+    if (!['organization_password', 'holder_credentials'].includes(nextStep)) return;
+    run(async (current) => {
+      try {
+        const { data } = nextStep === 'organization_password'
+          ? await certificateAccessAPI.authenticateOrganization(requestId, accessToken, password)
+          : await certificateAccessAPI.authenticateHolder(requestId, accessToken, { dob: holderDob, phone_number: holderPhone });
+        if (!current()) return;
+        validateDirectAccess(data, requestId, nextStep);
+        setStatus('approved'); setHolderDob(''); setHolderPhone('');
+        // The OTP token remains the credential. Direct auth never replaces it.
+        writeStored({ requestId, email: email.trim(), reference, accessToken, nextStep });
+      } catch (err) {
+        if (!current()) return;
+        const described = describeError(err, 'We couldn’t confirm your details. Please try again.');
+        if (described.status === 404) { writeStored(null); setStatus('not_found'); }
+        else setError(described);
+      } finally { if (current()) setPassword(''); }
+    });
+  };
+
   // Resume with a fresh read; only pending requests poll. Reads cannot overlap
   // manual actions, stop on errors/terminal states and pause on hidden tabs.
   useEffect(() => {
     if (step !== 'status') return undefined;
     if (status == null) { checkStatus(); return undefined; }
-    if (!['pending_email', 'pending_approval'].includes(status)) return undefined;
+    if (nextStep !== 'holder_approval' || !['pending_email', 'pending_approval'].includes(status)) return undefined;
     const timer = setInterval(() => {
       if (statusReadsRef.current >= 30) { clearInterval(timer); setPollPaused(true); return; }
       if (document.visibilityState === 'visible') checkStatus({ quiet: true });
     }, 60_000);
     return () => clearInterval(timer);
-  }, [step, status, checkStatus]);
+  }, [step, status, nextStep, checkStatus]);
 
   const viewReport = () => {
     if (status !== 'approved' || !accessToken || !reportUrl) return;
@@ -220,7 +256,13 @@ const CertificateAccessRequestContent = ({ params }) => {
     });
   };
 
-  const view = step === 'status' ? (status == null ? 'checking' : status === 'not_found' ? 'not_found' : visitorStatusView(status)) : step;
+  let view = step;
+  if (step === 'status') {
+    view = status == null ? 'checking' : status === 'not_found' ? 'not_found' : visitorStatusView(status);
+    if (status === 'pending_approval' && nextStep !== 'holder_approval') {
+      view = ['organization_password', 'holder_credentials'].includes(nextStep) ? nextStep : 'failed';
+    }
+  }
 
   return (
     <PublicAccessShell badge="Protected report">
@@ -229,7 +271,7 @@ const CertificateAccessRequestContent = ({ params }) => {
           <form onSubmit={submitLink} noValidate>
             <span className="flex h-11 w-11 items-center justify-center rounded-full bg-blue-50 text-brand-blue"><Lock size={20} strokeWidth={1.75} /></span>
             <h1 className="mt-4 font-sora text-xl font-bold">This report is protected</h1>
-            <p className="mt-2 text-sm leading-6 text-gray-600">The certificate holder decides who can see their verification reports. Paste the report link from the certificate to ask for access.</p>
+            <p className="mt-2 text-sm leading-6 text-gray-600">Paste the report link from the certificate to continue with secure access.</p>
             <label htmlFor="report-link" className="mt-5 block text-xs font-medium text-gray-700">Report link</label>
             <div className="relative mt-1.5">
               <Link2 size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
@@ -242,7 +284,7 @@ const CertificateAccessRequestContent = ({ params }) => {
           <form onSubmit={requestAccess} noValidate>
             <span className="flex h-11 w-11 items-center justify-center rounded-full bg-blue-50 text-brand-blue"><Lock size={20} strokeWidth={1.75} /></span>
             <h1 className="mt-4 font-sora text-xl font-bold">Ask to view this report</h1>
-            <p className="mt-2 text-sm leading-6 text-gray-600">This verification report is protected. We’ll email you a code to confirm your address, then ask the certificate holder to approve your request.</p>
+            <p className="mt-2 text-sm leading-6 text-gray-600">We’ll email you a code, then guide you through the identity or approval steps needed to view this protected report.</p>
             <label htmlFor="visitor-email" className="mt-5 block text-xs font-medium text-gray-700">Your email</label>
             <div className="relative mt-1.5">
               <Mail size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
@@ -252,7 +294,7 @@ const CertificateAccessRequestContent = ({ params }) => {
             <PrimaryButton type="submit" loading={busy} className="mt-5 w-full">
               {busy && <RefreshCw size={16} className="animate-spin motion-reduce:animate-none" />} Send code
             </PrimaryButton>
-            <p className="mt-4 text-xs leading-5 text-gray-500">Confirming your email doesn’t give you access by itself — only the certificate holder can approve it.</p>
+            <p className="mt-4 text-xs leading-5 text-gray-500">Confirming your email alone does not give you access to the report.</p>
           </form>
         ) : view === 'code' ? (
           <div>
@@ -269,6 +311,40 @@ const CertificateAccessRequestContent = ({ params }) => {
               <button type="button" onClick={() => startOver(true)} disabled={busy} className="font-semibold text-brand-blue hover:underline disabled:opacity-60">{error?.canResend ? 'Request a new code' : 'Didn’t get it? Send a new code'}</button>
             </div>
           </div>
+        ) : view === 'organization_password' || view === 'holder_credentials' ? (
+          <form onSubmit={authenticateDirect} noValidate>
+            <span className="flex h-11 w-11 items-center justify-center rounded-full bg-blue-50 text-brand-blue">
+              {view === 'organization_password' ? <KeyRound size={20} /> : <UserCheck size={20} />}
+            </span>
+            <h1 className="mt-4 font-sora text-xl font-bold">{view === 'organization_password' ? 'Confirm organization access' : 'Confirm your identity'}</h1>
+            <p className="mt-2 break-all text-sm text-gray-600">Email verified: {email}</p>
+            <p className="mt-3 text-sm leading-6 text-gray-600">
+              {view === 'organization_password'
+                ? 'Enter your organization account password to open this report. No holder approval email is needed.'
+                : 'Enter your registered mobile number and date of birth to open your report. No approval email is needed.'}
+            </p>
+            {view === 'organization_password' ? (
+              <>
+                <label htmlFor="organization-access-password" className="mt-5 block text-xs font-medium text-gray-700">Organization account password</label>
+                <input id="organization-access-password" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} disabled={busy} className="mt-1.5 h-11 w-full rounded-xl border border-gray-200 px-3 text-sm focus:border-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/20" />
+              </>
+            ) : (
+              <>
+                <label htmlFor="direct-holder-dob" className="mt-5 block text-xs font-medium text-gray-700">Date of birth</label>
+                <input id="direct-holder-dob" type="date" autoComplete="bday" value={holderDob} onChange={(e) => setHolderDob(e.target.value)} disabled={busy} className="mt-1.5 h-11 w-full rounded-xl border border-gray-200 px-3 text-sm focus:border-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/20" />
+                <label htmlFor="direct-holder-phone" className="mt-4 block text-xs font-medium text-gray-700">Registered mobile number</label>
+                <input id="direct-holder-phone" type="tel" inputMode="tel" autoComplete="tel" value={holderPhone} onChange={(e) => setHolderPhone(normalisePhoneInput(e.target.value))} disabled={busy} className="mt-1.5 h-11 w-full rounded-xl border border-gray-200 px-3 text-sm focus:border-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/20" />
+              </>
+            )}
+            {error && <p role="alert" className="mt-3 text-xs text-red-600">{error.message}</p>}
+            <PrimaryButton type="submit" loading={busy} className="mt-6 w-full">
+              {busy && <RefreshCw size={16} className="animate-spin motion-reduce:animate-none" />} Confirm access
+            </PrimaryButton>
+            <div className="mt-4 flex flex-wrap justify-center gap-4 text-xs">
+              <button type="button" onClick={() => checkStatus()} disabled={busy} className="font-semibold text-brand-blue hover:underline disabled:opacity-60">Check access status</button>
+              <button type="button" onClick={() => startOver(true)} disabled={busy} className="font-semibold text-brand-blue hover:underline disabled:opacity-60">Start a new request</button>
+            </div>
+          </form>
         ) : view === 'checking' ? (
           <AccessState icon={RefreshCw} title="Checking your access">
             <p role="status">Loading the latest decision for your request…</p>
@@ -276,7 +352,11 @@ const CertificateAccessRequestContent = ({ params }) => {
         ) : view === 'approved' ? (
           <div>
             <AccessState icon={CheckCircle2} tone="bg-green-50 text-green-600" title="Access approved">
-              The certificate holder approved your request. You can view the report while your access remains active.
+              {nextStep === 'organization_password'
+                ? 'Your organization identity is confirmed. Access is limited to this scanned report.'
+                : nextStep === 'holder_credentials'
+                  ? 'Your identity is confirmed. Access is limited to your own reports.'
+                  : 'The certificate holder approved your request. You can view the report while your access remains active.'}
             </AccessState>
             {error && <p role="alert" className="mt-4 text-center text-xs text-red-600">{error.message}</p>}
             {!report && (
@@ -314,7 +394,7 @@ const CertificateAccessRequestContent = ({ params }) => {
           </AccessState>
         ) : view === 'not_found' ? (
           <AccessState icon={AlertTriangle} tone="bg-gray-100 text-gray-600" title="Request not found" action={<PrimaryButton type="button" onClick={() => startOver(true)}>Start a new request</PrimaryButton>}>
-            This request is no longer available. You can ask again.
+            This request is no longer available. Start a new request for this report.
           </AccessState>
         ) : (
           <AccessState
@@ -329,7 +409,7 @@ const CertificateAccessRequestContent = ({ params }) => {
           </AccessState>
         )}
       </AccessCard>
-      <p className="mt-6 text-center text-xs leading-5 text-gray-500">Only the certificate holder can approve access. TruMarkZ never shares protected reports without their approval.</p>
+      <p className="mt-6 text-center text-xs leading-5 text-gray-500">Protected reports open only after the required identity checks or holder approval.</p>
     </PublicAccessShell>
   );
 };

@@ -21,6 +21,7 @@ import { OcrAssignmentGroups, OcrAppliedAssignments, OcrNationalitySelect } from
 import { CustomSelect } from '@/components/ui/CustomSelect';
 import { OCR_GENDERS, buildOcrAssignments, applyOcrAssignmentsToPreview } from '@/utils/ocrAssignments';
 import { humanEmailRequired, humanEmailError, withHumanEmailField, validateHumanExcelEmails } from '@/utils/humanEmail';
+import { humanPhoneRequired, humanPhoneError, withHumanPhoneField, validateHumanExcelPhones, humanPhoneBackendMessage } from '@/utils/humanPhone';
 import { missingRequiredColumns, schemaSourceColumns, visibleCustomFields } from '@/utils/schemaConfig';
 import { uploadErrorText } from '@/utils/uploadErrors';
 
@@ -139,7 +140,7 @@ const normalizeDocType = (value) =>
 // to the existing generic field list. We never guess DL/Aadhaar/PAN.
 const getReviewFields = (documentType, permission) => {
   const dt = normalizeDocType(documentType);
-  return withHumanEmailField(DOC_TYPE_FIELDS[dt] || REVIEW_FIELDS, permission);
+  return withHumanPhoneField(withHumanEmailField(DOC_TYPE_FIELDS[dt] || REVIEW_FIELDS, permission), permission);
 };
 
 // OCR commonly returns DOB as DD/MM/YYYY or DD-MM-YYYY — PATCH expects
@@ -312,6 +313,7 @@ const ReviewOcrModal = ({ isOpen, ocrResult, sourceEntries = {}, onClose, onDone
     const values = forms[userId] || {};
     const missing = fields.filter((f) => f.required && !String(values[f.key] ?? '').trim()).map((f) => f.label);
     if (String(values.email ?? '').trim() && humanEmailError(values.email, permission)) missing.push('Valid Email');
+    if (String(values.phone_number ?? '').trim() && humanPhoneError(values.phone_number, permission)) missing.push('Valid Phone Number');
     return missing;
   };
 
@@ -370,7 +372,7 @@ const ReviewOcrModal = ({ isOpen, ocrResult, sourceEntries = {}, onClose, onDone
 
   const continueFromPreview = () => {
     if (users.some((user) => getMissingRequiredFields(user.id, user.document_type).length > 0)) {
-      toast.error('Check the required fields and email addresses before continuing.');
+      toast.error('Check the required fields, email addresses and phone numbers before continuing.');
       setFinalPreview(false);
       setConfirmedIds(new Set());
       return;
@@ -398,7 +400,7 @@ const ReviewOcrModal = ({ isOpen, ocrResult, sourceEntries = {}, onClose, onDone
             ? `${users.length} confirmed record${users.length === 1 ? '' : 's'}. Check the details and attachments before costing. Your batch will be created only after you approve the total cost.`
             : 'Review the extracted details and attach any additional documents. Confirmation saves your local draft; the batch and attachments are submitted after costing approval.'}
         </p>
-        <p className="font-inter text-xs text-slate-500">{humanEmailRequired(permission) ? 'Email is required for every user so they can approve who views their reports.' : 'Email is optional for Open Search. You can continue without it.'}</p>
+        <p className="font-inter text-xs text-slate-500">{humanEmailRequired(permission) ? 'Email and Phone Number are required for every holder in Permission Required batches.' : 'Email and Phone Number are optional for Open Search.'}</p>
 
         <div className="flex items-center justify-between gap-3 border-b border-slate-100 pb-3 font-inter text-xs text-slate-500">
           <span>{users.length} record{users.length === 1 ? '' : 's'}</span>
@@ -523,15 +525,19 @@ const ReviewOcrModal = ({ isOpen, ocrResult, sourceEntries = {}, onClose, onDone
                         /> : f.key.startsWith('address_line') ? (
                           <textarea rows={2} value={values[f.key] || ''} disabled={isConfirmed || finishing || confirmingId !== null} onChange={(e) => updateField(u.id, f.key, e.target.value)} className="w-full resize-y rounded-lg border border-slate-200 px-2.5 py-2 font-inter text-xs leading-relaxed text-slate-900 outline-none focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/10 disabled:bg-slate-50 disabled:text-slate-500" />
                         ) : <input
-                          type={f.key === 'email' ? 'email' : 'text'}
+                          type={f.key === 'email' ? 'email' : f.key === 'phone_number' ? 'tel' : 'text'}
+                          inputMode={f.key === 'phone_number' ? 'tel' : undefined}
                           required={Boolean(f.required)}
                           aria-required={Boolean(f.required)}
                           aria-label={`${f.label} for ${u.id}`}
+                          aria-invalid={f.key === 'phone_number' ? !!humanPhoneError(values.phone_number, permission) : undefined}
+                          aria-describedby={f.key === 'phone_number' && humanPhoneError(values.phone_number, permission) ? `ocr-phone-error-${u.id}` : undefined}
                           value={values[f.key] || ''}
                           disabled={isConfirmed || finishing || confirmingId !== null}
                           onChange={(e) => updateField(u.id, f.key, e.target.value)}
                           className="w-full rounded-lg border border-slate-200 px-2.5 py-1.5 font-inter text-xs text-slate-900 outline-none focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/10 disabled:bg-slate-50 disabled:text-slate-400"
                         />}
+                        {f.key === 'phone_number' && humanPhoneError(values.phone_number, permission) && <p id={`ocr-phone-error-${u.id}`} role="alert" className="mt-1 font-inter text-xs text-red-600">{humanPhoneError(values.phone_number, permission)}</p>}
                       </div>
                     ))}
                   </div>
@@ -884,7 +890,8 @@ export const DownloadTemplate = () => {
   const navigate  = useNavigate();
   const location = useLocation();
   const inputRef  = useRef(null);
-  const { selectedIndustry, selectedPermission, selectedVerifications, batchData, setBatchData, setSelectedHumanTemplate } = useApp();
+  const { selectedIndustry, selectedPermission: storedPermission, humanPermission, selectedVerifications, batchData, setBatchData, setSelectedHumanTemplate } = useApp();
+  const selectedPermission = humanPermission ?? storedPermission;
   const { user } = useAuth();
   // Which configured dynamic schema (if any) this batch should use — see
   // "Dynamic Schema change.md". '' means "use the organization's default
@@ -893,11 +900,13 @@ export const DownloadTemplate = () => {
   const [schemaName, setSchemaName] = useState('');
   const [schemaConfig, setSchemaConfig] = useState(null);
 
-  const baseFields = useMemo(() => BASE_FIELDS.map((field) => field.key === 'email'
+  const baseFields = useMemo(() => withHumanPhoneField(BASE_FIELDS.map((field) => field.key === 'email'
     ? { ...field, required: humanEmailRequired(selectedPermission) }
-    : field), [selectedPermission]);
+    : field), selectedPermission), [selectedPermission]);
 
   const [excelFile,      setExcelFile]      = useState(null);
+  const [phoneError, setPhoneError] = useState('');
+  useEffect(() => { setPhoneError(''); }, [selectedPermission, excelFile]);
   const [customFields,   setCustomFields]   = useState([]);
   const [fieldInput,     setFieldInput]     = useState('');
   const [modalOpen,      setModalOpen]      = useState(false);
@@ -1064,9 +1073,10 @@ export const DownloadTemplate = () => {
       // further through Costing/Preview.
       // Only block on the fields PATCH /verification/batch-users/{user_id}
       // actually requires (full_name, dob, gender, nationality — see
-      // baseFields). Email is additionally required in Permission Required
-      // Human batches. Other selected template fields (
-      // phone_number, aadhar_number, pan_number, license_no, and any custom
+      // baseFields). Email and Phone Number are additionally required in
+      // Permission Required Human batches. Phone aliases and schema mappings
+      // are checked separately below. Other selected template fields (
+      // aadhar_number, pan_number, license_no, and any custom
       // fields the org added) is optional — their absence from the uploaded
       // file is fine and must never block Continue. This used to check the
       // full templateHeaders list, which wrongly treated those optional
@@ -1077,7 +1087,7 @@ export const DownloadTemplate = () => {
       // With a schema, the org's own mapped/aliased column names count too (the server maps them
       // before its own required-column check). Anything still unrecognised is left to the server
       // rather than blocked here — it validates against the schema with its exact message.
-      const requiredHeaders = baseFields.filter((f) => f.required).map((f) => f.key);
+      const requiredHeaders = baseFields.filter((f) => f.required && f.key !== 'phone_number').map((f) => f.key);
       const missingHeaders = missingRequiredColumns(rows[0], requiredHeaders, schemaConfig, { prefixOk: true });
       if (missingHeaders.length > 0) {
         if (!schemaConfig) {
@@ -1090,6 +1100,8 @@ export const DownloadTemplate = () => {
         emailColumns: schemaSourceColumns(schemaConfig).email || [],
         schemaApplies: !!schemaConfig,
       });
+      const phoneColumns = schemaSourceColumns(schemaConfig).phone_number || [];
+      validateHumanExcelPhones(rows, selectedPermission, { phoneColumns });
 
       const recordCount = rows
         .slice(1)
@@ -1098,13 +1110,15 @@ export const DownloadTemplate = () => {
       if (recordCount <= 0) { toast.error('The uploaded file has no data rows'); return; }
       setBatchData({
         file: excelFile, batchName: batchNameValue, schemaName,
-        description: '', recordCount, templateHeaders,
+        description: '', recordCount, templateHeaders, phoneColumns,
         fileName: excelFile.name, costConfirmed: false, uploadResponse: null,
       });
       setSelectedHumanTemplate('classic-blue');
       navigate('/org/costing');
     } catch (err) {
-      toast.error(getApiError(err, err?.message || 'Failed to read the uploaded file'));
+      const phoneMessage = humanPhoneBackendMessage(err);
+      setPhoneError(phoneMessage);
+      toast.error(phoneMessage || getApiError(err, err?.message || 'Failed to read the uploaded file'));
     }
   };
 
@@ -1222,6 +1236,8 @@ export const DownloadTemplate = () => {
                     onFileSelect={setExcelFile}
                     onRemove={() => setExcelFile(null)}
                   />
+                  {humanPhoneRequired(selectedPermission) && <p className="mt-3 text-xs text-slate-600">Phone Number <span className="text-red-500">*</span>: include phone_number for every holder (phone, mobile and mobile_number also accepted).</p>}
+                  {phoneError && <p role="alert" className="mt-2 text-xs text-red-600">{phoneError}</p>}
                 </div>
 
                 <div className="flex-1 space-y-3 p-6">
@@ -1438,7 +1454,7 @@ export const DownloadTemplate = () => {
                   className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2"
                 >
                   <div className="min-w-0">
-                    <p className="font-inter text-xs font-medium text-slate-800 truncate">{field.label}</p>
+                    <p className="font-inter text-xs font-medium text-slate-800 truncate">{field.label}{field.key === 'phone_number' && field.required && <span className="text-red-500"> *</span>}</p>
                     <p className="font-mono text-[10px] text-slate-400 truncate">
                       {field.key}{field.hint ? ` · ${field.hint}` : ''}
                     </p>

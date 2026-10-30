@@ -73,6 +73,7 @@ export const AuthProvider = ({ children }) => {
       name: data.full_name || data.org_name || '',
       email: data.email || '',
       phoneNumber: data.phone_number || '',
+      permissionMode: data.permission_mode,
       organization: data.org_name || '',
       userType,
       role: userType,

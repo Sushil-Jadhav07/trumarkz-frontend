@@ -2,6 +2,8 @@
 
 Updated: 30 October 2026. Status: implemented locally, not merged or deployed.
 
+**Latest extension:** [Organization password and holder mobile/DOB direct access](certificate-access-direct-auth.md) implements the subsequently supplied §9 addendum. The next step after OTP can now be direct authentication or the original third-party approval flow; the earlier visitor-only description below is extended by that handoff.
+
 ## Routes and QR compatibility
 
 Both public pages already existed and were reused. The new backend QR formats match the active routes in `src/App.jsx`:
