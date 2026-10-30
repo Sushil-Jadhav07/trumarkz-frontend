@@ -34,6 +34,32 @@ test('visitor screens follow the documented status meanings', () => {
   assert.equal(visitorStatusView('expired'), 'expired');
   assert.equal(visitorStatusView('revoked'), 'revoked');
   assert.equal(visitorStatusView('rejected'), 'rejected');
+  assert.equal(visitorStatusView('failed'), 'failed');
+  assert.equal(visitorStatusView('unknown'), 'failed');
+  assert.equal(visitorStatusView(undefined), 'failed');
+});
+
+test('access responses must confirm the visitor request identity, scoped token and known state', async () => {
+  const { validateAccessRequestCreated, validateAccessRequestStatus } = await import('./certificateAccess.js');
+  assert.equal(validateAccessRequestCreated({ request_id: 'visitor-id' }).request_id, 'visitor-id');
+  for (const data of [{}, { request_id: '' }, { request_id: 7 }]) assert.throws(() => validateAccessRequestCreated(data));
+  assert.equal(validateAccessRequestStatus({ request_id: 'visitor-id', status: 'pending_approval', access_token: 'scoped' }, 'visitor-id', { verified: true }).status, 'pending_approval');
+  for (const data of [
+    { request_id: 'report-id', status: 'approved', access_token: 'scoped' },
+    { request_id: 'visitor-id', status: 'unknown', access_token: 'scoped' },
+    { request_id: 'visitor-id', status: 'approved' },
+    { request_id: 'visitor-id', status: 'approved', access_token: '' },
+  ]) assert.throws(() => validateAccessRequestStatus(data, 'visitor-id', { verified: true }));
+});
+
+test('holder details and decisions never assume success from incomplete or contradictory responses', async () => {
+  const { validateHolderInfo, validateHolderDecision } = await import('./certificateAccess.js');
+  const info = { visitor_email: 'visitor@example.test', requires_phone_number: true, approval_deadline: '2030-01-01T00:00:00Z' };
+  assert.equal(validateHolderInfo(info), info);
+  for (const data of [{}, { ...info, requires_phone_number: undefined }, { ...info, approval_deadline: 'invalid' }]) assert.throws(() => validateHolderInfo(data));
+  assert.equal(validateHolderDecision({ status: 'approved' }, 'approve').status, 'approved');
+  assert.equal(validateHolderDecision({ status: 'rejected' }, 'reject').status, 'rejected');
+  for (const data of [{}, { status: 'pending_approval' }, { status: 'rejected' }]) assert.throws(() => validateHolderDecision(data, 'approve'));
 });
 
 test('email check and date formatting', () => {

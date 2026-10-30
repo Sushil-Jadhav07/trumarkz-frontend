@@ -8,8 +8,8 @@ import {
   PublicAccessShell, AccessCard, AccessState, PrimaryButton, SecondaryButton,
 } from '@/components/shared/PublicAccessShell';
 import { certificateAccessAPI, fetchReportBlob, getApiError, reportApiBaseUrl } from '@/services/api';
-import { parseReportReference, reportUrlFromReference, retryAfterText } from '@/utils/reportAccess';
-import { isValidEmail, visitorStatusView } from '@/utils/certificateAccess';
+import { parseReportReference, referenceFromParams, reportUrlFromReference, retryAfterText } from '@/utils/reportAccess';
+import { isValidEmail, visitorStatusView, validateAccessRequestCreated, validateAccessRequestStatus } from '@/utils/certificateAccess';
 
 // Visitor flow for a protected (holder_approval) report — web change report §4d.
 // 1. ask for access with an email  2. enter the emailed code  3. wait for the
@@ -33,18 +33,7 @@ const describeError = (err, fallback) => {
   const retryAfter = err?.response?.headers?.['retry-after'];
   if (status === 429) return { status, message: `Too many attempts. ${retryAfterText(retryAfter)}` };
   if (status === 503) return { status, message: 'This service is temporarily unavailable. Please try again in a few minutes.' };
-  return { status, message: getApiError(err, fallback) };
-};
-
-// The report this page is about: ?document_id=… | ?request_id=…&file_index=… | ?report=<link>
-const referenceFromParams = (params) => {
-  if (params.get('document_id')) return { document_id: params.get('document_id') };
-  if (params.get('request_id') && params.get('file_index') !== null) {
-    const fileIndex = Number(params.get('file_index'));
-    if (Number.isInteger(fileIndex) && fileIndex >= 0) return { request_id: params.get('request_id'), file_index: fileIndex };
-  }
-  if (params.get('report')) return parseReportReference(params.get('report'));
-  return null;
+  return { status, message: getApiError(err, err?.message || fallback) };
 };
 
 const ReportViewer = ({ report, onClose }) => {
@@ -68,39 +57,60 @@ const ReportViewer = ({ report, onClose }) => {
 
 export const CertificateAccessRequest = () => {
   const [params] = useSearchParams();
+  return <CertificateAccessRequestContent key={params.toString()} params={params} />;
+};
+
+const CertificateAccessRequestContent = ({ params }) => {
   const stored = useMemo(readStored, []);
   const paramRef = useMemo(() => referenceFromParams(params), [params]);
+  const hasReference = ['document_id', 'request_id', 'file_index', 'report'].some((key) => params.has(key));
   // A stored request only resumes when it is for the same report (or no report was named).
-  const resume = stored?.requestId && (!paramRef || JSON.stringify(stored.reference) === JSON.stringify(paramRef)) ? stored : null;
+  const resume = stored?.requestId && (!hasReference || (paramRef && JSON.stringify(stored.reference) === JSON.stringify(paramRef))) ? stored : null;
 
   const [reference, setReference] = useState(resume?.reference || paramRef);
   const [linkInput, setLinkInput] = useState('');
   const [email, setEmail] = useState(resume?.email || '');
   const [step, setStep] = useState(resume?.accessToken ? 'status' : resume?.requestId ? 'code' : 'email');
+  // Visitor access-request ID; the report's ID stays in reference.request_id.
   const [requestId, setRequestId] = useState(resume?.requestId || null);
   const [accessToken, setAccessToken] = useState(resume?.accessToken || null);
   const [sentMessage, setSentMessage] = useState(resume?.message || '');
   const [otp, setOtp] = useState('');
   const [status, setStatus] = useState(null);
-  const [error, setError] = useState(null);
+  const [error, setError] = useState(hasReference && !paramRef ? { message: 'This report link is incomplete or invalid. Paste the full report link below to continue.' } : null);
   const [busy, setBusy] = useState(false);
   const [report, setReport] = useState(null);
   const busyRef = useRef(false);
+  const activeRef = useRef(true);
+  const generationRef = useRef(0);
+  const statusReadsRef = useRef(0);
+  const [pollPaused, setPollPaused] = useState(false);
+
+  useEffect(() => {
+    activeRef.current = true;
+    return () => { activeRef.current = false; generationRef.current++; busyRef.current = false; };
+  }, []);
 
   const reportUrl = reportUrlFromReference(reference, reportApiBaseUrl);
 
   useEffect(() => () => { if (report?.url) URL.revokeObjectURL(report.url); }, [report]);
 
   // Single-use codes and links: never let a double-click send the same request twice.
-  const run = async (fn) => {
+  const run = useCallback(async (fn) => {
     if (busyRef.current) return;
+    const generation = generationRef.current;
+    const current = () => activeRef.current && generationRef.current === generation;
     busyRef.current = true;
     setBusy(true);
     setError(null);
-    try { await fn(); } finally { busyRef.current = false; setBusy(false); }
-  };
+    try { await fn(current); } finally { if (current()) { busyRef.current = false; setBusy(false); } }
+  }, []);
 
   const startOver = (keepEmail = true) => {
+    generationRef.current++;
+    busyRef.current = false;
+    statusReadsRef.current = 0;
+    setBusy(false); setPollPaused(false);
     writeStored(null);
     setRequestId(null); setAccessToken(null); setStatus(null); setOtp(''); setSentMessage('');
     setReport(null); setError(null);
@@ -119,30 +129,37 @@ export const CertificateAccessRequest = () => {
   const requestAccess = (event) => {
     event.preventDefault();
     if (!isValidEmail(email)) { setError({ message: 'Enter a valid email address.' }); return; }
-    run(async () => {
+    if (!reportUrl) { setError({ message: 'Choose a valid report before requesting access.' }); return; }
+    run(async (current) => {
       try {
         const { data } = await certificateAccessAPI.requestAccess({ visitor_email: email.trim(), ...reference });
+        if (!current()) return;
+        validateAccessRequestCreated(data);
         setRequestId(data.request_id);
         setSentMessage(data.message || 'If this report can be shared, we’ve sent a code to your email.');
         setOtp('');
         setStep('code');
         writeStored({ requestId: data.request_id, email: email.trim(), reference, message: data.message });
       } catch (err) {
+        if (!current()) return;
         setError(describeError(err, 'We couldn’t send the request. Please try again.'));
       }
     });
   };
 
   const verifyCode = () => {
-    if (otp.length !== 6) { setError({ message: 'Enter all 6 digits of the code.' }); return; }
-    run(async () => {
+    if (!/^\d{6}$/.test(otp)) { setError({ message: 'Enter all 6 digits of the code.' }); return; }
+    run(async (current) => {
       try {
         const { data } = await certificateAccessAPI.verifyRequest(requestId, otp);
+        if (!current()) return;
+        validateAccessRequestStatus(data, requestId, { verified: true });
         setAccessToken(data.access_token);
-        setStatus(data.status || 'pending_approval');
+        setStatus(data.status);
         setStep('status');
         writeStored({ requestId, email: email.trim(), reference, accessToken: data.access_token });
       } catch (err) {
+        if (!current()) return;
         const described = describeError(err, 'Invalid or expired code');
         setError({ ...described, canResend: described.status === 400 });
         setOtp('');
@@ -151,44 +168,59 @@ export const CertificateAccessRequest = () => {
   };
 
   const checkStatus = useCallback(async ({ quiet = false } = {}) => {
-    if (!requestId || !accessToken) return;
-    if (!quiet) { setBusy(true); setError(null); }
-    try {
-      const { data } = await certificateAccessAPI.getRequestStatus(requestId, accessToken);
-      setStatus(data.status);
-    } catch (err) {
-      const described = describeError(err, 'We couldn’t check this request.');
-      if (described.status === 404) { setStatus('not_found'); writeStored(null); } else if (!quiet) setError(described);
-    } finally {
-      if (!quiet) setBusy(false);
-    }
-  }, [requestId, accessToken]);
+    if (!requestId || !accessToken || busyRef.current) return;
+    await run(async (current) => {
+      try {
+        statusReadsRef.current++;
+        const { data } = await certificateAccessAPI.getRequestStatus(requestId, accessToken);
+        if (!current()) return;
+        validateAccessRequestStatus(data, requestId);
+        setStatus(data.status);
+        if (data.status !== 'approved') setReport(null);
+        setPollPaused(statusReadsRef.current >= 30);
+      } catch (err) {
+        if (!current()) return;
+        const described = describeError(err, 'We couldn’t check this request.');
+        setReport(null);
+        if (described.status === 404) { setStatus('not_found'); writeStored(null); }
+        else { setStatus('failed'); setError(described); }
+      }
+    });
+  }, [requestId, accessToken, run]);
 
-  // Check on arrival, then once a minute while waiting (the server allows 60 checks an hour).
+  // Resume with a fresh read; only pending requests poll. Reads cannot overlap
+  // manual actions, stop on errors/terminal states and pause on hidden tabs.
   useEffect(() => {
     if (step !== 'status') return undefined;
-    checkStatus();
+    if (status == null) { checkStatus(); return undefined; }
+    if (!['pending_email', 'pending_approval'].includes(status)) return undefined;
     const timer = setInterval(() => {
+      if (statusReadsRef.current >= 30) { clearInterval(timer); setPollPaused(true); return; }
       if (document.visibilityState === 'visible') checkStatus({ quiet: true });
     }, 60_000);
     return () => clearInterval(timer);
-  }, [step, checkStatus]);
+  }, [step, status, checkStatus]);
 
-  const viewReport = () => run(async () => {
+  const viewReport = () => {
+    if (status !== 'approved' || !accessToken || !reportUrl) return;
+    run(async (current) => {
     try {
       const blob = await fetchReportBlob(reportUrl, { accessToken });
+      if (!current()) return;
       setReport((previous) => { if (previous?.url) URL.revokeObjectURL(previous.url); return { blob, url: URL.createObjectURL(blob) }; });
     } catch (err) {
+      if (!current()) return;
       if (err?.status === 403) {
+        setStatus('failed');
         setError({ message: 'This report isn’t available to you right now — your access may have expired or been revoked.' });
-        checkStatus({ quiet: true });
       } else {
         setError({ message: err?.status === 429 ? `Too many attempts. ${retryAfterText(err.retryAfter)}` : (err?.message || 'The report could not be opened.') });
       }
     }
-  });
+    });
+  };
 
-  const view = step === 'status' ? (status === 'not_found' ? 'not_found' : visitorStatusView(status)) : step;
+  const view = step === 'status' ? (status == null ? 'checking' : status === 'not_found' ? 'not_found' : visitorStatusView(status)) : step;
 
   return (
     <PublicAccessShell badge="Protected report">
@@ -226,7 +258,7 @@ export const CertificateAccessRequest = () => {
           <div>
             <span className="flex h-11 w-11 items-center justify-center rounded-full bg-blue-50 text-brand-blue"><Mail size={20} strokeWidth={1.75} /></span>
             <h1 className="mt-4 font-sora text-xl font-bold">Enter the code</h1>
-            <p className="mt-2 text-sm leading-6 text-gray-600">{sentMessage} The code is valid for 10 minutes and works once.</p>
+            <p className="mt-2 text-sm leading-6 text-gray-600">{sentMessage} Enter the verification code from your email.</p>
             <p className="mt-1 text-xs text-gray-500">Sent to <span className="font-medium text-gray-700">{email}</span></p>
             <div className="mt-6"><OTPInput value={otp} onChange={setOtp} error={error?.message} /></div>
             {error && <p role="alert" className="mt-3 text-center text-xs text-red-600">{error.message}</p>}
@@ -234,13 +266,17 @@ export const CertificateAccessRequest = () => {
               {busy && <RefreshCw size={16} className="animate-spin motion-reduce:animate-none" />} Verify code
             </PrimaryButton>
             <div className="mt-4 text-center text-xs">
-              <button type="button" onClick={() => startOver(true)} className="font-semibold text-brand-blue hover:underline">{error?.canResend ? 'Request a new code' : 'Didn’t get it? Send a new code'}</button>
+              <button type="button" onClick={() => startOver(true)} disabled={busy} className="font-semibold text-brand-blue hover:underline disabled:opacity-60">{error?.canResend ? 'Request a new code' : 'Didn’t get it? Send a new code'}</button>
             </div>
           </div>
+        ) : view === 'checking' ? (
+          <AccessState icon={RefreshCw} title="Checking your access">
+            <p role="status">Loading the latest decision for your request…</p>
+          </AccessState>
         ) : view === 'approved' ? (
           <div>
             <AccessState icon={CheckCircle2} tone="bg-green-50 text-green-600" title="Access approved">
-              The certificate holder approved your request. Approved access lasts 72 hours.
+              The certificate holder approved your request. You can view the report while your access remains active.
             </AccessState>
             {error && <p role="alert" className="mt-4 text-center text-xs text-red-600">{error.message}</p>}
             {!report && (
@@ -263,9 +299,18 @@ export const CertificateAccessRequest = () => {
               </SecondaryButton>
             )}
           >
-            <p>Your email is confirmed. We’ve asked the certificate holder to approve your request — they have 24 hours to respond.</p>
-            <p className="mt-2 text-xs text-gray-500">Keep this tab open, or come back to it later in this browser. It checks for a decision every minute.</p>
+            <p>Your email is confirmed. We’ve asked the certificate holder to approve your request.</p>
+            <p className="mt-2 text-xs text-gray-500">{pollPaused ? 'Automatic checks paused. Use Check again for the latest decision.' : 'Keep this tab open, or come back to it later in this browser. It checks for a decision every minute.'}</p>
             {error && <p role="alert" className="mt-3 text-xs text-red-600">{error.message}</p>}
+          </AccessState>
+        ) : view === 'failed' ? (
+          <AccessState icon={AlertTriangle} tone="bg-red-50 text-red-600" title="Couldn’t confirm access" action={(
+            <div className="flex flex-wrap justify-center gap-3">
+              {requestId && accessToken && <SecondaryButton onClick={() => checkStatus()} disabled={busy}>Check again</SecondaryButton>}
+              <SecondaryButton onClick={() => startOver(true)} disabled={busy}>Start a new request</SecondaryButton>
+            </div>
+          )}>
+            <p role="alert">{error?.message || 'The access request could not be completed. Check its status again or start a new request.'}</p>
           </AccessState>
         ) : view === 'not_found' ? (
           <AccessState icon={AlertTriangle} tone="bg-gray-100 text-gray-600" title="Request not found" action={<PrimaryButton type="button" onClick={() => startOver(true)}>Start a new request</PrimaryButton>}>

@@ -5,7 +5,7 @@ import { isCertificateAccessPage } from '@/utils/certificateAccess';
 import { automaticRecordId, canRetryAutomatic } from '@/utils/automaticVerification';
 import { validateOcrAssignments } from '@/utils/ocrAssignments';
 import { withSampleRecord } from '@/utils/schemaConfig';
-import { fetchReport, isGatedReportUrl, reportAuthHeaders } from '@/utils/reportAccess';
+import { fetchReport, isGatedReportUrl, reportAuthHeaders, certificateAccessPath } from '@/utils/reportAccess';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
 const VERIFICATION_BASE_URL = import.meta.env.VITE_VERIFICATION_API_URL || API_BASE_URL;
@@ -1402,6 +1402,16 @@ export const openReport = async (url) => {
     else window.open(objectUrl, '_blank', 'noopener,noreferrer');
     setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
   } catch (error) {
+    // Keep denied report content protected, but give visitors the existing
+    // email/OTP/holder-approval flow rather than a dead-end report error.
+    if (error?.status === 403 && /holder.*approv|approval.required/i.test(error.message || '')) {
+      const entryPath = certificateAccessPath(url);
+      if (entryPath) {
+        if (tab && !tab.closed) tab.location.href = entryPath;
+        else window.location.assign(entryPath);
+        return;
+      }
+    }
     tab?.close();
     throw error;
   }

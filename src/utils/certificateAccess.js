@@ -15,6 +15,7 @@ export const GRANT_STATUS_META = {
   rejected:         { label: 'Rejected by holder',  tone: 'bg-red-50 text-red-700', final: true },
   revoked:          { label: 'Revoked',             tone: 'bg-gray-100 text-gray-600', final: true },
   expired:          { label: 'Expired',             tone: 'bg-gray-100 text-gray-600', final: true },
+  failed:           { label: 'Failed',              tone: 'bg-red-50 text-red-700', final: true },
 };
 
 export const grantStatusMeta = (status) =>
@@ -27,8 +28,36 @@ export const canRevokeGrant = (grant) => !!grant?.id && !grantStatusMeta(grant.s
 export const visitorStatusView = (status) => {
   if (status === 'approved') return 'approved';
   if (status === 'pending_email' || status === 'pending_approval') return 'waiting';
-  if (status === 'rejected' || status === 'revoked' || status === 'expired') return status;
-  return 'waiting';
+  if (status === 'rejected' || status === 'revoked' || status === 'expired' || status === 'failed') return status;
+  return 'failed';
+};
+
+export const validateAccessRequestCreated = (data) => {
+  if (typeof data?.request_id !== 'string' || !data.request_id.trim()) throw new Error('The server did not confirm the access request. Please try again.');
+  return data;
+};
+
+export const validateAccessRequestStatus = (data, requestId, { verified = false } = {}) => {
+  if (data?.request_id !== requestId || !Object.hasOwn(GRANT_STATUS_META, data?.status)
+    || (verified && (typeof data.access_token !== 'string' || !data.access_token.trim()))) {
+    throw new Error('The access response could not be confirmed. Please check the request again.');
+  }
+  return data;
+};
+
+export const validateHolderInfo = (data) => {
+  if (!data || typeof data.visitor_email !== 'string' || !isValidEmail(data.visitor_email)
+    || typeof data.requires_phone_number !== 'boolean'
+    || !Number.isFinite(Date.parse(data.approval_deadline))) {
+    throw new Error('The approval request could not be confirmed. Please reload the request.');
+  }
+  return data;
+};
+
+export const validateHolderDecision = (data, decision) => {
+  const expected = decision === 'approve' ? 'approved' : decision === 'reject' ? 'rejected' : null;
+  if (!expected || data?.status !== expected) throw new Error('The server did not confirm this decision. Please reload the request to check its current state.');
+  return data;
 };
 
 // Holder phone: any format is accepted; the server compares the last 10 digits.

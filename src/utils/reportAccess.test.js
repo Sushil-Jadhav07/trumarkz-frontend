@@ -2,10 +2,28 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   parseReportReference, reportUrlFromReference, isGatedReportUrl, reportAuthHeaders,
-  fetchReport, ReportAccessError, retryAfterText,
+  fetchReport, ReportAccessError, retryAfterText, referenceFromParams,
 } from './reportAccess.js';
 
 const API = 'https://api.trumarkz.test';
+
+test('bad report links cannot crash the visitor page or use non-web schemes', () => {
+  assert.equal(parseReportReference(`${API}/verification/documents/%E0%A4/view`), null);
+  assert.equal(parseReportReference(`${API}/verification/manual/reports/%ZZ/view/0`), null);
+  assert.equal(parseReportReference('file:///verification/documents/d/view'), null);
+  assert.equal(parseReportReference(`${API}/verification/manual/reports/r/view/9007199254740992`), null);
+});
+
+test('visitor query references reject incomplete and conflicting IDs while preserving index zero', () => {
+  const parse = (query) => referenceFromParams(new URLSearchParams(query));
+  assert.deepEqual(parse('request_id=r&file_index=0'), { request_id: 'r', file_index: 0 });
+  assert.deepEqual(parse('document_id=d'), { document_id: 'd' });
+  assert.deepEqual(parse(`report=${encodeURIComponent(`${API}/verification/manual/reports/r/view/2`)}`), { request_id: 'r', file_index: 2 });
+  for (const query of ['request_id=r', 'file_index=0', 'request_id=r&file_index=', 'request_id=r&file_index=+',
+    'request_id=r&file_index=1e2', 'request_id=r&file_index=-1', 'document_id=',
+    'document_id=d&request_id=r&file_index=0', 'document_id=d&document_id=other',
+    'request_id=r&file_index=0&file_index=1', 'request_id=r&file_index=9007199254740992']) assert.equal(parse(query), null, query);
+});
 
 test('parses both report routes and nothing else', () => {
   assert.deepEqual(parseReportReference(`${API}/verification/documents/doc-1/view`), { document_id: 'doc-1' });

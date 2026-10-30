@@ -20,12 +20,35 @@ const parseUrl = (url) => {
 // { document_id } or { request_id, file_index } for a TruMarkZ report link, else null.
 export const parseReportReference = (url) => {
   const parsed = parseUrl(url);
-  if (!parsed) return null;
-  const doc = parsed.pathname.match(DOCUMENT_VIEW);
-  if (doc) return { document_id: decodeURIComponent(doc[1]) };
-  const manual = parsed.pathname.match(MANUAL_VIEW);
-  if (manual) return { request_id: decodeURIComponent(manual[1]), file_index: Number(manual[2]) };
+  if (!parsed || !['http:', 'https:'].includes(parsed.protocol)) return null;
+  try {
+    const doc = parsed.pathname.match(DOCUMENT_VIEW);
+    if (doc) return { document_id: decodeURIComponent(doc[1]) };
+    const manual = parsed.pathname.match(MANUAL_VIEW);
+    if (manual && Number.isSafeInteger(Number(manual[2]))) return { request_id: decodeURIComponent(manual[1]), file_index: Number(manual[2]) };
+  } catch { /* Malformed percent encoding is invalid input, not a page crash. */ }
   return null;
+};
+
+// Accept exactly one reference shape. Invalid or ambiguous URL parameters must
+// never silently resume a different report or turn an empty index into file 0.
+export const referenceFromParams = (params) => {
+  const keys = ['document_id', 'request_id', 'file_index', 'report'];
+  if (keys.some((key) => params.getAll(key).length > 1)) return null;
+  if (params.has('document_id')) {
+    if (keys.slice(1).some((key) => params.has(key))) return null;
+    const id = params.get('document_id').trim();
+    return id ? { document_id: id } : null;
+  }
+  if (params.has('request_id') || params.has('file_index')) {
+    if (params.has('report')) return null;
+    const id = params.get('request_id')?.trim();
+    const rawIndex = params.get('file_index');
+    const index = Number(rawIndex);
+    return id && /^\d+$/.test(rawIndex ?? '') && Number.isSafeInteger(index)
+      ? { request_id: id, file_index: index } : null;
+  }
+  return params.has('report') ? parseReportReference(params.get('report')) : null;
 };
 
 // Rebuilds the report link from a reference (visitor page opened with query params).
@@ -36,6 +59,13 @@ export const reportUrlFromReference = (ref, apiBaseUrl = '') => {
     return `${base}/verification/manual/reports/${encodeURIComponent(ref.request_id)}/view/${ref.file_index}`;
   }
   return null;
+};
+
+// Only non-secret report identity travels to the public entry page. Discard
+// source query strings/fragments so credentials never become permanent URLs.
+export const certificateAccessPath = (url) => {
+  const reference = parseReportReference(url);
+  return reference ? `/certificate-access/request?${new URLSearchParams(reference)}` : null;
 };
 
 // A credential is only ever attached to a TruMarkZ report route on one of our own

@@ -43,10 +43,11 @@ export const OTPInput = ({ length = 6, value = '', onChange, error }) => {
   };
 
   return (
-    <div className="flex gap-2 justify-center">
+    <div className="mx-auto flex w-full max-w-[328px] justify-center gap-1.5 sm:gap-2">
       {otp.map((digit, index) => (
         <motion.div
           key={index}
+          className="min-w-0 flex-1"
           animate={digit ? { scale: [1, 1.05, 1] } : {}}
           transition={{ duration: 0.15 }}
         >
@@ -54,13 +55,15 @@ export const OTPInput = ({ length = 6, value = '', onChange, error }) => {
             ref={el => inputs.current[index] = el}
             type="text"
             inputMode="numeric"
+            aria-label={`Code digit ${index + 1} of ${length}`}
+            aria-invalid={!!error}
             maxLength={1}
             value={digit}
             onChange={e => handleChange(index, e)}
             onKeyDown={e => handleKeyDown(index, e)}
             onPaste={handlePaste}
             className={clsx(
-              'w-12 h-14 text-center text-xl font-bold font-sora rounded-xl border-2 outline-none transition-all duration-200',
+              'w-full min-w-0 h-12 sm:h-14 text-center text-xl font-bold font-sora rounded-xl border-2 outline-none transition-all duration-200',
               digit ? 'border-brand-blue bg-brand-blue/5 text-brand-dark' : 'border-brand-gray text-brand-dark',
               error && 'border-red-500',
               'focus:border-brand-blue focus:ring-4 focus:ring-brand-blue/10'

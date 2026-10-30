@@ -7,7 +7,7 @@ import { Logo } from '@/components/ui/Logo';
 export const PublicAccessShell = ({ badge = 'Secure certificate access', children }) => (
   <div className="min-h-dvh bg-brand-bg font-inter text-brand-dark">
     <header className="border-b border-gray-100 bg-white">
-      <div className="mx-auto flex max-w-5xl items-center justify-between gap-3 px-5 py-5">
+      <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-3 px-5 py-5">
         <Logo size="md" />
         <span className="flex items-center gap-1.5 text-xs font-medium text-gray-500">
           <ShieldCheck size={15} className="shrink-0" /> <span>{badge}</span>
