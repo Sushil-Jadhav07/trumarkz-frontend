@@ -1,13 +1,21 @@
+import { SlidingTabs } from '@/components/ui/SlidingTabs';
 import { LoadingSkeleton } from '@/components/shared/LoadingSkeleton';
 import React, { useState, useEffect, useCallback, useRef, forwardRef, useImperativeHandle } from 'react';
 import { motion } from 'framer-motion';
 import { AuthLayout } from '@/components/layout/AuthLayout';
-import { PageHeader } from '@/components/shared/PageHeader';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
+import { CustomSelect as PageSizeSelect } from '@/components/ui/CustomSelect';
+import { KpiCard } from '@/components/shared/KpiCard';
 import {
-  AlignLeft, BookOpen, Building2, Check, ChevronDown, Clock, DollarSign,
+  PageIntro, OutlineButton, SolidButton, DirectoryBar, SearchField, Avatar, RowActionMenu, NumberedPager,
+} from '@/components/shared/AdminPageParts';
+import { IndustryTagPicker } from '@/components/shared/IndustryTagPicker';
+import { industryEntityForCategory, splitIndustryTags } from '@/utils/industryTypes';
+import { pageRange } from '@/utils/pagination';
+import {
+  AlignLeft, BookOpen, Building2, Check, ChevronDown, Clock, DollarSign, ExternalLink, FileText, Layers,
   Link, Mail, MapPin, MoreVertical, Pencil, Phone,
   Plus, RefreshCw, ShieldCheck, Trash2, User, Users, X, Zap,
 } from 'lucide-react';
@@ -259,8 +267,8 @@ const VerifierDirectory = forwardRef((props, ref) => {
   const [saving,     setSaving]     = useState(false);
   const [deleteItem, setDeleteItem] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
-  const [menuId,     setMenuId]     = useState(null);
-  const [menuPos,    setMenuPos]    = useState(null);
+  const [page,       setPage]       = useState(1);
+  const [pageSize,   setPageSize]   = useState(10);
   const [typeNames,  setTypeNames]  = useState([]); // verification type names, for the Verifier Type autofill
 
   const fetchAll = useCallback(async (refresh = false) => {
@@ -296,22 +304,6 @@ const VerifierDirectory = forwardRef((props, ref) => {
       })
       .catch(() => setTypeNames([]));
   }, []);
-
-  useEffect(() => {
-    if (!menuId) return;
-    const close = () => { setMenuId(null); setMenuPos(null); };
-    const onMD = (e) => {
-      if (!e.target.closest('[data-action-menu]') && !e.target.closest('[data-action-btn]')) close();
-    };
-    window.addEventListener('scroll', close, true);
-    window.addEventListener('resize', close);
-    document.addEventListener('mousedown', onMD);
-    return () => {
-      window.removeEventListener('scroll', close, true);
-      window.removeEventListener('resize', close);
-      document.removeEventListener('mousedown', onMD);
-    };
-  }, [menuId]);
 
   const filtered = verifiers.filter((v) => {
     if (!search.trim()) return true;
@@ -362,8 +354,6 @@ const VerifierDirectory = forwardRef((props, ref) => {
       notes:          item.notes          || '',
     });
     setEditOpen(true);
-    setMenuId(null);
-    setMenuPos(null);
   };
 
   const handleEdit = async (e) => {
@@ -407,205 +397,123 @@ const VerifierDirectory = forwardRef((props, ref) => {
     }
   };
 
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const safePage = Math.min(page, totalPages);
+  const paged = filtered.slice((safePage - 1) * pageSize, safePage * pageSize);
+  const { from: startIdx, to: endIdx } = pageRange(safePage, pageSize, filtered.length);
   const uniqueOrgs = [...new Set(verifiers.map((v) => v.organization).filter(Boolean))].length;
   const withSpec   = verifiers.filter((v) => normaliseSpecialization(v.specialization).length > 0).length;
 
   return (
     <div>
       {/* Stats */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-5">
-        {[
-          { label: 'Total Verifiers',    value: verifiers.length, icon: Users,     color: 'text-brand-blue',  cardBg: 'bg-blue-50/70 border-blue-100' },
-          { label: 'Organizations',      value: uniqueOrgs,       icon: Building2, color: 'text-purple-600', cardBg: 'bg-purple-50/70 border-purple-100' },
-          { label: 'With Verifier Type', value: withSpec,         icon: BookOpen,  color: 'text-green-600',  cardBg: 'bg-green-50/70 border-green-100' },
-        ].map(({ label, value, icon: Icon, color, cardBg }) => (
-          <Card key={label} className={`p-4 overflow-hidden ${cardBg}`}>
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <p className="text-xs text-gray-500 font-inter">{label}</p>
-                <p className="font-sora font-bold text-2xl text-brand-dark mt-1">{value}</p>
-              </div>
-              <div className={`w-11 h-11 rounded-xl bg-white flex items-center justify-center shadow-sm`}>
-                <Icon size={20} className={color} />
-              </div>
-            </div>
-          </Card>
-        ))}
+      <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <KpiCard label="Total verifiers" value={loading ? '—' : verifiers.length} icon={Users} />
+        <KpiCard label="Organizations" value={loading ? '—' : uniqueOrgs} icon={Building2} delay={0.05} />
+        <KpiCard label="With verifier type" value={loading ? '—' : withSpec} icon={BookOpen} delay={0.1} />
       </div>
 
-      {/* Toolbar */}
-      <Card className="p-4 mb-4">
-        <div className="flex items-center justify-between gap-3">
-          <div className="relative flex-1 max-w-sm">
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search by name, email, organization..."
-              className="w-full rounded-xl border border-gray-200 px-3 py-2 pr-8 text-xs font-inter focus:outline-none focus:ring-2 focus:ring-brand-blue/30"
-            />
-            {search && (
-              <button onClick={() => setSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
-                <X size={13} />
-              </button>
+      {props.tabs}
+
+      <section aria-label="Registered verifiers" className="overflow-hidden rounded-xl border border-gray-100 bg-white">
+        <DirectoryBar
+          title="Registered verifiers"
+          count={loading ? null : verifiers.length}
+          search={search}
+          onSearch={(v) => { setSearch(v); setPage(1); }}
+          placeholder="Search name, email or organization"
+        />
+
+        {loading ? (
+          <div className="px-5 pb-5"><LoadingSkeleton variant="table" label="Loading verifiers" columns={6} /></div>
+        ) : filtered.length === 0 ? (
+          <div className="border-t border-gray-100 py-14 text-center">
+            <Users size={26} className="mx-auto mb-2 text-gray-300" />
+            <p className="text-sm font-medium text-gray-500 font-inter">
+              {verifiers.length === 0 ? 'No verifiers added yet' : 'No verifiers match your search'}
+            </p>
+            {verifiers.length === 0 && (
+              <div className="mt-3 flex justify-center"><SolidButton icon={Plus} onClick={() => setAddOpen(true)}>Add first verifier</SolidButton></div>
             )}
           </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => fetchAll(true)}
-              className={`flex items-center gap-1.5 text-xs text-gray-500 font-inter hover:text-brand-blue transition-colors px-2 py-2 ${refreshing ? 'pointer-events-none' : ''}`}
-            >
-              <RefreshCw size={13} className={refreshing ? 'animate-spin' : ''} />
-              {refreshing ? 'Refreshing...' : 'Refresh'}
-            </button>
-          </div>
-        </div>
-      </Card>
-
-      {/* Table */}
-      {loading ? (
-        <LoadingSkeleton variant="table" label="Loading verifiers" columns={6}/>
-      ) : filtered.length === 0 ? (
-        <Card className="p-10 text-center">
-          <Users size={32} className="text-gray-200 mx-auto mb-3" />
-          <p className="text-sm font-medium text-gray-400 font-inter">
-            {verifiers.length === 0 ? 'No verifiers added yet' : 'No verifiers match your search'}
-          </p>
-          {verifiers.length === 0 && (
-            <div className="mt-3">
-              <Button variant="primary" size="sm" icon={Plus} onClick={() => setAddOpen(true)}>
-                Add First Verifier
-              </Button>
-            </div>
-          )}
-        </Card>
-      ) : (
-        <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }}>
-          <Card className="p-0 overflow-hidden border border-gray-200 shadow-sm">
-            <div className="px-6 py-5 border-b border-gray-100 bg-gradient-to-r from-white to-gray-50/70">
-              <h3 className="font-sora font-semibold text-brand-dark text-lg">Verifier Directory</h3>
-              <p className="text-sm text-gray-500 font-inter mt-1">
-                {filtered.length} verifier{filtered.length !== 1 ? 's' : ''}
-                {search ? ` matching "${search}"` : ' registered'}
-              </p>
-            </div>
+        ) : (
+          <>
             <div className="overflow-x-auto scrollbar-hidden">
-              <table className="w-full min-w-[900px] border-collapse">
+              <table className="w-full min-w-[960px] border-collapse text-left text-xs font-inter">
                 <thead>
-                  <tr className="bg-gray-50 border-b border-gray-100">
-                    {['Name / Address', 'Email', 'Phone', 'Organization', 'Verifier Type', 'Actions'].map((h) => (
-                      <th key={h} className="px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-500 font-inter">{h}</th>
-                    ))}
+                  <tr>
+                    {['Name / address', 'Email', 'Phone', 'Organization', 'Verification types'].map((h) => <th key={h} className="px-4 py-2.5">{h}</th>)}
+                    <th className="px-4 py-2.5 text-right">Actions</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-100 bg-white">
-                  {filtered.map((item, index) => (
-                    <motion.tr
-                      key={item.id}
-                      initial={{ opacity: 0, y: 6 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: index * 0.03 }}
-                      className="hover:bg-blue-50/30 transition-colors"
-                    >
-                      <td className="px-5 py-4">
-                        <div className="flex items-center gap-3">
-                          <div className="w-9 h-9 rounded-xl bg-brand-blue/10 text-brand-blue flex items-center justify-center shrink-0 font-sora font-bold text-sm">
-                            {item.name?.[0]?.toUpperCase() || 'V'}
+                <tbody className="divide-y divide-gray-100">
+                  {paged.map((item) => {
+                    const specs = normaliseSpecialization(item.specialization);
+                    return (
+                      <tr key={item.id} className="transition-colors hover:bg-blue-50/30">
+                        <td className="px-4 py-2">
+                          <div className="flex min-w-0 items-center gap-2.5">
+                            <Avatar name={item.name} />
+                            <div className="min-w-0">
+                              <p className="truncate text-[13px] font-medium text-brand-dark">{item.name}</p>
+                              {item.address && (
+                                <p className="flex items-center gap-1 truncate text-[11px] text-[#7d8aa5]"><MapPin size={10} className="shrink-0" /> {item.address}</p>
+                              )}
+                            </div>
                           </div>
-                          <div>
-                            <p className="text-sm font-semibold text-brand-dark font-inter">{item.name}</p>
-                            {item.address && (
-                              <p className="text-xs text-gray-400 font-inter flex items-center gap-1 mt-0.5">
-                                <MapPin size={10} className="shrink-0" /> {item.address}
-                              </p>
-                            )}
+                        </td>
+                        <td className="px-4 py-2 text-[#7d8aa5]">{item.email || '—'}</td>
+                        <td className="whitespace-nowrap px-4 py-2 text-[#7d8aa5]">{item.phone || '—'}</td>
+                        <td className="px-4 py-2">
+                          {item.organization
+                            ? <span className="inline-flex rounded-md bg-[#e8f0fe] px-2 py-0.5 text-[11px] font-medium text-brand-blue">{item.organization}</span>
+                            : <span className="text-gray-400">—</span>}
+                        </td>
+                        <td className="px-4 py-2">
+                          {specs.length > 0 ? (
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              {specs.slice(0, 2).map((spec) => (
+                                <span key={spec} className="inline-flex rounded-md bg-[#e8f0fe] px-2 py-0.5 text-[11px] font-medium text-brand-blue">{spec}</span>
+                              ))}
+                              {specs.length > 2 && <span title={specs.slice(2).join(', ')} className="text-[11px] font-medium text-brand-blue">+ {specs.length - 2} more</span>}
+                            </div>
+                          ) : <span className="text-gray-400">—</span>}
+                        </td>
+                        <td className="px-4 py-2">
+                          <div className="flex items-center justify-end gap-2">
+                            <button type="button" onClick={() => openEdit(item)} aria-label={`Edit ${item.name}`} className="rounded px-1 text-xs font-semibold text-brand-blue hover:underline">Edit</button>
+                            <RowActionMenu
+                              label={`Actions for ${item.name}`}
+                              items={[
+                                { label: 'Edit verifier', icon: Pencil, onClick: () => openEdit(item) },
+                                { label: 'Delete verifier', icon: Trash2, tone: 'danger', onClick: () => setDeleteItem(item) },
+                              ]}
+                            />
                           </div>
-                        </div>
-                      </td>
-                      <td className="px-5 py-4">
-                        <p className="text-xs text-gray-600 font-inter">{item.email || '—'}</p>
-                      </td>
-                      <td className="px-5 py-4">
-                        <p className="text-xs text-gray-600 font-inter">{item.phone || '—'}</p>
-                      </td>
-                      <td className="px-5 py-4">
-                        {item.organization ? (
-                          <span className="px-2.5 py-1 rounded-lg bg-purple-50 text-xs text-purple-700 font-inter border border-purple-100">
-                            {item.organization}
-                          </span>
-                        ) : (
-                          <span className="text-xs text-gray-300 font-inter">—</span>
-                        )}
-                      </td>
-                      <td className="px-5 py-4">
-                        {normaliseSpecialization(item.specialization).length > 0 ? (
-                          <div className="flex flex-wrap gap-1">
-                            {normaliseSpecialization(item.specialization).map((s) => (
-                              <span key={s} className="rounded-md bg-blue-50 px-1.5 py-0.5 text-[11px] font-medium text-brand-blue font-inter">
-                                {s}
-                              </span>
-                            ))}
-                          </div>
-                        ) : (
-                          <span className="text-xs text-gray-300 font-inter">—</span>
-                        )}
-                      </td>
-                      <td className="px-5 py-4 text-center">
-                        <div className="inline-flex justify-center">
-                          <button
-                            type="button"
-                            data-action-btn="true"
-                            onClick={(e) => {
-                              if (menuId === item.id) { setMenuId(null); setMenuPos(null); }
-                              else {
-                                const rect = e.currentTarget.getBoundingClientRect();
-                                const menuH = 80;
-                                const top = window.innerHeight - rect.bottom < menuH + 8
-                                  ? rect.top - menuH - 4
-                                  : rect.bottom + 4;
-                                setMenuPos({ top, right: window.innerWidth - rect.right });
-                                setMenuId(item.id);
-                              }
-                            }}
-                            className="p-2 rounded-lg border border-gray-200 text-gray-500 hover:text-brand-dark hover:bg-gray-50 shadow-sm"
-                          >
-                            <MoreVertical size={14} />
-                          </button>
-                        </div>
-                      </td>
-                    </motion.tr>
-                  ))}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
-          </Card>
-        </motion.div>
-      )}
 
-      {/* Action dropdown */}
-      {menuId && menuPos && (
-        <div
-          data-action-menu="true"
-          style={{ position: 'fixed', top: menuPos.top, right: menuPos.right, zIndex: 9999 }}
-          className="w-36 rounded-xl border border-gray-200 bg-white shadow-lg p-1"
-        >
-          {(() => {
-            const item = filtered.find((v) => v.id === menuId);
-            if (!item) return null;
-            return (
-              <>
-                <button type="button" onClick={() => openEdit(item)}
-                  className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-inter text-gray-700 hover:bg-gray-50">
-                  <Pencil size={13} /> Edit
-                </button>
-                <button type="button" onClick={() => { setMenuId(null); setMenuPos(null); setDeleteItem(item); }}
-                  className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-inter text-red-600 hover:bg-red-50">
-                  <Trash2 size={13} /> Delete
-                </button>
-              </>
-            );
-          })()}
-        </div>
-      )}
+            <div className="flex flex-col justify-between gap-3 border-t border-gray-100 px-5 py-3 sm:flex-row sm:items-center">
+              <p className="text-xs text-gray-600 font-inter">Showing {startIdx}–{endIdx} of {filtered.length} verifier{filtered.length === 1 ? '' : 's'}</p>
+              <div className="flex flex-wrap items-center gap-3">
+                <PageSizeSelect
+                  value={pageSize}
+                  onChange={(n) => { setPageSize(n); setPage(1); }}
+                  ariaLabel="Rows per page"
+                  className="w-28"
+                  options={[10, 25, 50].map((n) => ({ value: n, label: `${n} / page` }))}
+                />
+                <NumberedPager page={safePage} totalPages={totalPages} onPage={setPage} />
+              </div>
+            </div>
+          </>
+        )}
+      </section>
 
       {/* Add Modal */}
       <Modal isOpen={addOpen} onClose={() => { setAddOpen(false); setForm(EMPTY_VF); }} title="Add Verifier" size="lg" onSubmit={handleAdd}>
@@ -690,14 +598,13 @@ const VerificationTypes = forwardRef((props, ref) => {
   const [submitting,      setSubmitting]      = useState(false);
   const [deletingId,      setDeletingId]      = useState(null);
   const [deleteConfirmItem, setDeleteConfirmItem] = useState(null);
-  const [actionMenuId,    setActionMenuId]    = useState(null);
+  const [search,          setSearch]          = useState('');
+  const [page,            setPage]            = useState(1);
+  const [pageSize,        setPageSize]        = useState(10);
   const [editModalOpen,   setEditModalOpen]   = useState(false);
   const [editTarget,      setEditTarget]      = useState(null);
   const [editForm,        setEditForm]        = useState(EMPTY_VT);
   const [saving,          setSaving]          = useState(false);
-  const [industryInput,   setIndustryInput]   = useState('');
-  const [editIndustryInput, setEditIndustryInput] = useState('');
-  const [menuPos,         setMenuPos]         = useState(null);
 
   const fetchTypes = useCallback(async (showRefresh = false) => {
     if (showRefresh) setRefreshing(true); else setLoading(true);
@@ -725,23 +632,9 @@ const VerificationTypes = forwardRef((props, ref) => {
     openAdd: () => setModalOpen(true),
   }), [fetchTypes]);
 
-  useEffect(() => {
-    if (!actionMenuId) return;
-    const close = () => { setActionMenuId(null); setMenuPos(null); };
-    const onMouseDown = (e) => {
-      if (!e.target.closest('[data-action-menu]') && !e.target.closest('[data-action-btn]')) close();
-    };
-    window.addEventListener('scroll', close, true);
-    window.addEventListener('resize', close);
-    document.addEventListener('mousedown', onMouseDown);
-    return () => {
-      window.removeEventListener('scroll', close, true);
-      window.removeEventListener('resize', close);
-      document.removeEventListener('mousedown', onMouseDown);
-    };
-  }, [actionMenuId]);
-
+  const typeQuery = search.trim().toLowerCase();
   const types = allTypes.filter((t) => {
+    if (typeQuery && !String(t.name || '').toLowerCase().includes(typeQuery)) return false;
     if (labelFilter && t.label !== labelFilter) return false;
     if (industryFilter.trim() &&
       !(t.industry_type || []).some((ind) =>
@@ -750,6 +643,12 @@ const VerificationTypes = forwardRef((props, ref) => {
     ) return false;
     return true;
   });
+
+  useEffect(() => { setPage(1); }, [search, categoryTab, labelFilter, industryFilter]);
+  const totalPages = Math.max(1, Math.ceil(types.length / pageSize));
+  const safePage = Math.min(page, totalPages);
+  const pagedTypes = types.slice((safePage - 1) * pageSize, safePage * pageSize);
+  const { from: startIdx, to: endIdx } = pageRange(safePage, pageSize, types.length);
 
   const total     = allTypes.length;
   const automatic = allTypes.filter((t) => t.label === 'automatic').length;
@@ -761,35 +660,10 @@ const VerificationTypes = forwardRef((props, ref) => {
 
   const updateForm  = (field, value) => setForm((prev) => ({ ...prev, [field]: value }));
   const resetForm   = () => setForm(EMPTY_VT);
-  const handleClose = () => { setModalOpen(false); resetForm(); setIndustryInput(''); };
+  const handleClose = () => { setModalOpen(false); resetForm(); };
 
-  const formTags = form.industry_type
-    ? form.industry_type.split(',').map((s) => s.trim()).filter(Boolean)
-    : [];
-  const addFormTag = (val) => {
-    const tag = val.trim();
-    if (!tag) return;
-    if (!formTags.includes(tag)) updateForm('industry_type', [...formTags, tag].join(', '));
-    setIndustryInput('');
-  };
-  const removeFormTag = (tag) =>
-    updateForm('industry_type', formTags.filter((t) => t !== tag).join(', '));
-
-  const editTags = editForm.industry_type
-    ? editForm.industry_type.split(',').map((s) => s.trim()).filter(Boolean)
-    : [];
-  const addEditTag = (val) => {
-    const tag = val.trim();
-    if (!tag) return;
-    if (!editTags.includes(tag))
-      setEditForm((p) => ({ ...p, industry_type: [...editTags, tag].join(', ') }));
-    setEditIndustryInput('');
-  };
-  const removeEditTag = (tag) =>
-    setEditForm((p) => ({
-      ...p,
-      industry_type: editTags.filter((t) => t !== tag).join(', '),
-    }));
+  const formTags = splitIndustryTags(form.industry_type);
+  const editTags = splitIndustryTags(editForm.industry_type);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -806,9 +680,7 @@ const VerificationTypes = forwardRef((props, ref) => {
       api_link:      form.label === 'automatic' ? form.api_link.trim()      : null,
       price:         form.price !== '' ? Number(form.price) : 0,
       timeline:      form.timeline.trim() || undefined,
-      industry_type: form.industry_type
-        ? form.industry_type.split(',').map((s) => s.trim()).filter(Boolean)
-        : [],
+      industry_type: formTags,
     };
     try {
       const { data: created } = await verificationAPI.createVerificationType(payload);
@@ -849,9 +721,7 @@ const VerificationTypes = forwardRef((props, ref) => {
       timeline:      item.timeline      || '',
       industry_type: (item.industry_type || []).join(', '),
     });
-    setEditIndustryInput('');
     setEditModalOpen(true);
-    setActionMenuId(null);
   };
 
   const handleSaveEdit = async (e) => {
@@ -867,9 +737,7 @@ const VerificationTypes = forwardRef((props, ref) => {
       api_link:      editForm.label === 'automatic' ? editForm.api_link.trim()      : null,
       price:         editForm.price !== '' ? Number(editForm.price) : 0,
       timeline:      editForm.timeline.trim() || undefined,
-      industry_type: editForm.industry_type
-        ? editForm.industry_type.split(',').map((s) => s.trim()).filter(Boolean)
-        : [],
+      industry_type: editTags,
     };
     try {
       const { data: updated } = await verificationAPI.patchVerificationType(editTarget.id, payload);
@@ -886,249 +754,153 @@ const VerificationTypes = forwardRef((props, ref) => {
 
   return (
     <div>
-      {/* Stat Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-5">
-        {[
-          { label: 'Total Types', value: total,     icon: ShieldCheck, color: 'text-brand-blue',  cardBg: 'bg-blue-50/70 border-blue-100',     share: null },
-          { label: 'Automatic',   value: automatic, icon: Zap,         color: 'text-green-600',   cardBg: 'bg-green-50/70 border-green-100',   share: total ? automatic / total : 0, barColor: 'bg-green-500' },
-          { label: 'Manual',      value: manual,    icon: Mail,        color: 'text-orange-600',  cardBg: 'bg-orange-50/70 border-orange-100', share: total ? manual / total : 0,    barColor: 'bg-orange-400' },
-        ].map(({ label, value, icon: Icon, color, cardBg, share, barColor }) => (
-          <Card key={label} className={`p-4 overflow-hidden ${cardBg}`}>
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <p className="text-xs text-gray-500 font-inter">{label}</p>
-                <p className="font-sora font-bold text-2xl text-brand-dark mt-1">{value}</p>
-                <p className="text-[11px] text-gray-400 font-inter mt-0.5">
-                  {label === 'Total Types' ? 'All verification types' : `${label} verification types`}
-                </p>
-              </div>
-              <div className="w-11 h-11 rounded-xl bg-white flex items-center justify-center shrink-0 shadow-sm">
-                <Icon size={20} className={color} />
-              </div>
-            </div>
-            {share !== null && (
-              <div className="w-full h-1.5 bg-white/70 rounded-full overflow-hidden mt-3">
-                <div className={`h-1.5 rounded-full ${barColor}`} style={{ width: `${Math.round(share * 100)}%` }} />
-              </div>
-            )}
-          </Card>
-        ))}
+      {/* Stats */}
+      <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <KpiCard label="Total types" value={loading ? '—' : total} icon={Layers} />
+        <KpiCard label="Automatic" value={loading ? '—' : automatic} icon={Zap} delay={0.05} />
+        <KpiCard label="Manual" value={loading ? '—' : manual} icon={FileText} delay={0.1} />
       </div>
 
-      {/* Filters */}
-      <Card className="p-4 mb-4">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-          <div className="flex items-center gap-2 flex-wrap">
-            {VT_CATEGORY_TABS.map((tab) => (
-              <button
-                key={tab.value}
-                onClick={() => setCategoryTab(tab.value)}
-                className={`px-4 py-2 rounded-lg text-xs font-semibold font-inter transition-all ${
-                  categoryTab === tab.value
-                    ? 'bg-brand-blue text-white shadow-sm'
-                    : 'bg-gray-50 text-gray-600 border border-gray-200 hover:bg-gray-100'
-                }`}
-              >
-                {tab.label}
-              </button>
-            ))}
-            {VT_LABEL_TABS.map((tab) => (
-              <button
-                key={tab.value}
-                onClick={() => setLabelFilter((prev) => (prev === tab.value ? '' : tab.value))}
-                className={`px-4 py-2 rounded-lg text-xs font-semibold font-inter transition-all ${
-                  labelFilter === tab.value
-                    ? tab.value === 'automatic'
-                      ? 'bg-green-600 text-white shadow-sm'
-                      : 'bg-orange-500 text-white shadow-sm'
-                    : 'bg-gray-50 text-gray-600 border border-gray-200 hover:bg-gray-100'
-                }`}
-              >
-                {tab.label}
-              </button>
-            ))}
-          </div>
-          <div className="flex items-end gap-2">
-            <div>
-              <label className="block text-[11px] font-semibold text-gray-400 font-inter mb-1">Filter by industry</label>
-              <select
-                value={industryFilter}
-                onChange={(e) => setIndustryFilter(e.target.value)}
-                className="rounded-xl border border-gray-200 px-3 py-2 text-xs font-semibold font-inter text-gray-600 focus:outline-none focus:ring-2 focus:ring-brand-blue/30 w-52 bg-white"
-              >
-                <option value="">All Industries</option>
-                {industryOptions.map((ind) => (
-                  <option key={ind} value={ind}>{ind}</option>
-                ))}
-              </select>
+      {props.tabs}
+
+      <section aria-label="Verification type directory" className="overflow-hidden rounded-xl border border-gray-100 bg-white">
+        <div className="flex flex-col gap-3 px-5 pb-3 pt-4">
+          <h2 className="flex items-center gap-2.5 font-sora text-base font-semibold text-brand-dark">
+            Verification type directory
+            {!loading && <span className="rounded-full bg-[#e3ebf8] px-2.5 py-0.5 text-xs font-semibold text-brand-blue font-inter">{total}</span>}
+          </h2>
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+            <div className="flex flex-wrap items-center gap-2">
+              <SlidingTabs variant="solid" toggle ariaLabel="Verification type category" value={categoryTab} onChange={setCategoryTab} tabs={VT_CATEGORY_TABS} />
+              {VT_LABEL_TABS.map((tab) => (
+                <button
+                  key={tab.value}
+                  type="button"
+                  aria-pressed={labelFilter === tab.value}
+                  onClick={() => setLabelFilter((prev) => (prev === tab.value ? '' : tab.value))}
+                  className={`h-8 rounded-lg px-4 text-xs font-medium font-inter transition-colors ${labelFilter === tab.value ? 'bg-brand-blue text-white' : 'border border-gray-200 bg-white text-gray-700 hover:bg-gray-50'}`}
+                >{tab.label}</button>
+              ))}
             </div>
-            <button
-              onClick={() => fetchTypes(true)}
-              className={`flex items-center gap-1.5 text-xs text-gray-500 font-inter hover:text-brand-blue transition-colors border border-gray-200 rounded-xl px-3 py-2 ${refreshing ? 'pointer-events-none' : ''}`}
-            >
-              <RefreshCw size={13} className={refreshing ? 'animate-spin' : ''} />
-              {refreshing ? 'Refreshing...' : 'Refresh'}
-            </button>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+              <div className="sm:w-56">
+                <p className="mb-1 text-[11px] text-gray-600 font-inter">Industry</p>
+                <PageSizeSelect
+                  value={industryFilter}
+                  onChange={setIndustryFilter}
+                  ariaLabel="Filter by industry"
+                  searchable
+                  options={[{ value: '', label: 'All industries' }, ...industryOptions.map((ind) => ({ value: ind, label: ind }))]}
+                />
+              </div>
+              <SearchField search={search} onSearch={setSearch} placeholder="Search verification types" className="w-full sm:w-64" />
+            </div>
           </div>
         </div>
-      </Card>
 
-      {/* Table */}
-      {loading ? (
-        <LoadingSkeleton variant="table" label="Loading verification types" columns={5}/>
-      ) : types.length === 0 ? (
-        <Card className="p-10 text-center">
-          <ShieldCheck size={32} className="text-gray-200 mx-auto mb-3" />
-          <p className="text-sm font-medium text-gray-400 font-inter">No verification types found</p>
-          <p className="text-xs text-gray-400 font-inter mt-1">Try changing the category tab or clearing the industry filter.</p>
-        </Card>
-      ) : (
-        <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }}>
-          <Card className="p-0 overflow-hidden border border-gray-200 shadow-sm">
-            <div className="px-6 py-5 border-b border-gray-100 bg-gradient-to-r from-white to-gray-50/70">
-              <h3 className="font-sora font-semibold text-brand-dark text-lg">Verification Type Directory</h3>
-              <p className="text-sm text-gray-500 font-inter mt-1">
-                {types.length} type{types.length !== 1 ? 's' : ''} shown
-                {industryFilter ? ` · filtered by "${industryFilter}"` : ''}
-              </p>
-            </div>
+        {loading ? (
+          <div className="px-5 pb-5"><LoadingSkeleton variant="table" label="Loading verification types" columns={7} /></div>
+        ) : types.length === 0 ? (
+          <div className="border-t border-gray-100 py-14 text-center">
+            <ShieldCheck size={26} className="mx-auto mb-2 text-gray-300" />
+            <p className="text-sm font-medium text-gray-500 font-inter">No verification types found</p>
+            <p className="mt-1 text-xs text-gray-500 font-inter">Try another category, clear the industry filter or change the search.</p>
+          </div>
+        ) : (
+          <>
             <div className="overflow-x-auto scrollbar-hidden">
-              <table className="w-full min-w-[960px] border-collapse">
+              <table className="w-full min-w-[1040px] border-collapse text-left text-xs font-inter">
                 <thead>
-                  <tr className="bg-gray-50 border-b border-gray-100">
-                    {['Name', 'Label', 'Category', 'Contact / Link', 'Price / Timeline', 'Industries', 'Actions'].map((h) => (
-                      <th key={h} className="px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-500 font-inter">{h}</th>
-                    ))}
+                  <tr>
+                    <th className="px-4 py-2.5">Name</th>
+                    <th className="px-4 py-2.5">Mode</th>
+                    <th className="px-4 py-2.5">Category</th>
+                    <th className="px-4 py-2.5">Contact / API</th>
+                    <th className="px-4 py-2.5">Rate / turnaround<span className="block text-[11px] font-normal text-[#7d8aa5]">Per record</span></th>
+                    <th className="px-4 py-2.5">Industries</th>
+                    <th className="px-4 py-2.5 text-right">Actions</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-100 bg-white">
-                  {types.map((item, index) => (
-                    <motion.tr
-                      key={item.id}
-                      initial={{ opacity: 0, y: 6 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: index * 0.03 }}
-                      className="hover:bg-blue-50/30 transition-colors"
-                    >
-                      <td className="px-5 py-4">
-                        <div className="flex items-center gap-3">
-                          <div className="w-9 h-9 rounded-xl bg-brand-blue/10 text-brand-blue flex items-center justify-center shrink-0">
-                            <ShieldCheck size={15} />
+                <tbody className="divide-y divide-gray-100">
+                  {pagedTypes.map((item) => {
+                    const industries = item.industry_type || [];
+                    const isAuto = item.label === 'automatic';
+                    const apiHref = /^https?:\/\//i.test(item.api_link || '') ? item.api_link : null;
+                    return (
+                      <tr key={item.id} className="transition-colors hover:bg-blue-50/30">
+                        <td className="px-4 py-2">
+                          <div className="flex min-w-0 items-center gap-2.5">
+                            <Avatar name={item.name} />
+                            <span className="text-[13px] text-brand-dark">{item.name}</span>
                           </div>
-                          <p className="text-sm font-semibold text-brand-dark font-inter">{item.name}</p>
-                        </div>
-                      </td>
-                      <td className="px-5 py-4">
-                        <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold font-inter border ${
-                          item.label === 'automatic'
-                            ? 'bg-green-50 text-green-700 border-green-100'
-                            : 'bg-orange-50 text-orange-700 border-orange-100'
-                        }`}>
-                          {item.label === 'automatic' ? <Zap size={11} /> : <Mail size={11} />}
-                          {item.label === 'automatic' ? 'Automatic' : 'Manual'}
-                        </span>
-                      </td>
-                      <td className="px-5 py-4">
-                        <span className="px-2.5 py-1 rounded-lg bg-gray-100 text-xs text-gray-600 font-inter capitalize border border-gray-200">
-                          {item.category || '—'}
-                        </span>
-                      </td>
-                      <td className="px-5 py-4 max-w-[200px]">
-                        {item.label === 'manual' ? (
-                          item.email_address ? (
-                            <p className="text-xs text-gray-600 font-inter flex items-center gap-1.5 truncate">
-                              <Mail size={12} className="shrink-0 text-orange-400" />
-                              {item.email_address}
-                            </p>
-                          ) : <span className="text-xs text-gray-300 font-inter">—</span>
-                        ) : (
-                          item.api_link ? (
-                            <p className="text-xs text-brand-blue font-inter flex items-center gap-1.5 truncate" title={item.api_link}>
-                              <Link size={12} className="shrink-0" />
-                              <span className="truncate">{item.api_link}</span>
-                            </p>
-                          ) : <span className="text-xs text-gray-300 font-inter">—</span>
-                        )}
-                      </td>
-                      <td className="px-5 py-4">
-                        {item.price != null && (
-                          <p className="text-sm font-bold text-brand-dark font-sora">₹{item.price}</p>
-                        )}
-                        {item.timeline && (
-                          <p className="text-xs text-gray-400 font-inter flex items-center gap-1 mt-1">
-                            <Clock size={11} /> {item.timeline}
-                          </p>
-                        )}
-                      </td>
-                      <td className="px-5 py-4">
-                        <div className="flex flex-wrap gap-1">
-                          {(item.industry_type || []).slice(0, 3).map((s) => (
-                            <span key={s} className="px-2 py-0.5 rounded-md bg-blue-50 text-xs text-brand-blue font-inter border border-blue-100">{s}</span>
-                          ))}
-                          {(item.industry_type || []).length > 3 && (
-                            <span className="px-2 py-0.5 rounded-md bg-gray-100 text-xs text-gray-500 font-inter">
-                              +{item.industry_type.length - 3}
-                            </span>
+                        </td>
+                        <td className="px-4 py-2">
+                          <span className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-md px-2.5 py-1 text-[11px] font-medium ${isAuto ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>
+                            {isAuto ? <Zap size={12} /> : <FileText size={12} />}{isAuto ? 'Automatic' : 'Manual'}
+                          </span>
+                        </td>
+                        <td className="px-4 py-2">
+                          <span className="inline-flex rounded-md border border-gray-200 bg-gray-50 px-2 py-0.5 text-[11px] capitalize text-gray-600">{item.category || '—'}</span>
+                        </td>
+                        <td className="px-4 py-2">
+                          {isAuto ? (
+                            apiHref
+                              ? <a href={apiHref} target="_blank" rel="noopener noreferrer" title={item.api_link} className="inline-flex items-center gap-1 font-medium text-brand-blue hover:underline">API endpoint <ExternalLink size={12} /></a>
+                              : <span className="text-gray-400">—</span>
+                          ) : (
+                            item.email_address
+                              ? <a href={`mailto:${item.email_address}`} title={item.email_address} className="inline-flex items-center gap-1 font-medium text-brand-blue hover:underline">Email verifier <ExternalLink size={12} /></a>
+                              : <span className="text-gray-400">—</span>
                           )}
-                        </div>
-                      </td>
-                      <td className="px-5 py-4 text-center">
-                        <div className="inline-flex justify-center">
-                          <button
-                            type="button"
-                            data-action-btn="true"
-                            onClick={(e) => {
-                              if (actionMenuId === item.id) { setActionMenuId(null); setMenuPos(null); }
-                              else {
-                                const rect = e.currentTarget.getBoundingClientRect();
-                                const menuH = 80;
-                                const top = window.innerHeight - rect.bottom < menuH + 8
-                                  ? rect.top - menuH - 4
-                                  : rect.bottom + 4;
-                                setMenuPos({ top, right: window.innerWidth - rect.right });
-                                setActionMenuId(item.id);
-                              }
-                            }}
-                            className="p-2 rounded-lg border border-gray-200 text-gray-500 hover:text-brand-dark hover:bg-gray-50 shadow-sm"
-                          >
-                            <MoreVertical size={14} />
-                          </button>
-                        </div>
-                      </td>
-                    </motion.tr>
-                  ))}
+                        </td>
+                        <td className="px-4 py-2">
+                          {item.price != null && <p className="text-[13px] font-semibold text-brand-dark">₹{item.price}</p>}
+                          {item.timeline && <p className="flex items-center gap-1 text-[11px] text-[#7d8aa5]"><Clock size={11} /> {item.timeline}</p>}
+                        </td>
+                        <td className="px-4 py-2">
+                          {industries.length > 0 ? (
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              {industries.slice(0, 2).map((ind) => (
+                                <span key={ind} className="inline-flex rounded-md bg-[#e8f0fe] px-2 py-0.5 text-[11px] font-medium text-brand-blue">{ind}</span>
+                              ))}
+                              {industries.length > 2 && <span title={industries.slice(2).join(', ')} className="text-[11px] font-medium text-brand-blue">+ {industries.length - 2} more</span>}
+                            </div>
+                          ) : <span className="text-gray-400">—</span>}
+                        </td>
+                        <td className="px-4 py-2">
+                          <div className="flex justify-end">
+                            <RowActionMenu
+                              label={`Actions for ${item.name}`}
+                              items={[
+                                { label: 'Edit type', icon: Pencil, onClick: () => openEdit(item) },
+                                { label: 'Delete type', icon: Trash2, tone: 'danger', onClick: () => setDeleteConfirmItem(item) },
+                              ]}
+                            />
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
-          </Card>
-        </motion.div>
-      )}
 
-      {/* Action dropdown */}
-      {actionMenuId && menuPos && (
-        <div
-          data-action-menu="true"
-          style={{ position: 'fixed', top: menuPos.top, right: menuPos.right, zIndex: 9999 }}
-          className="w-36 rounded-xl border border-gray-200 bg-white shadow-lg p-1"
-        >
-          {(() => {
-            const item = types.find((t) => t.id === actionMenuId);
-            if (!item) return null;
-            return (
-              <>
-                <button type="button" onClick={() => { setMenuPos(null); openEdit(item); }}
-                  className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-inter text-gray-700 hover:bg-gray-50">
-                  <Pencil size={13} /> Edit
-                </button>
-                <button type="button" onClick={() => { setActionMenuId(null); setMenuPos(null); setDeleteConfirmItem(item); }}
-                  className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-inter text-red-600 hover:bg-red-50">
-                  <Trash2 size={13} /> Delete
-                </button>
-              </>
-            );
-          })()}
-        </div>
-      )}
+            <div className="flex flex-col justify-between gap-3 border-t border-gray-100 px-5 py-3 sm:flex-row sm:items-center">
+              <p className="text-xs text-gray-600 font-inter">Showing {startIdx}–{endIdx} of {types.length} type{types.length === 1 ? '' : 's'}</p>
+              <div className="flex flex-wrap items-center gap-3">
+                <PageSizeSelect
+                  value={pageSize}
+                  onChange={(n) => { setPageSize(n); setPage(1); }}
+                  ariaLabel="Rows per page"
+                  className="w-28"
+                  options={[10, 25, 50].map((n) => ({ value: n, label: `${n} / page` }))}
+                />
+                <NumberedPager page={safePage} totalPages={totalPages} onPage={setPage} />
+              </div>
+            </div>
+          </>
+        )}
+      </section>
 
       {/* Add Verification Type Modal */}
       <Modal isOpen={modalOpen} onClose={handleClose} title="Add Verification Type" size="lg" onSubmit={handleSubmit}>
@@ -1191,29 +963,13 @@ const VerificationTypes = forwardRef((props, ref) => {
               </div>
             </div>
           </div>
-          <div>
-            <label className={labelCls}>Industry Types</label>
-            <div className="rounded-xl border border-gray-200 px-3 py-2 min-h-[44px] flex flex-wrap gap-1.5 items-center focus-within:ring-2 focus-within:ring-brand-blue/30 bg-white">
-              {formTags.map((tag) => (
-                <span key={tag} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-blue-50 text-xs text-brand-blue border border-blue-100 font-inter">
-                  {tag}
-                  <button type="button" onClick={() => removeFormTag(tag)} className="hover:text-red-500 transition-colors"><X size={10} /></button>
-                </span>
-              ))}
-              <input
-                value={industryInput}
-                onChange={(e) => setIndustryInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); addFormTag(industryInput); }
-                  if (e.key === 'Backspace' && !industryInput && formTags.length) removeFormTag(formTags[formTags.length - 1]);
-                }}
-                onBlur={() => { if (industryInput.trim()) addFormTag(industryInput); }}
-                placeholder={formTags.length ? '' : 'Type and press Enter to add...'}
-                className="flex-1 min-w-[160px] text-sm font-inter outline-none bg-transparent py-0.5"
-              />
-            </div>
-            <p className="text-xs text-gray-400 font-inter mt-1">Press Enter or comma to add. Backspace removes the last tag.</p>
-          </div>
+          <IndustryTagPicker
+            entityType={industryEntityForCategory(form.category)}
+            tags={formTags}
+            onChange={(tags) => updateForm('industry_type', tags.join(', '))}
+            disabled={submitting}
+            labelClassName={labelCls}
+          />
           <Modal.Footer className="flex flex-col sm:flex-row justify-end gap-2">
             <Button variant="ghost" type="button" onClick={handleClose} disabled={submitting}>Cancel</Button>
             <Button type="submit" variant="primary" icon={Plus} disabled={submitting}>
@@ -1289,29 +1045,13 @@ const VerificationTypes = forwardRef((props, ref) => {
               </div>
             </div>
           </div>
-          <div>
-            <label className={labelCls}>Industry Types</label>
-            <div className="rounded-xl border border-gray-200 px-3 py-2 min-h-[44px] flex flex-wrap gap-1.5 items-center focus-within:ring-2 focus-within:ring-brand-blue/30 bg-white">
-              {editTags.map((tag) => (
-                <span key={tag} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-blue-50 text-xs text-brand-blue border border-blue-100 font-inter">
-                  {tag}
-                  <button type="button" onClick={() => removeEditTag(tag)} className="hover:text-red-500 transition-colors"><X size={10} /></button>
-                </span>
-              ))}
-              <input
-                value={editIndustryInput}
-                onChange={(e) => setEditIndustryInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); addEditTag(editIndustryInput); }
-                  if (e.key === 'Backspace' && !editIndustryInput && editTags.length) removeEditTag(editTags[editTags.length - 1]);
-                }}
-                onBlur={() => { if (editIndustryInput.trim()) addEditTag(editIndustryInput); }}
-                placeholder={editTags.length ? '' : 'Type and press Enter to add...'}
-                className="flex-1 min-w-[160px] text-sm font-inter outline-none bg-transparent py-0.5"
-              />
-            </div>
-            <p className="text-xs text-gray-400 font-inter mt-1">Press Enter or comma to add. Backspace removes the last tag.</p>
-          </div>
+          <IndustryTagPicker
+            entityType={industryEntityForCategory(editForm.category)}
+            tags={editTags}
+            onChange={(tags) => setEditForm((p) => ({ ...p, industry_type: tags.join(', ') }))}
+            disabled={saving}
+            labelClassName={labelCls}
+          />
           <Modal.Footer className="flex flex-col sm:flex-row justify-end gap-2">
             <Button variant="ghost" type="button" onClick={() => { setEditModalOpen(false); setEditTarget(null); }} disabled={saving}>Cancel</Button>
             <Button type="submit" variant="primary" icon={saving ? RefreshCw : Pencil} disabled={saving}>
@@ -1349,21 +1089,22 @@ const VerificationTypes = forwardRef((props, ref) => {
 
 // ── Page tabs ─────────────────────────────────────────────────────────────────
 const TABS = [
-  { id: 'directory', label: 'Verifier Directory' },
-  { id: 'types',     label: 'Verification Types' },
+  { id: 'directory', label: 'Verifier directory' },
+  { id: 'types',     label: 'Verification types' },
 ];
 
-// ── Main Export ───────────────────────────────────────────────────────────────
 const TAB_META = {
   directory: {
-    title: 'Verifier Directory',
-    subtitle: 'Manage verifier entities used across the platform',
-    addLabel: 'Add Verifier',
+    eyebrow: 'Verifier management',
+    title: 'Verifier directory',
+    subtitle: 'Manage verifier contacts and supported verification types.',
+    addLabel: 'Add verifier',
   },
   types: {
-    title: 'Verification Types',
-    subtitle: 'Manage verification types used across the platform',
-    addLabel: 'Add Type',
+    eyebrow: 'Verifier management',
+    title: 'Verification types',
+    subtitle: 'Manage verification types used across the platform.',
+    addLabel: 'Add type',
   },
 };
 
@@ -1374,44 +1115,35 @@ export const Verifiers = () => {
   const activeRef = activeTab === 'directory' ? directoryRef : typesRef;
   const meta = TAB_META[activeTab];
 
+  const tabBar = (
+    <SlidingTabs
+      variant="underline"
+      ariaLabel="Verifier sections"
+      className="mb-4"
+      value={activeTab}
+      onChange={setActiveTab}
+      tabs={TABS.map((tab) => ({ value: tab.id, label: tab.label }))}
+    />
+
+  );
+
   return (
-    <AuthLayout title="Verifiers">
-      <PageHeader
+    <AuthLayout title="Verifiers" breadcrumb={['Administration', 'Verifiers']}>
+      <PageIntro
+        eyebrow={meta.eyebrow}
         title={meta.title}
         subtitle={meta.subtitle}
-        action={
-          <div className="flex items-center gap-3">
-            <Button variant="outline" size="sm" icon={RefreshCw} onClick={() => activeRef.current?.refresh()}>
-              Refresh
-            </Button>
-            <Button variant="primary" size="sm" icon={Plus} onClick={() => activeRef.current?.openAdd()}>
-              {meta.addLabel}
-            </Button>
-          </div>
-        }
+        actions={(
+          <>
+            <OutlineButton icon={RefreshCw} onClick={() => activeRef.current?.refresh()}>Refresh</OutlineButton>
+            <SolidButton icon={Plus} onClick={() => activeRef.current?.openAdd()}>{meta.addLabel}</SolidButton>
+          </>
+        )}
       />
 
-      {/* Tab bar */}
-      <div className="flex gap-0 mb-6 border-b border-gray-200">
-        {TABS.map((tab) => (
-          <button
-            key={tab.id}
-            type="button"
-            onClick={() => setActiveTab(tab.id)}
-            className={`px-5 py-2.5 text-sm font-semibold font-inter border-b-2 transition-all -mb-[1px] ${
-              activeTab === tab.id
-                ? 'border-brand-blue text-brand-blue'
-                : 'border-transparent text-gray-500 hover:text-brand-dark'
-            }`}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
-
       {activeTab === 'directory'
-        ? <VerifierDirectory ref={directoryRef} />
-        : <VerificationTypes ref={typesRef} />}
+        ? <VerifierDirectory ref={directoryRef} tabs={tabBar} />
+        : <VerificationTypes ref={typesRef} tabs={tabBar} />}
     </AuthLayout>
   );
 };

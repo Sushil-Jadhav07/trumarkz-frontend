@@ -1,40 +1,38 @@
 import { LoadingSkeleton } from '@/components/shared/LoadingSkeleton';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
+import { useNavigate, Link } from 'react-router-dom';
 import { AuthLayout } from '@/components/layout/AuthLayout';
-import { PageHeader } from '@/components/shared/PageHeader';
-import { Card } from '@/components/ui/Card';
-import { Badge } from '@/components/ui/Badge';
+import { PageIntro, SearchField, NumberedPager } from '@/components/shared/AdminPageParts';
+import { SlidingTabs } from '@/components/ui/SlidingTabs';
+import { CustomSelect } from '@/components/ui/CustomSelect';
 import { skillsAPI, getApiError } from '@/services/api';
+import { pageRange } from '@/utils/pagination';
 import toast from 'react-hot-toast';
-import { Layers, CheckCircle, Clock, XCircle, FileText } from 'lucide-react';
+import {
+  Layers, ShieldCheck, Clock, XCircle, FileText, GitBranch, Info, CheckCircle2, Code2, GraduationCap, Heart, FolderKanban,
+} from 'lucide-react';
 
-const statusBadge = (status) => {
-  if (status === 'verified') return { status: 'verified', label: 'Verified' };
-  if (status === 'rejected') return { status: 'failed', label: 'Rejected' };
-  return { status: 'pending', label: 'Pending' };
+const TYPE_ICONS = { education: GraduationCap, technical: Code2, soft: Heart, project: FolderKanban };
+const TYPE_LABELS = { education: 'Education', technical: 'Technical', soft: 'Soft skill', project: 'Project' };
+const STATUS_PILL = {
+  verified: { label: 'Verified', icon: CheckCircle2, tone: 'bg-green-100 text-green-700' },
+  rejected: { label: 'Rejected', icon: XCircle, tone: 'bg-red-100 text-red-600' },
+  pending: { label: 'Pending', icon: Clock, tone: 'bg-amber-100 text-amber-800' },
 };
+const PAGE_SIZES = [10, 25, 50].map((n) => ({ value: n, label: `${n} per page` }));
 
 const formatDate = (value) =>
   value ? new Date(value).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : null;
 
-const StatCard = ({ icon: Icon, color, bg, label, value }) => (
-  <Card className="p-4">
-    <div className="flex items-center gap-3">
-      <div className={`p-2 rounded-lg ${bg}`}>
-        <Icon size={18} className={color} />
-      </div>
-      <div>
-        <p className="text-xs text-gray-500 font-inter">{label}</p>
-        <p className="text-xl font-sora font-bold text-brand-dark">{value}</p>
-      </div>
-    </div>
-  </Card>
-);
-
 export const AllSkills = () => {
+  const navigate = useNavigate();
   const [skills, setSkills] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState('all');
+  const [query, setQuery] = useState('');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
 
   useEffect(() => {
     let mounted = true;
@@ -45,9 +43,30 @@ export const AllSkills = () => {
     return () => { mounted = false; };
   }, []);
 
-  const verifiedCount = skills.filter((s) => s.status === 'verified').length;
-  const pendingCount = skills.filter((s) => s.status === 'pending').length;
-  const rejectedCount = skills.filter((s) => s.status === 'rejected').length;
+  const counts = useMemo(() => ({
+    all: skills.length,
+    verified: skills.filter((s) => s.status === 'verified').length,
+    pending: skills.filter((s) => s.status === 'pending').length,
+    rejected: skills.filter((s) => s.status === 'rejected').length,
+  }), [skills]);
+
+  const rows = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return skills.filter((s) => (tab === 'all' || s.status === tab)
+      && (!q || [s.skill_name, s.skill_type, s.institution_name, s.degree, s.skill_info].some((v) => String(v || '').toLowerCase().includes(q))));
+  }, [skills, tab, query]);
+
+  const totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
+  const safePage = Math.min(page, totalPages);
+  const pageRows = rows.slice((safePage - 1) * pageSize, safePage * pageSize);
+  const { from, to } = pageRange(safePage, pageSize, rows.length);
+
+  const tabs = [
+    { value: 'all', label: `All (${counts.all})` },
+    { value: 'verified', label: `Verified (${counts.verified})` },
+    { value: 'pending', label: `Pending (${counts.pending})` },
+    { value: 'rejected', label: `Rejected (${counts.rejected})` },
+  ];
 
   if (loading) {
     return (
@@ -59,78 +78,139 @@ export const AllSkills = () => {
 
   return (
     <AuthLayout title="All Skills">
-      <div className="w-full mx-auto lg:max-w-none space-y-6">
-        <PageHeader title="All Skills" subtitle="Every skill on your account, straight from GET /skills/me" />
+      <div className="w-full mx-auto lg:max-w-none">
+        <PageIntro
+          title="All Skills"
+          subtitle="View every skill and its verification status."
+          actions={(
+            <button
+              type="button"
+              onClick={() => navigate('/individual/skill-tree')}
+              className="inline-flex h-10 items-center gap-2 rounded-lg border-2 border-brand-blue/80 bg-white px-5 text-sm font-semibold text-brand-blue transition-colors hover:bg-blue-50 font-inter"
+            >
+              <GitBranch size={17} /> My skill tree
+            </button>
+          )}
+        />
 
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <StatCard icon={Layers} color="text-brand-blue" bg="bg-brand-blue/10" label="Total" value={skills.length} />
-          <StatCard icon={CheckCircle} color="text-green-600" bg="bg-green-100" label="Verified" value={verifiedCount} />
-          <StatCard icon={Clock} color="text-orange-500" bg="bg-orange-100" label="Pending" value={pendingCount} />
-          <StatCard icon={XCircle} color="text-red-500" bg="bg-red-100" label="Rejected" value={rejectedCount} />
+        {/* Totals */}
+        <div className="relative mb-4 overflow-hidden rounded-xl bg-gradient-to-r from-[#1D5CF2] to-[#2B6BFA] px-6 py-5 text-white shadow-[0_10px_24px_-14px_rgba(29,92,242,0.6)]">
+          <svg aria-hidden="true" className="pointer-events-none absolute right-5 top-4 hidden h-12 w-24 sm:block" viewBox="0 0 96 48" fill="#fff" fillOpacity="0.4">
+            {Array.from({ length: 4 }).flatMap((_, row) => Array.from({ length: 7 }).map((__, col) => <circle key={`${row}-${col}`} cx={4 + col * 14} cy={4 + row * 14} r="1.5" />))}
+          </svg>
+          <dl className="relative grid grid-cols-2 gap-5 lg:grid-cols-4 lg:gap-0 lg:divide-x lg:divide-white/25">
+            {[
+              { label: 'Total skills', value: counts.all, icon: Layers },
+              { label: 'Verified', value: counts.verified, icon: ShieldCheck },
+              { label: 'Pending', value: counts.pending, icon: Clock },
+              { label: 'Rejected', value: counts.rejected, icon: XCircle },
+            ].map((stat, i) => (
+              <div key={stat.label} className={`flex items-center gap-5 ${i > 0 ? 'lg:pl-10' : 'lg:pl-4'}`}>
+                <stat.icon size={40} strokeWidth={1.4} className="shrink-0" />
+                <div>
+                  <dt className="text-sm text-white/95 font-inter">{stat.label}</dt>
+                  <dd className="font-sora text-3xl font-bold leading-tight">{stat.value}</dd>
+                </div>
+              </div>
+            ))}
+          </dl>
         </div>
 
-        {skills.length === 0 ? (
-          <Card className="p-10 text-center">
-            <p className="text-sm text-gray-400 font-inter">No skills found for this account yet.</p>
-          </Card>
-        ) : (
-          <Card className="p-0 overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-gray-100 bg-gray-50/60">
-                    <th className="text-left font-inter font-semibold text-xs text-gray-500 uppercase tracking-wide px-5 py-3">Skill</th>
-                    <th className="text-left font-inter font-semibold text-xs text-gray-500 uppercase tracking-wide px-5 py-3">Type</th>
-                    <th className="text-left font-inter font-semibold text-xs text-gray-500 uppercase tracking-wide px-5 py-3">Institution / Degree</th>
-                    <th className="text-left font-inter font-semibold text-xs text-gray-500 uppercase tracking-wide px-5 py-3">Status</th>
-                    <th className="text-left font-inter font-semibold text-xs text-gray-500 uppercase tracking-wide px-5 py-3">Verified On</th>
-                    <th className="text-left font-inter font-semibold text-xs text-gray-500 uppercase tracking-wide px-5 py-3">Docs</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {skills.map((item, i) => {
-                    const badge = statusBadge(item.status);
-                    const institutionLine = [item.institution_name, item.degree].filter(Boolean).join(' — ');
-                    return (
-                      <motion.tr
-                        key={item.id}
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        transition={{ delay: i * 0.03 }}
-                        className="border-b border-gray-50 last:border-0 hover:bg-gray-50/60 transition-colors"
-                      >
-                        <td className="px-5 py-4">
-                          <p className="font-medium text-brand-dark font-inter">{item.skill_name}</p>
-                          {item.skill_info && <p className="text-xs text-gray-400 font-inter mt-0.5">{item.skill_info}</p>}
-                        </td>
-                        <td className="px-5 py-4">
-                          <span className="text-xs px-2 py-1 rounded-lg bg-gray-100 text-gray-600 font-inter capitalize">{item.skill_type}</span>
-                        </td>
-                        <td className="px-5 py-4 text-gray-600 font-inter">
-                          {institutionLine || '—'}
-                        </td>
-                        <td className="px-5 py-4">
-                          <Badge status={badge.status}>{badge.label}</Badge>
-                          {item.status === 'rejected' && item.status_reason && (
-                            <p className="text-xs text-red-500 font-inter mt-1 max-w-[180px]">{item.status_reason}</p>
-                          )}
-                        </td>
-                        <td className="px-5 py-4 text-gray-500 font-inter text-xs">
-                          {formatDate(item.verified_at) || '—'}
-                        </td>
-                        <td className="px-5 py-4 text-gray-500 font-inter text-xs">
-                          {item.documents && item.documents.length > 0 ? (
-                            <span className="flex items-center gap-1"><FileText size={12} />{item.documents.length}</span>
-                          ) : '—'}
-                        </td>
-                      </motion.tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+        <section aria-label="Skills directory" className="mb-4 rounded-xl border border-gray-100 bg-white p-5">
+          <h2 className="flex items-center gap-3 font-sora text-lg font-semibold text-brand-dark">
+            Skills directory
+            <span className="rounded-full bg-[#e3ebf8] px-3 py-0.5 text-[13px] font-medium text-brand-blue font-inter">{counts.all} {counts.all === 1 ? 'skill' : 'skills'}</span>
+          </h2>
+          <p className="mt-0.5 text-[13px] text-gray-500 font-inter">Your complete skill record.</p>
+
+          <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <SlidingTabs
+              variant="underline"
+              ariaLabel="Filter skills by status"
+              className="overflow-x-auto"
+              value={tab}
+              onChange={(value) => { setTab(value); setPage(1); }}
+              tabs={tabs}
+            />
+            <SearchField search={query} onSearch={(v) => { setQuery(v); setPage(1); }} placeholder="Search skills…" className="w-full sm:w-72" />
+          </div>
+
+          {rows.length === 0 ? (
+            <div className="mt-4 rounded-xl border border-dashed border-gray-200 py-12 text-center">
+              <p className="text-sm text-gray-500 font-inter">{skills.length === 0 ? 'No skills found for this account yet.' : 'No skills match your filters.'}</p>
+              {skills.length === 0 && <Link to="/individual/skill-tree" className="mt-2 inline-block text-sm font-semibold text-brand-blue hover:underline font-inter">Add your first skill</Link>}
             </div>
-          </Card>
-        )}
+          ) : (
+            <>
+              <div className="mt-4 overflow-x-auto scrollbar-hidden">
+                <table className="w-full min-w-[820px] border-collapse text-left text-xs font-inter">
+                  <thead>
+                    <tr>
+                      <th className="rounded-l-lg px-4 py-3">Skill</th>
+                      <th className="px-4 py-3">Type</th>
+                      <th className="px-4 py-3">Institution / Degree</th>
+                      <th className="px-4 py-3">Status</th>
+                      <th className="px-4 py-3">Verified on</th>
+                      <th className="rounded-r-lg px-4 py-3">Documents</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {pageRows.map((item, i) => {
+                      const pill = STATUS_PILL[item.status] || STATUS_PILL.pending;
+                      const TypeIcon = TYPE_ICONS[item.skill_type] || Code2;
+                      const institutionLine = [item.institution_name, item.degree].filter(Boolean).join(' — ');
+                      return (
+                        <motion.tr key={item.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: i * 0.03 }} className="transition-colors hover:bg-blue-50/30">
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-3.5">
+                              <span aria-hidden="true" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[#e8f0fe] text-brand-blue"><TypeIcon size={20} strokeWidth={1.6} /></span>
+                              <div className="min-w-0">
+                                <p className="text-[15px] font-semibold text-brand-dark">{item.skill_name}</p>
+                                {item.skill_info && <p className="text-xs text-gray-500">{item.skill_info}</p>}
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3"><span className="inline-flex rounded-md bg-[#e3ebf8] px-2.5 py-1 text-xs font-medium text-brand-blue">{TYPE_LABELS[item.skill_type] || item.skill_type}</span></td>
+                          <td className="px-4 py-3 text-[13px] text-[#2f3b52]">{institutionLine || '—'}</td>
+                          <td className="px-4 py-3">
+                            <span className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[13px] font-medium ${pill.tone}`}><pill.icon size={16} />{pill.label}</span>
+                            {item.status === 'rejected' && item.status_reason && <p className="mt-1 max-w-[200px] text-xs text-red-500">{item.status_reason}</p>}
+                          </td>
+                          <td className="whitespace-nowrap px-4 py-3 text-[13px] text-[#2f3b52]">{formatDate(item.verified_at) || '—'}</td>
+                          <td className="px-4 py-3 text-[13px] text-[#2f3b52]">
+                            {item.documents && item.documents.length > 0
+                              ? <span className="inline-flex items-center gap-1.5"><FileText size={14} />{item.documents.length}</span>
+                              : '—'}
+                          </td>
+                        </motion.tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="mt-3 flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
+                <p className="text-[13px] text-gray-600 font-inter">Showing {from}–{to} of {rows.length} {rows.length === 1 ? 'skill' : 'skills'}</p>
+                <div className="flex flex-wrap items-center gap-4">
+                  <NumberedPager page={safePage} totalPages={totalPages} onPage={setPage} />
+                  <span aria-hidden="true" className="hidden h-6 w-px bg-gray-200 sm:block" />
+                  <CustomSelect
+                    value={pageSize}
+                    onChange={(n) => { setPageSize(n); setPage(1); }}
+                    options={PAGE_SIZES}
+                    ariaLabel="Rows per page"
+                    className="w-36 [&>button]:h-10 [&>button]:text-[13px] [&>button]:font-medium [&>button]:rounded-lg"
+                  />
+                </div>
+              </div>
+            </>
+          )}
+        </section>
+
+        <p className="flex items-center gap-3 rounded-xl bg-[#e9f0fb] px-5 py-3 text-[13px] text-[#2f3b52] font-inter">
+          <Info size={17} className="shrink-0 text-brand-blue" />
+          <span>Manage entries and supporting documents in <Link to="/individual/skill-tree" className="font-medium text-brand-blue hover:underline">My Skill Tree</Link>.</span>
+        </p>
       </div>
     </AuthLayout>
   );

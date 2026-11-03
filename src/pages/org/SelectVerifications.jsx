@@ -13,6 +13,7 @@ import { verificationAPI, getApiError } from '@/services/api';
 import { ArrowRight, Check, Clock, Mail, RefreshCw, Shield, Zap } from 'lucide-react';
 import toast from 'react-hot-toast';
 import clsx from 'clsx';
+import { batchOrigin } from '@/utils/batchOrigin';
 
 export const SelectVerifications = () => {
   const navigate = useNavigate();
@@ -111,7 +112,7 @@ export const SelectVerifications = () => {
                 No verification types found for the selected industries
               </p>
               <p className="text-xs text-gray-400 font-inter">
-                Go back and adjust your industry selection.
+                Your industry is set in Profile — update it there if it looks wrong.
               </p>
             </div>
           ) : (
@@ -197,7 +198,7 @@ export const SelectVerifications = () => {
             margins cancel AuthLayout's own page padding so the bar spans
             the full content width instead of floating inset. */}
         <div className="sticky bottom-0 z-10 -mx-4 mt-5 flex flex-col-reverse gap-2 border-t border-gray-100 bg-white/95 px-4 py-2.5 backdrop-blur-sm sm:flex-row sm:justify-end lg:-mx-8 lg:px-8">
-          <Button variant="outline" size="sm" className="w-full sm:w-auto" onClick={() => navigate('/org/industry')}>
+          <Button variant="outline" size="sm" className="w-full sm:w-auto" onClick={() => navigate(batchOrigin())}>
             Back
           </Button>
           <Button variant="primary" size="sm" className="w-full sm:w-auto" onClick={handleContinue} icon={ArrowRight}>

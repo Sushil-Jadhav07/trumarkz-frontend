@@ -14,7 +14,15 @@ const recipientError = (err) => {
   return getApiError(err, 'Failed to load recipients. Please try again.');
 };
 
-export const EmailDraftRecipients = ({ verificationType, verificationSelector }) => {
+// Two overlapping tiles used as the empty-state picture of the workspace cards.
+export const PairArt = ({ icons: [First, Second] }) => (
+  <div aria-hidden="true" className="relative mx-auto h-[84px] w-[132px]">
+    <span className="absolute left-0 top-1 flex h-14 w-[68px] -rotate-6 items-center justify-center rounded-xl border-2 border-[#9db8ee] bg-[#e8f0fe] text-brand-blue"><First size={26} strokeWidth={1.5} /></span>
+    <span className="absolute right-0 top-6 flex h-14 w-[68px] items-center justify-center rounded-xl border-2 border-[#9db8ee] bg-white text-brand-blue shadow-sm"><Second size={26} strokeWidth={1.5} /></span>
+  </div>
+);
+
+export const EmailDraftRecipients = ({ verificationType, verificationSelector, aside }) => {
   const [batches, setBatches] = useState([]);
   const [batchesLoading, setBatchesLoading] = useState(true);
   const [batchesError, setBatchesError] = useState(null);
@@ -79,55 +87,74 @@ export const EmailDraftRecipients = ({ verificationType, verificationSelector })
   const approved = users.filter((user) => ['approved', 'verified', 'completed'].includes(String(user.status).toLowerCase())).length;
   const reportCount = users.filter((user) => recipientReportUrl(user.report_url)).length;
 
+  const emptyTitle = batches.length === 0
+    ? 'No batches available'
+    : !verificationType || !batchId ? 'Select a verification type and batch' : 'Choose a batch to see its recipients';
+  const emptyText = batches.length === 0 ? 'Refresh the batch list to check for new batches.' : 'Matching recipients will appear here.';
+
   return (
-    <section aria-label="Batch recipients" className="overflow-hidden rounded-2xl border border-gray-200 bg-white font-inter">
-      <div className="border-b border-gray-100 px-5 py-5 sm:px-6">
-        <div className="mb-4 flex items-center gap-2 text-sm font-semibold text-brand-dark"><FolderOpen size={17} className="text-brand-blue" />Verification &amp; batch</div>
+    <div className="space-y-4 font-inter">
+      <section aria-label="Verification and batch" className="rounded-xl border border-gray-100 bg-white px-5 py-4">
+        <div className="mb-3 flex items-center gap-2.5 font-sora text-base font-semibold text-brand-dark"><FolderOpen size={20} strokeWidth={1.6} className="text-brand-blue" />Verification &amp; batch</div>
         <div className={`grid gap-4 ${verificationSelector ? 'lg:grid-cols-2 lg:gap-6' : ''}`}>
-          {verificationSelector && <div className="min-w-0"><p className="mb-2 text-xs font-medium text-gray-600">Verification type <span className="text-brand-blue">*</span></p>{verificationSelector}</div>}
+          {verificationSelector && (
+            <div className="min-w-0">
+              <p className="mb-1.5 text-[13px] font-medium text-brand-dark">Verification type <span className="text-brand-blue">*</span></p>
+              {verificationSelector}
+              <p className="mt-1.5 text-xs text-gray-500">Required to view or create templates.</p>
+            </div>
+          )}
           <div className="min-w-0">
-            <div className="mb-2 flex items-center justify-between gap-2"><p className="text-xs font-medium text-gray-600">Batch <span className="font-normal text-gray-400">· for recipients</span></p><span className="text-xs tabular-nums text-gray-400">{batchesLoading ? 'Loading…' : `${batches.length} available`}</span></div>
+            <div className="mb-1.5 flex items-center justify-between gap-2"><p className="text-[13px] font-medium text-brand-dark">Batch <span className="font-normal text-gray-500">· for recipients</span></p><span className="text-xs tabular-nums text-gray-500">{batchesLoading ? 'Loading…' : `${batches.length} available`}</span></div>
             <div className="flex items-start gap-2">
               <CustomSelect value={batchId} onChange={setBatchId}
                 options={batches} placeholder={batchesLoading ? 'Loading batches…' : 'Choose a batch'}
                 disabled={batchesLoading || batches.length === 0} searchable searchPlaceholder="Search batches or organizations"
-                ariaLabel="Recipient batch" className="min-w-0 flex-1 [&>button]:min-h-11 [&>button]:rounded-xl [&>button]:px-3.5" />
+                ariaLabel="Recipient batch" className="min-w-0 flex-1 [&>button]:min-h-11 [&>button]:rounded-lg [&>button]:px-3.5" />
               <button type="button" aria-label="Refresh batches" title="Refresh batches" disabled={batchesLoading} onClick={() => setBatchReload((value) => value + 1)}
-                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-gray-200 text-gray-500 transition-colors hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40 disabled:opacity-50"><RefreshCw size={15} className={batchesLoading ? 'animate-spin' : ''} /></button>
+                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-gray-200 text-gray-500 transition-colors hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40 disabled:opacity-50"><RefreshCw size={15} className={batchesLoading ? 'animate-spin' : ''} /></button>
             </div>
+            <p className="mt-1.5 break-words text-xs leading-5 text-gray-500">{selectedBatch ? <><span className="font-medium text-gray-600">Selected batch:</span> {selectedBatch.label}</> : 'Select a batch to review its recipients.'}</p>
           </div>
         </div>
-        {selectedBatch && <p className="mt-3 break-words text-xs leading-5 text-gray-500"><span className="font-medium text-gray-600">Selected batch:</span> {selectedBatch.label}</p>}
-      </div>
+      </section>
 
-      <div className="flex flex-wrap items-center justify-between gap-3 px-5 pb-3 pt-5 sm:px-6">
-        <div className="flex items-center gap-2"><h3 className="text-base font-semibold text-brand-dark">Batch recipients</h3>{current && !loading && !current.error && <span className="rounded-md bg-blue-50 px-2 py-0.5 text-xs font-semibold tabular-nums text-brand-blue">{users.length}</span>}</div>
-        {batchId && verificationType && <button type="button" onClick={() => setReload((value) => value + 1)} disabled={loading} className="flex items-center gap-1.5 text-xs font-medium text-gray-500 hover:text-brand-blue disabled:opacity-50"><RefreshCw size={13} className={loading ? 'animate-spin' : ''} />Refresh recipients</button>}
-      </div>
-      {batchesError ? (
-        <div role="alert" className="mx-5 mb-5 flex items-start gap-2 rounded-xl border border-red-100 bg-red-50 p-4 text-sm leading-6 text-red-700 sm:mx-6"><AlertTriangle size={16} className="mt-1 shrink-0" />{batchesError}</div>
-      ) : batchesLoading || loading ? (
-        <div role="status" aria-label={batchesLoading ? 'Loading batches' : 'Loading recipients'} className="space-y-3 px-5 pb-6 sm:px-6">{[1,2,3].map((key) => <div key={key} className="flex motion-safe:animate-pulse items-center gap-4 rounded-lg bg-gray-50 p-3"><div className="h-8 w-8 rounded-lg bg-gray-200/60" /><div className="h-3 w-1/3 rounded bg-gray-200/60" /><div className="ml-auto h-3 w-1/5 rounded bg-gray-200/60" /></div>)}</div>
-      ) : batches.length === 0 || !batchId || !verificationType ? (
-        <div className="mx-5 mb-5 flex flex-col items-start gap-3 rounded-xl border border-dashed border-gray-200 bg-gray-50/70 p-5 sm:mx-6 sm:flex-row sm:items-center">
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-400"><Users size={21} strokeWidth={1.6} /></div>
-          <div><p className="text-sm font-medium text-gray-700">{batches.length === 0 ? 'No batches available' : !verificationType ? 'Start with a verification type and batch' : 'Choose a batch to see its recipients'}</p><p className="mt-1 text-sm leading-6 text-gray-500">{batches.length === 0 ? 'Refresh the batch list to check for new batches.' : 'Review matching users, verification outcomes, and reports in one place.'}</p></div>
-        </div>
-      ) : current?.error ? (
-        <div role="alert" className="mx-5 mb-5 space-y-3 rounded-xl border border-red-100 bg-red-50 p-4 sm:mx-6">
-          <p className="flex items-start gap-2 text-sm leading-6 text-red-700"><AlertTriangle size={16} className="mt-1 shrink-0" />{current.error}</p>
-          <button type="button" onClick={() => setReload((value) => value + 1)} className="rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-100">Try again</button>
-        </div>
-      ) : users.length === 0 ? (
-        <div className="px-5 pb-6 sm:px-6"><p className="rounded-xl bg-gray-50 p-5 text-sm leading-6 text-gray-500">No recipients in this batch have {verificationType}. Choose a different batch or verification type.</p></div>
-      ) : (
+      <div className="grid items-start gap-4 lg:grid-cols-2">
+        <section aria-label="Batch recipients" className="min-w-0 overflow-hidden rounded-xl border border-gray-100 bg-white">
+          <div className="flex items-start gap-3 px-5 pt-4">
+            <Users size={22} strokeWidth={1.5} className="mt-0.5 shrink-0 text-brand-blue" />
+            <div className="min-w-0 flex-1">
+              <h3 className="flex items-center gap-2 font-sora text-base font-semibold text-brand-dark">Batch recipients{current && !loading && !current.error && <span className="rounded-full bg-[#e3ebf8] px-2.5 py-0.5 text-xs font-semibold tabular-nums text-brand-blue">{users.length}</span>}</h3>
+              <p className="mt-0.5 text-xs text-gray-500">Review users, outcomes and reports.</p>
+            </div>
+            {batchId && verificationType && <button type="button" onClick={() => setReload((value) => value + 1)} disabled={loading} className="flex shrink-0 items-center gap-1.5 text-xs font-medium text-gray-500 hover:text-brand-blue disabled:opacity-50"><RefreshCw size={13} className={loading ? 'animate-spin' : ''} />Refresh</button>}
+          </div>
+          <div className="mx-4 mb-2 mt-3 rounded-md bg-[#eef3fb] px-3 py-2 text-[13px] font-semibold text-brand-dark">Recipient preview</div>
+          {batchesError ? (
+            <div role="alert" className="mx-5 mb-5 flex items-start gap-2 rounded-xl border border-red-100 bg-red-50 p-4 text-sm leading-6 text-red-700"><AlertTriangle size={16} className="mt-1 shrink-0" />{batchesError}</div>
+          ) : batchesLoading || loading ? (
+            <div role="status" aria-label={batchesLoading ? 'Loading batches' : 'Loading recipients'} className="space-y-3 px-5 pb-6">{[1,2,3].map((key) => <div key={key} className="flex motion-safe:animate-pulse items-center gap-4 rounded-lg bg-gray-50 p-3"><div className="h-8 w-8 rounded-lg bg-gray-200/60" /><div className="h-3 w-1/3 rounded bg-gray-200/60" /><div className="ml-auto h-3 w-1/5 rounded bg-gray-200/60" /></div>)}</div>
+          ) : batches.length === 0 || !batchId || !verificationType ? (
+            <div className="px-5 pb-8 pt-4 text-center">
+              <PairArt icons={[Users, Search]} />
+              <p className="mt-3 text-[15px] font-medium text-brand-dark">{emptyTitle}</p>
+              <p className="mt-1 text-[13px] text-gray-500">{emptyText}</p>
+            </div>
+          ) : current?.error ? (
+            <div role="alert" className="mx-5 mb-5 space-y-3 rounded-xl border border-red-100 bg-red-50 p-4">
+              <p className="flex items-start gap-2 text-sm leading-6 text-red-700"><AlertTriangle size={16} className="mt-1 shrink-0" />{current.error}</p>
+              <button type="button" onClick={() => setReload((value) => value + 1)} className="rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-100">Try again</button>
+            </div>
+          ) : users.length === 0 ? (
+            <div className="px-5 pb-6"><p className="rounded-xl bg-gray-50 p-5 text-sm leading-6 text-gray-500">No recipients in this batch have {verificationType}. Choose a different batch or verification type.</p></div>
+          ) : (
         <>
           <div className="flex flex-wrap items-center justify-between gap-3 px-5 pb-4 sm:px-6">
             <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-gray-500"><span className="inline-flex items-center gap-1.5"><Users size={13} />{users.length} matching users</span><span className="inline-flex items-center gap-1.5"><CheckCircle2 size={13} className="text-green-600" />{approved} approved</span><span className="inline-flex items-center gap-1.5"><FileCheck2 size={13} className="text-brand-blue" />{reportCount} reports</span></div>
             <div className="flex w-full items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 focus-within:border-brand-blue focus-within:ring-2 focus-within:ring-brand-blue/10 sm:w-64"><Search size={14} className="shrink-0 text-gray-400" /><input aria-label="Search recipients" placeholder="Search recipients…" value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} className="min-w-0 flex-1 bg-transparent py-2 text-sm text-gray-700 outline-none" />{search && <button type="button" aria-label="Clear recipient search" onClick={() => { setSearch(''); setPage(1); }} className="text-gray-400 hover:text-gray-700"><X size={14} /></button>}</div>
           </div>
           <div className="max-h-[26rem] overflow-auto border-t border-gray-100 thin-scrollbar">
-            <table className="w-full min-w-[880px] text-left text-sm">
+            <table className="w-full min-w-[780px] text-left text-sm">
               <thead className="sticky top-0 z-10 bg-gray-50 text-xs text-gray-500"><tr>{['Recipient', 'Email', 'Phone', 'Status', 'Reason', 'Report'].map((label) => <th key={label} className="px-5 py-3 font-medium">{label}</th>)}</tr></thead>
               <tbody className="divide-y divide-gray-100">
                 {pagedUsers.map((user, index) => {
@@ -149,7 +176,10 @@ export const EmailDraftRecipients = ({ verificationType, verificationSelector })
           </div>
           <TablePagination compact page={safePage} pageSize={pageSize} total={filteredUsers.length} onPageChange={setPage} onPageSizeChange={(size) => { setPageSize(size); setPage(1); }} noun="recipient" />
         </>
-      )}
-    </section>
+          )}
+        </section>
+        {aside}
+      </div>
+    </div>
   );
 };

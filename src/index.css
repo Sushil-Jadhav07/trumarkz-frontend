@@ -64,3 +64,17 @@
     100% { top: 0; }
   }
 }
+
+/* Shared data-table header: the same light blue band and plain, medium-weight labels on every table. */
+table > thead,
+table > thead > tr,
+table > thead > tr > th {
+  background-color: #eef3fb !important;
+}
+table > thead > tr > th {
+  color: #2f3b52 !important;
+  font-size: 0.75rem !important;
+  font-weight: 500 !important;
+  letter-spacing: normal !important;
+  text-transform: none !important;
+}

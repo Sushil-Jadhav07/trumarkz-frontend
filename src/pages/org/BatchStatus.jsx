@@ -4,6 +4,9 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { AuthLayout } from '@/components/layout/AuthLayout';
 import { PageHeader } from '@/components/shared/PageHeader';
+import { KpiCard, KpiSkeleton } from '@/components/shared/KpiCard';
+import { PageIntro, OutlineButton, SolidButton, NumberedPager } from '@/components/shared/AdminPageParts';
+import { SlidingTabs } from '@/components/ui/SlidingTabs';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { ProgressBar } from '@/components/ui/ProgressBar';
@@ -208,9 +211,9 @@ const FILTER_OPTIONS = [
   { value: '',                          label: 'All',                       icon: Layers },
   { value: 'pending',                   label: 'Pending',                   icon: Clock },
   { value: 'processing',                label: 'Processing',                icon: Play },
-  { value: 'verification_in_progress',  label: 'Verification In Progress',  icon: ShieldCheck },
-  { value: 'verification_completed',    label: 'Verification Completed',    icon: CheckCircle },
-  { value: 'sdc_generated',              label: 'SDC Generated',            icon: Award },
+  { value: 'verification_in_progress',  label: 'Verification in progress',  icon: ShieldCheck },
+  { value: 'verification_completed',    label: 'Verification completed',    icon: CheckCircle },
+  { value: 'sdc_generated',              label: 'SDC generated',            icon: Award },
   { value: 'approved',                  label: 'Approved',                  icon: CheckCircle },
 ];
 
@@ -281,6 +284,17 @@ const formatDate = (v) => {
     ? v
     : d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
 };
+
+// Soft filled status pills used by the batch directory.
+const STATUS_PILL = {
+  pending: 'bg-amber-100 text-amber-800',
+  processing: 'bg-blue-100 text-blue-700',
+  verification_in_progress: 'bg-blue-100 text-blue-700',
+  verification_completed: 'bg-green-100 text-green-700',
+  sdc_generated: 'bg-green-100 text-green-700',
+  approved: 'bg-emerald-100 text-emerald-700',
+};
+const sentence = (label) => (String(label).charAt(0) + String(label).slice(1).toLowerCase()).replace(/^Sdc/, 'SDC');
 
 // ── Stagger variants ──────────────────────────────────────────────────────────
 const listContainer = {
@@ -1911,389 +1925,187 @@ export const BatchStatus = () => {
     approved:                    batches.filter((b) => b.status === 'approved').length,
   };
 
-  const statCards = [
-    {
-      label:      'Total Records',
-      value:      totalRecords,
-      sub:        `across ${batches.length} batch${batches.length !== 1 ? 'es' : ''}`,
-      icon:       Layers,
-      surface:    'bg-brand-blue border-brand-blue',
-      iconBg:     'bg-white/15',
-      iconColor:  'text-white',
-      labelColor: 'text-white/65',
-      valueColor: 'text-white',
-      subColor:   'text-white/55',
-    },
-    {
-      label:      'Verified',
-      value:      totalVerified,
-      sub:        totalRecords > 0 ? `${Math.round((totalVerified / totalRecords) * 100)}% of total` : '—',
-      icon:       CheckCircle,
-      surface:    'bg-white border-gray-100',
-      iconBg:     'bg-green-50',
-      iconColor:  'text-green-600',
-      labelColor: 'text-gray-400',
-      valueColor: 'text-brand-dark',
-      subColor:   'text-green-600',
-    },
-    {
-      label:      'Pending',
-      value:      totalPending,
-      sub:        totalRecords > 0 ? `${Math.round((totalPending / totalRecords) * 100)}% of total` : '—',
-      icon:       Clock,
-      surface:    'bg-white border-gray-100',
-      iconBg:     'bg-amber-50',
-      iconColor:  'text-amber-600',
-      labelColor: 'text-gray-400',
-      valueColor: 'text-brand-dark',
-      subColor:   'text-amber-600',
-    },
-    {
-      label:      'Failed',
-      value:      totalFailed,
-      sub:        totalRecords > 0 ? `${Math.round((totalFailed / totalRecords) * 100)}% of total` : '—',
-      icon:       XCircle,
-      surface:    'bg-white border-gray-100',
-      iconBg:     'bg-red-50',
-      iconColor:  'text-red-500',
-      labelColor: 'text-gray-400',
-      valueColor: 'text-brand-dark',
-      subColor:   'text-red-500',
-    },
-  ];
+  const pctOf = (n) => (totalRecords > 0 ? Math.round((n / totalRecords) * 100) : 0);
+  const filterTabs = FILTER_OPTIONS.map((opt) => ({ value: opt.value, label: opt.label, icon: opt.icon, count: filterCounts[opt.value] ?? 0 }));
+  const totalPagesSafe = Math.max(1, totalPages);
+  const shownFrom = filtered.length === 0 ? 0 : page * PAGE_SIZE + 1;
+  const shownTo = Math.min(filtered.length, (page + 1) * PAGE_SIZE);
+  const openBatch = (batch) => {
+    if (batch.batchType === 'warranty') {
+      navigate(`/org/batch-status/warranty/${batch.id}`, { state: { batchName: batch.name } });
+    } else {
+      navigate(`/org/batch-status/${batch.id}`);
+    }
+  };
 
   return (
-    <AuthLayout title="Batch Status">
-      <div className="mx-auto w-full space-y-5 lg:max-w-none">
+    <AuthLayout title="Batch Status" breadcrumb={['Workspace', 'Batches']}>
+      <div className="mx-auto w-full lg:max-w-none">
 
-        {/* ── Page header ── */}
-        <PageHeader
-          title="Verification Batches"
-          subtitle="Monitor verification status across all your batches in real time"
-          action={
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => fetchData(true)}
-                disabled={refreshing}
-                className="inline-flex items-center gap-1.5 rounded-xl border border-gray-200 bg-white px-3 py-2 font-inter text-sm font-medium text-brand-dark transition-colors hover:bg-gray-50 disabled:opacity-60"
-              >
-                <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />
-                {refreshing ? 'Refreshing…' : 'Refresh'}
-              </button>
-              <Button variant="primary" size="sm" icon={Upload} onClick={handleNewBatchClick}>
-                New Batch
-              </Button>
-            </div>
-          }
+        <PageIntro
+          title="Verification batches"
+          subtitle="Track verification progress across your batches."
+          actions={(
+            <>
+              <OutlineButton icon={RefreshCw} onClick={() => fetchData(true)} disabled={refreshing}>{refreshing ? 'Refreshing…' : 'Refresh'}</OutlineButton>
+              <SolidButton icon={Upload} onClick={handleNewBatchClick}>New batch</SolidButton>
+            </>
+          )}
         />
 
         {/* ── Stat cards ── */}
-        {!loading && batches.length > 0 && (
-          <motion.div
-            variants={listContainer}
-            initial="hidden"
-            animate="show"
-            className="grid grid-cols-2 gap-4 lg:grid-cols-4"
-          >
-            {statCards.map((s) => (
-              <motion.div
-                key={s.label}
-                variants={listItem}
-                className={`rounded-2xl border p-5 ${s.surface}`}
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className={`font-inter text-[10px] font-semibold uppercase tracking-[0.14em] ${s.labelColor}`}>
-                      {s.label}
-                    </p>
-                    <p className={`mt-2 font-sora text-3xl font-bold leading-none ${s.valueColor}`}>
-                      {s.value.toLocaleString()}
-                    </p>
-                    <p className={`mt-2 font-inter text-xs ${s.subColor}`}>{s.sub}</p>
-                  </div>
-                  <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${s.iconBg}`}>
-                    <s.icon size={18} className={s.iconColor} />
-                  </div>
-                </div>
-              </motion.div>
-            ))}
-          </motion.div>
-        )}
+        <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {loading ? [0, 1, 2, 3].map((i) => <KpiSkeleton key={i} />) : (
+            <>
+              <KpiCard label="Total records" value={totalRecords.toLocaleString()} sub={`Across ${batches.length} batch${batches.length !== 1 ? 'es' : ''}`} icon={Layers} />
+              <KpiCard label="Verified" value={totalVerified.toLocaleString()} sub={`${pctOf(totalVerified)}% of records`} icon={CheckCircle} delay={0.05} />
+              <KpiCard label="Pending" value={totalPending.toLocaleString()} sub={`${pctOf(totalPending)}% of records`} icon={Clock} delay={0.1} />
+              <KpiCard label="Failed" value={totalFailed.toLocaleString()} sub={`${pctOf(totalFailed)}% of records`} icon={XCircle} delay={0.15} />
+            </>
+          )}
+        </div>
 
         {/* ── Overall progress ── */}
         {!loading && batches.length > 0 && (
-          <motion.div
-            initial={{ opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.3, duration: 0.3, ease: 'easeOut' }}
-            className="rounded-2xl border border-gray-100 bg-white p-5"
-          >
-            <div className="mb-4 flex items-center justify-between gap-4">
-              <div className="flex items-center gap-3">
-                <div className="flex h-9 w-9 items-center justify-center rounded-xl border border-brand-blue/10 bg-brand-blue/5">
-                  <BarChart3 size={16} className="text-brand-blue" />
-                </div>
-                <div>
-                  <p className="font-inter text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-400">
-                    Pipeline Overview
-                  </p>
-                  <p className="font-sora text-sm font-semibold text-brand-dark">
-                    Overall Verification Progress
-                  </p>
-                </div>
+          <section aria-label="Overall verification progress" className="mb-4 rounded-xl border border-gray-100 bg-white px-5 py-4">
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex items-center gap-3.5">
+                <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-[#e8f0fe] text-brand-blue"><BarChart3 size={20} strokeWidth={1.75} /></span>
+                <h2 className="font-sora text-[15px] font-semibold text-brand-dark">Overall verification progress</h2>
               </div>
               <div className="text-right">
-                <p className="font-sora text-2xl font-bold text-brand-dark">{overallPct}%</p>
-                <p className="font-inter text-[11px] text-gray-400">
-                  {totalVerified + totalFailed} / {totalRecords} processed
-                </p>
+                <p className="font-sora text-lg font-bold leading-tight text-brand-dark">{overallPct}% processed</p>
+                <p className="text-xs text-gray-500 font-inter">{totalVerified + totalFailed} of {totalRecords} records</p>
               </div>
             </div>
-            <SegmentedBar
-              total={totalRecords}
-              verified={totalVerified}
-              failed={totalFailed}
-              pending={totalPending}
-            />
-            <div className="mt-3 flex flex-wrap items-center gap-x-6 gap-y-2">
+            <div className="mt-3">
+              <SegmentedBar total={totalRecords} verified={totalVerified} failed={totalFailed} pending={totalPending} />
+            </div>
+            <div className="mt-2.5 flex flex-wrap items-center gap-x-6 gap-y-2">
               {[
                 { color: 'bg-green-500', label: 'Verified', count: totalVerified },
-                { color: 'bg-amber-300', label: 'Pending',  count: totalPending },
+                { color: 'bg-amber-400', label: 'Pending',  count: totalPending },
                 { color: 'bg-red-400',   label: 'Failed',   count: totalFailed },
               ].map((leg) => (
-                <div key={leg.label} className="flex items-center gap-1.5">
-                  <div className={`h-2.5 w-2.5 rounded-sm ${leg.color}`} />
-                  <span className="font-inter text-xs text-gray-500">
-                    {leg.label} —{' '}
-                    <span className="font-medium text-brand-dark">{leg.count}</span>
-                  </span>
+                <div key={leg.label} className="flex items-center gap-2">
+                  <span className={`h-2.5 w-2.5 rounded-sm ${leg.color}`} />
+                  <span className="text-xs text-[#2f3b52] font-inter">{leg.label} — {leg.count}</span>
                 </div>
               ))}
             </div>
-          </motion.div>
+          </section>
         )}
 
         {/* ── Filter tabs ── */}
-        <div className="flex items-center gap-1 rounded-xl border border-gray-100 bg-white p-1.5">
-          {FILTER_OPTIONS.map((opt) => {
-            const isActive = statusFilter === opt.value;
-            const count    = filterCounts[opt.value] ?? 0;
-            return (
-              <button
-                key={opt.value}
-                onClick={() => { setStatusFilter(opt.value); setPage(0); }}
-                className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-2 font-inter text-xs font-medium transition-all ${
-                  isActive
-                    ? 'bg-brand-blue text-white'
-                    : 'text-gray-500 hover:bg-gray-50 hover:text-brand-dark'
-                }`}
-              >
-                <opt.icon size={12} />
-                {opt.label}
-                <span className={`rounded-md px-1.5 py-0.5 text-[10px] font-bold leading-none ${
-                  isActive ? 'bg-white/20 text-white' : 'bg-gray-100 text-gray-500'
-                }`}>
-                  {count}
-                </span>
-              </button>
-            );
-          })}
+        <div className="mb-4 overflow-x-auto rounded-xl border border-gray-100 bg-white p-1.5 scrollbar-hidden">
+          <SlidingTabs
+            variant="filters"
+            toggle
+            ariaLabel="Filter batches by status"
+            value={statusFilter}
+            onChange={(value) => { setStatusFilter(value); setPage(0); }}
+            tabs={filterTabs}
+            className="flex-nowrap"
+          />
         </div>
 
-        {/* ── Batch table ── */}
-        <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white">
-          <div className="flex items-center justify-between border-b border-gray-100 bg-gray-50/70 px-5 py-3.5">
-            <p className="font-sora text-sm font-semibold text-brand-dark">
-              Batches
-              {statusFilter && (
-                <span className="ml-2 font-inter text-xs font-normal text-gray-400">
-                  · {FILTER_OPTIONS.find((o) => o.value === statusFilter)?.label}
-                </span>
-              )}
-            </p>
-            {!loading && (
-              <span className="font-inter text-xs text-gray-400">
-                {filtered.length} batch{filtered.length !== 1 ? 'es' : ''}
-              </span>
-            )}
+        {/* ── Batch directory ── */}
+        <section aria-label="Batch directory" className="overflow-hidden rounded-xl border border-gray-100 bg-white">
+          <div className="flex items-center justify-between px-5 pb-3 pt-4">
+            <h2 className="font-sora text-base font-semibold text-brand-dark">
+              Batch directory
+              {statusFilter && <span className="ml-2 font-inter text-xs font-normal text-gray-500">· {FILTER_OPTIONS.find((o) => o.value === statusFilter)?.label}</span>}
+            </h2>
+            {!loading && <span className="text-[13px] text-gray-500 font-inter">{filtered.length} batch{filtered.length !== 1 ? 'es' : ''}</span>}
           </div>
 
-          {loading && (
-            <LoadingSkeleton variant="table" label="Loading batches" columns={6}/>
-          )}
+          {loading && <div className="px-5 pb-5"><LoadingSkeleton variant="table" label="Loading batches" columns={5} /></div>}
 
           {!loading && paged.length === 0 && (
-            <div className="flex flex-col items-center justify-center gap-4 p-16 text-center">
+            <div className="flex flex-col items-center justify-center gap-4 border-t border-gray-100 p-14 text-center">
               <div className="flex h-12 w-12 items-center justify-center rounded-xl border border-gray-100 bg-gray-50">
                 <Layers size={20} className="text-gray-400" />
               </div>
               <div>
                 <p className="font-sora text-sm font-semibold text-brand-dark">No batches found</p>
-                <p className="mt-1 font-inter text-xs text-gray-400">
-                  {statusFilter
-                    ? 'Try a different filter or create a new batch.'
-                    : 'Create your first verification batch to get started.'}
+                <p className="mt-1 font-inter text-xs text-gray-500">
+                  {statusFilter ? 'Try a different filter or create a new batch.' : 'Create your first verification batch to get started.'}
                 </p>
               </div>
-              <Button variant="primary" size="sm" icon={Upload} onClick={handleNewBatchClick}>
-                New Batch
-              </Button>
+              <SolidButton icon={Upload} onClick={handleNewBatchClick}>New batch</SolidButton>
             </div>
           )}
 
           {!loading && paged.length > 0 && (
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[680px]">
-                <thead>
-                  <tr className="border-b border-gray-100">
-                    <th className="px-5 py-3 text-left font-inter text-[10px] font-bold uppercase tracking-[0.1em] text-gray-400">
-                      Batch
-                    </th>
-                    <th className="hidden px-5 py-3 text-left font-inter text-[10px] font-bold uppercase tracking-[0.1em] text-gray-400 sm:table-cell">
-                      Progress
-                    </th>
-                    <th className="px-5 py-3 text-center font-inter text-[10px] font-bold uppercase tracking-[0.1em] text-gray-400">
-                      Records
-                    </th>
-                    <th className="px-5 py-3 text-left font-inter text-[10px] font-bold uppercase tracking-[0.1em] text-gray-400">
-                      Status
-                    </th>
-                    <th className="px-5 py-3 text-right font-inter text-[10px] font-bold uppercase tracking-[0.1em] text-gray-400">
-                      Action
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <AnimatePresence mode="sync">
-                    {paged.map((batch, index) => {
-                      const pct  = batch.total > 0
-                        ? Math.round(((batch.verified + batch.failed) / batch.total) * 100)
-                        : 0;
+            <>
+              <div className="overflow-x-auto scrollbar-hidden">
+                <table className="w-full min-w-[820px] border-collapse text-left text-xs font-inter">
+                  <thead>
+                    <tr>
+                      <th className="px-5 py-2.5">Batch</th>
+                      <th className="px-4 py-2.5">Progress</th>
+                      <th className="px-4 py-2.5 text-center">Records</th>
+                      <th className="px-4 py-2.5">Status</th>
+                      <th className="px-5 py-2.5 text-right">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {paged.map((batch) => {
+                      const pct = batch.total > 0 ? Math.round(((batch.verified + batch.failed) / batch.total) * 100) : 0;
                       const bm = batch.statusMeta;
                       return (
-                        <motion.tr
-                          key={batch.id}
-                          initial={{ opacity: 0, y: 6 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          exit={{ opacity: 0 }}
-                          transition={{ delay: index * 0.04, duration: 0.22, ease: 'easeOut' }}
-                          onClick={() => {
-                            if (batch.batchType === 'warranty') {
-                              navigate(`/org/batch-status/warranty/${batch.id}`, { state: { batchName: batch.name } });
-                            } else {
-                              navigate(`/org/batch-status/${batch.id}`);
-                            }
-                          }}
-                          className="cursor-pointer border-b border-gray-50 transition-colors last:border-0 hover:bg-gray-50/60"
-                        >
-                          <td className="px-5 py-4">
+                        <tr key={batch.id} onClick={() => openBatch(batch)} className="cursor-pointer transition-colors hover:bg-blue-50/30">
+                          <td className="px-5 py-2.5">
                             <div className="flex items-center gap-3">
-                              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-brand-blue/10 bg-brand-blue/5">
-                                <Package size={16} className="text-brand-blue" />
-                              </div>
+                              <span aria-hidden="true" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#e8f0fe] text-brand-blue"><Layers size={17} strokeWidth={1.7} /></span>
                               <div className="min-w-0">
-                                <p className="truncate font-inter text-sm font-semibold text-brand-dark">
-                                  {batch.name}
-                                </p>
-                                <p className="truncate font-inter text-xs text-gray-400">
-                                  {formatDate(batch.createdAt)}
-                                </p>
+                                <p className="truncate text-[13px] font-medium text-brand-dark">{batch.name}</p>
+                                <p className="text-[11px] text-gray-500">{formatDate(batch.createdAt)}</p>
                               </div>
                             </div>
                           </td>
-                          <td className="hidden w-48 px-5 py-4 sm:table-cell">
-                            <ProgressBar progress={pct} height="h-1.5" showLabel={false} />
-                            <p className="mt-1.5 font-inter text-[11px] text-gray-400">
-                              {pct}% · {batch.verified}/{batch.total} verified
-                            </p>
+                          <td className="w-56 px-4 py-2.5">
+                            <div className="h-1.5 w-36 overflow-hidden rounded-full bg-gray-200" role="progressbar" aria-label={`${batch.name} progress`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct}>
+                              <div className="h-full rounded-full bg-brand-blue" style={{ width: `${pct}%` }} />
+                            </div>
+                            <p className="mt-1 text-[11px] text-gray-500">{pct}% · {batch.verified}/{batch.total} verified</p>
                           </td>
-                          <td className="px-5 py-4 text-center">
-                            <div className="inline-flex min-w-[2.5rem] items-center justify-center rounded-lg border border-gray-100 bg-gray-50 px-2.5 py-1">
-                              <span className="font-sora text-sm font-bold text-brand-dark">{batch.total}</span>
+                          <td className="px-4 py-2.5 text-center">
+                            <span className="inline-flex min-w-[36px] items-center justify-center rounded-lg bg-gray-100 px-2.5 py-1 text-[13px] font-semibold text-brand-dark">{batch.total}</span>
+                          </td>
+                          <td className="px-4 py-2.5">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-3 py-1 text-xs font-medium ${STATUS_PILL[batch.status] || STATUS_PILL.pending}`}>
+                                <span className={`h-1.5 w-1.5 rounded-full ${bm.dot}`} />{sentence(bm.label)}
+                              </span>
+                              <ReportsProtectedBadge mode={batch.certificateAccessMode} className="!rounded-full !bg-[#e6eefb] !px-3 !py-1 !text-xs" />
                             </div>
                           </td>
-                          <td className="px-5 py-4">
-                            <div className={`inline-flex items-center gap-1.5 rounded-xl border px-3 py-1.5 ${bm.tone}`}>
-                              <div className={`h-1.5 w-1.5 rounded-full ${bm.dot}`} />
-                              <span className="font-inter text-xs font-semibold">{bm.label}</span>
-                            </div>
-                            <ReportsProtectedBadge mode={batch.certificateAccessMode} className="mt-1.5 flex w-fit" />
-                          </td>
-                          <td className="px-5 py-4 text-right">
+                          <td className="px-5 py-2.5 text-right">
                             <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                if (batch.batchType === 'warranty') {
-                                  navigate(`/org/batch-status/warranty/${batch.id}`, { state: { batchName: batch.name } });
-                                } else {
-                                  navigate(`/org/batch-status/${batch.id}`);
-                                }
-                              }}
-                              className="inline-flex items-center gap-1.5 rounded-xl border border-brand-blue/20 bg-brand-blue/5 px-3 py-1.5 font-inter text-xs font-semibold text-brand-blue transition-all hover:bg-brand-blue hover:text-white"
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); openBatch(batch); }}
+                              className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-[#c7d8f5] bg-[#f3f7fe] px-3 text-xs font-medium text-brand-blue transition-colors hover:bg-brand-blue hover:text-white"
                             >
-                              <Eye size={12} />
-                              View Details
+                              <Eye size={14} /> View details
                             </button>
                           </td>
-                        </motion.tr>
+                        </tr>
                       );
                     })}
-                  </AnimatePresence>
-                </tbody>
-              </table>
-            </div>
+                  </tbody>
+                </table>
+              </div>
+              <div className="flex flex-col justify-between gap-3 border-t border-gray-100 px-5 py-3 sm:flex-row sm:items-center">
+                <p className="text-xs text-gray-600 font-inter">Showing {shownFrom}–{shownTo} of {filtered.length} batch{filtered.length !== 1 ? 'es' : ''}</p>
+                <div className="flex items-center gap-4">
+                  <span className="text-xs text-gray-600 font-inter">Page {page + 1} of {totalPagesSafe}</span>
+                  {totalPages > 1 && <NumberedPager page={page + 1} totalPages={totalPages} onPage={(p) => setPage(p - 1)} />}
+                </div>
+              </div>
+            </>
           )}
-        </div>
-
-        {/* ── Pagination ── */}
-        {totalPages > 1 && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ duration: 0.25 }}
-            className="flex items-center justify-between rounded-xl border border-gray-100 bg-white px-4 py-3"
-          >
-            <p className="font-inter text-xs text-gray-400">
-              Page <span className="font-semibold text-brand-dark">{page + 1}</span> of {totalPages}
-              <span className="mx-2 text-gray-200">·</span>
-              {filtered.length} batches
-            </p>
-            <div className="flex items-center gap-1.5">
-              <button
-                onClick={() => setPage((p) => Math.max(0, p - 1))}
-                disabled={page === 0}
-                className="flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 bg-white text-brand-dark transition-colors hover:bg-gray-50 disabled:opacity-40"
-              >
-                <ChevronLeft size={14} />
-              </button>
-              {Array.from({ length: Math.min(totalPages, 5) }, (_, i) => {
-                const p = totalPages <= 5
-                  ? i
-                  : Math.max(0, Math.min(page - 2, totalPages - 5)) + i;
-                return (
-                  <button
-                    key={p}
-                    onClick={() => setPage(p)}
-                    className={`h-8 w-8 rounded-lg font-inter text-xs font-medium transition-colors ${
-                      page === p
-                        ? 'bg-brand-blue text-white'
-                        : 'border border-gray-200 bg-white text-gray-500 hover:bg-gray-50'
-                    }`}
-                  >
-                    {p + 1}
-                  </button>
-                );
-              })}
-              <button
-                onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
-                disabled={page >= totalPages - 1}
-                className="flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 bg-white text-brand-dark transition-colors hover:bg-gray-50 disabled:opacity-40"
-              >
-                <ChevronRight size={14} />
-              </button>
-            </div>
-          </motion.div>
-        )}
+        </section>
       </div>
 
       <Modal isOpen={showGstGate} onClose={() => setShowGstGate(false)} title="GST Verification Required" size="lg">

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { RefreshCw, AlertTriangle } from 'lucide-react';
 import { Input } from '@/components/ui/Input';
 import { DhiwaysDetailsEditor } from '@/components/shared/DhiwaysDetailsEditor';
+import { IndustrySelect } from '@/components/shared/IndustrySelect';
 import { OrgSchemaConfigsPanel } from '@/components/shared/OrgSchemaConfigsPanel';
 import { SERVICE_TYPE_OPTIONS } from '@/data/serviceTypeOptions';
 import { normalizeDhiwayDetails, mergeSchemaConfigSpaces } from '@/utils/dhiway';
@@ -172,7 +173,7 @@ export const OrganizationEditor = ({ onClose, orgId, onSuccess }) => {
             </div>
           </div>
 
-          <Input label="Industry Type" placeholder="e.g. Healthcare" value={form.industry_type} onChange={set('industry_type')} />
+          <IndustrySelect value={form.industry_type} onChange={(v) => setForm((f) => ({ ...f, industry_type: v }))} disabled={submitting} />
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Input label="GSTIN" value={form.gstin} onChange={set('gstin')} placeholder="27ABCDE1234F1Z5" />

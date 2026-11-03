@@ -3,15 +3,20 @@ import { motion } from 'framer-motion';
 import { Link } from 'react-router-dom';
 import { AuthLayout } from '@/components/layout/AuthLayout';
 import { BrowserNotifications } from '@/components/shared/BrowserNotifications';
+import { SuperAdminProfile } from '@/pages/account/SuperAdminProfile';
 import { Button } from '@/components/ui/Button';
-import { Card } from '@/components/ui/Card';
-import { Badge } from '@/components/ui/Badge';
+import { PageIntro } from '@/components/shared/AdminPageParts';
 import { useAuth } from '@/context/AuthContext';
+import { useApp } from '@/context/AppContext';
+import { CustomSelect } from '@/components/ui/CustomSelect';
+import { useIndustryTypes, loadIndustryTypes } from '@/hooks/useIndustryTypes';
+import { industrySelectOptions } from '@/utils/industryTypes';
+import { setBatchIndustry } from '@/utils/batchIndustry';
+import { matchProfileIndustry } from '@/utils/industry';
 import { authAPI, adminAPI, getApiError } from '@/services/api';
 import {
-  Mail, Phone, Building2, Save,
-  CheckCircle, FileText, MapPin, RefreshCw, Shield, ShieldCheck, ShieldOff, AlertTriangle,
-  Calendar, Hash, Briefcase, Pencil, X, Database, Layers, Star,
+  Mail, Phone, Save, CheckCircle2, Calendar, RefreshCw, ShieldCheck, ShieldOff, AlertTriangle,
+  Pencil, X, Database, Layers, BarChart3, User, Package,
 } from 'lucide-react';
 import { SERVICE_TYPE_OPTIONS } from '@/data/serviceTypeOptions';
 import { DhiwaysDetailsEditor } from '@/components/shared/DhiwaysDetailsEditor';
@@ -39,24 +44,12 @@ const normalizeIndustryList = (value) => {
   return [];
 };
 
+
 const SERVICE_TYPE_LABELS = Object.fromEntries(SERVICE_TYPE_OPTIONS.map((o) => [o.value, o.label]));
 
 // Basic org profile fields saved via PATCH /auth/me — keys match both the
 // `user` object field name and the authAPI.updateOwnProfile() payload key.
 const ORG_DETAIL_FIELD_KEYS = ['gstin', 'businessRegNumber', 'addressLine1', 'addressLine2', 'addressLine3'];
-
-const DetailRow = ({ icon: Icon, label, value, hint }) => (
-  <div className="flex items-start gap-3">
-    <div className="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center shrink-0 mt-0.5">
-      <Icon size={14} className="text-gray-400" />
-    </div>
-    <div className="min-w-0 flex-1">
-      <p className="text-[11px] text-gray-400 font-inter uppercase tracking-wide mb-0.5">{label}</p>
-      <p className="text-sm font-medium text-brand-dark font-inter break-words">{value || '—'}</p>
-      {hint && <p className="text-[11px] text-gray-400 font-inter mt-0.5">{hint}</p>}
-    </div>
-  </div>
-);
 
 const FieldInput = ({ icon: Icon, label, value, onChange, placeholder, disabled }) => (
   <div>
@@ -74,29 +67,47 @@ const FieldInput = ({ icon: Icon, label, value, onChange, placeholder, disabled 
   </div>
 );
 
-// One Edit button puts every editable field in this card into edit mode at
-// once; it's replaced by Save/Cancel while editing, so a single Save commits
-// everything changed. Service Type + Space ID(s) go through their own
-// endpoints (PATCH /auth/me/service-type, PATCH /auth/me/dhiway-space);
-// GSTIN/business reg number/address go through PATCH /auth/me.
-const CardEditControl = ({ isEditing, saving, onEdit, onSave, onCancel }) =>
-  isEditing ? (
-    <div className="flex gap-2 shrink-0">
-      <Button variant="primary" size="sm" icon={Save} loading={saving} onClick={onSave}>Save</Button>
-      <Button variant="outline" size="sm" icon={X} disabled={saving} onClick={onCancel}>Cancel</Button>
-    </div>
-  ) : (
-    <button
-      type="button"
-      onClick={onEdit}
-      className="flex shrink-0 items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-semibold font-inter text-brand-blue hover:bg-blue-50 transition-colors"
-    >
-      <Pencil size={12} /> Edit
-    </button>
-  );
+const EditButton = ({ onClick }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    className="inline-flex h-9 shrink-0 items-center gap-2 rounded-lg border border-[#c7d8f5] bg-white px-4 text-[13px] font-semibold text-brand-blue transition-colors hover:bg-blue-50"
+  >
+    <Pencil size={14} /> Edit
+  </button>
+);
+
+const EditActions = ({ saving, onSave, onCancel }) => (
+  <div className="flex shrink-0 gap-2">
+    <Button variant="primary" size="sm" icon={Save} loading={saving} onClick={onSave}>Save</Button>
+    <Button variant="outline" size="sm" icon={X} disabled={saving} onClick={onCancel}>Cancel</Button>
+  </div>
+);
+
+const Cell = ({ label, hint, children, className = '' }) => (
+  <div className={`min-w-0 px-5 py-3.5 ${className}`}>
+    <p className="text-xs text-gray-500 font-inter">{label}</p>
+    <div className="mt-1 break-words text-[15px] font-semibold text-brand-dark font-inter">{children || <span className="font-medium text-gray-400">—</span>}</div>
+    {hint && <p className="mt-0.5 text-xs text-gray-500 font-inter">{hint}</p>}
+  </div>
+);
+
+const StatusPill = ({ ok, children, icon: Icon = CheckCircle2 }) => (
+  <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium font-inter ${ok ? 'bg-green-50 text-green-700' : 'bg-amber-50 text-amber-700'}`}>
+    <Icon size={13} />{children}
+  </span>
+);
+
+// Long ids are shown shortened, like "f77d19f8...0315ccae".
+const shortId = (value) => (value && value.length > 20 ? `${value.slice(0, 8)}...${value.slice(-8)}` : value || '—');
+const SPACE_ICONS = { human: User, product: Package, warranty: ShieldCheck, '': User };
 
 export const Profile = () => {
   const { user, loading, updateUserProfile, refreshUser, role } = useAuth();
+  const { setSelectedIndustry, setSelectedVerifications } = useApp();
+  // PATCH /auth/me checks the industry against the organization list. A value saved earlier that is
+  // no longer on it stays selectable, and resending it unchanged still saves.
+  const { names: organizationIndustryNames } = useIndustryTypes('organization');
   const [refreshing, setRefreshing] = useState(false);
   const [organizationIndustry, setOrganizationIndustry] = useState(() => normalizeIndustryList(user?.industryType));
 
@@ -120,7 +131,7 @@ export const Profile = () => {
   // reg number and address are all editable together in one Save.
   const [editingOrg, setEditingOrg] = useState(false);
   const [orgDraft, setOrgDraft] = useState({
-    serviceType: '', dhiwaysDetails: [],
+    serviceType: '', industryType: '', dhiwaysDetails: [],
     gstin: '', businessRegNumber: '', addressLine1: '', addressLine2: '', addressLine3: '',
   });
   const [savingOrg, setSavingOrg] = useState(false);
@@ -189,6 +200,7 @@ export const Profile = () => {
   const startEditOrg = () => {
     setOrgDraft({
       serviceType: user?.serviceType || '',
+      industryType: organizationIndustry[0] || '',
       dhiwaysDetails: (user?.dhiwaysDetails || []).map((row) => ({ ...row })),
       gstin: user?.gstin || '',
       businessRegNumber: user?.businessRegNumber || '',
@@ -267,6 +279,14 @@ export const Profile = () => {
         updates.serviceType = orgDraft.serviceType;
       }
 
+      // Industry decides which verification types a new batch offers. It is changed here only —
+      // the batch wizard no longer asks for it.
+      const industryChanged = !!orgDraft.industryType && orgDraft.industryType !== (organizationIndustry[0] || '');
+      if (industryChanged) {
+        profilePayload.industryType = orgDraft.industryType;
+        updates.industryType = orgDraft.industryType;
+      }
+
       ORG_DETAIL_FIELD_KEYS.forEach((key) => {
         const value = orgDraft[key].trim();
         if (value !== (user?.[key] || '')) {
@@ -296,6 +316,16 @@ export const Profile = () => {
         updateUserProfile(updates);
         await refreshUser();
       }
+      if (industryChanged) {
+        setOrganizationIndustry([orgDraft.industryType]);
+        // A batch started from here on uses the new industry; checks picked for the old one no longer apply.
+        const { items: humanList } = await loadIndustryTypes('human');
+        const match = matchProfileIndustry(orgDraft.industryType, humanList);
+        // A pick remembered from the batch picker would now override the profile's choice.
+        setBatchIndustry(user?.id, '');
+        setSelectedIndustry(match ? [match] : null);
+        setSelectedVerifications([]);
+      }
       setEditingOrg(false);
       toast.success('Organization details updated');
     } catch (err) {
@@ -303,6 +333,20 @@ export const Profile = () => {
     } finally {
       setSavingOrg(false);
     }
+  };
+
+  // The information card and the Dhiway card edit one shared draft; either Save commits everything.
+  const editing = editingPersonal || editingOrg;
+  const saving = savingPersonal || savingOrg;
+  const startEditInfo = () => {
+    startEditPersonal();
+    if (isOrg && !editingOrg) startEditOrg();
+  };
+  const startEditSpaces = () => { if (!editingOrg) startEditOrg(); };
+  const cancelAll = () => { setEditingPersonal(false); setEditingOrg(false); };
+  const saveAll = async () => {
+    if (editingPersonal) await savePersonal();
+    if (editingOrg) await saveOrg();
   };
 
   const handleVerifyGst = async () => {
@@ -371,436 +415,278 @@ export const Profile = () => {
 
   const addressValue = [user?.addressLine1, user?.addressLine2, user?.addressLine3].filter(Boolean).join(', ');
 
+  // Every hook above runs for all roles; only what is drawn differs.
+  if (isSuperAdmin) return <SuperAdminProfile />;
+
+  const spaces = user?.dhiwaysDetails || [];
+  const memberLabel = user?.createdAt
+    ? new Date(user.createdAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+    : null;
+  const roleText = roleLabel;
+  const infoHeaderIcon = isOrg ? BarChart3 : User;
+  const InfoIcon = infoHeaderIcon;
+  const input = 'h-9 w-full rounded-lg border border-[#d9e1ee] bg-white px-3 text-sm font-medium text-brand-dark font-inter focus:border-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/20 disabled:bg-gray-50';
+
   return (
-    <AuthLayout title="Profile">
-      <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }}>
+    <AuthLayout title="Profile" breadcrumb={['Workspace', 'Profile']}>
+      <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }} className="w-full mx-auto lg:max-w-none">
+        <PageIntro
+          title={isOrg ? 'Organization profile' : 'My profile'}
+          subtitle={isOrg ? 'Your organization, account and verification settings.' : 'Your account details and settings.'}
+          actions={(
+            <button
+              type="button"
+              onClick={handleRefresh}
+              disabled={refreshing || loading}
+              className="inline-flex h-9 items-center gap-2 rounded-lg border border-gray-200 bg-white px-4 text-[13px] font-medium text-gray-600 font-inter transition-colors hover:bg-gray-50 disabled:opacity-60"
+            >
+              <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} /> Refresh
+            </button>
+          )}
+        />
 
-        {/* Profile hero card */}
-        <Card className="mb-5 p-6">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-5">
-            {/* Left: avatar + info */}
-            <div className="flex items-center gap-5">
-              <div className="w-[72px] h-[72px] rounded-full bg-brand-blue ring-4 ring-brand-blue/15 flex items-center justify-center shrink-0 text-white text-2xl font-bold font-sora shadow-md">
-                {avatarInitial}
-              </div>
-
-              {/* Name + badges + email */}
-              <div>
-                <h2 className="text-[22px] font-bold text-brand-dark font-sora leading-tight">{displayName}</h2>
-                <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
-                  <span className={`text-[11px] font-semibold px-2.5 py-0.5 rounded-full font-inter ${roleColor}`}>{roleLabel}</span>
-                  {user?.emailVerified && (
-                    <span className="flex items-center gap-1 text-[11px] text-green-700 bg-green-50 rounded-full px-2.5 py-0.5 font-inter font-medium">
-                      <CheckCircle size={10} /> Verified
-                    </span>
-                  )}
-                  {user?.isActive && (
-                    <span className="flex items-center gap-1 text-[11px] text-brand-blue bg-blue-50 rounded-full px-2.5 py-0.5 font-inter font-medium">
-                      <Shield size={10} /> Active
-                    </span>
-                  )}
-                </div>
-                <div className="flex items-center gap-1.5 mt-2">
-                  <Mail size={12} className="text-gray-400" />
-                  <span className="text-sm text-gray-500 font-inter">{user?.email || '—'}</span>
-                </div>
-                {user?.id && (
-                  <div className="mt-3 pt-3 border-t border-gray-100 flex items-center gap-2">
-                    <span className="text-[10px] font-semibold text-gray-400 font-inter uppercase tracking-widest shrink-0">Account ID</span>
-                    <span className="text-xs text-gray-500 font-mono truncate">{user.id}</span>
-                  </div>
-                )}
-              </div>
+        {/* Hero */}
+        <div className="relative mb-4 overflow-hidden rounded-xl bg-gradient-to-r from-[#1D5CF2] to-[#2B6BFA] px-7 py-5 text-white shadow-[0_10px_24px_-14px_rgba(29,92,242,0.6)]">
+          <svg aria-hidden="true" className="pointer-events-none absolute inset-y-0 right-0 h-full w-[55%]" viewBox="0 0 600 140" preserveAspectRatio="none" fill="none">
+            {[0, 1, 2, 3, 4, 5, 6].map((i) => (
+              <path key={i} d={`M${200 + i * 10} -10 C ${300 + i * 6} ${30 + i * 8}, ${380 - i * 4} ${10 + i * 12}, ${470 + i * 8} ${50 + i * 10} S ${580} ${100 + i * 4}, 620 ${60 + i * 14}`} stroke="#fff" strokeOpacity="0.13" strokeWidth="1.2" />
+            ))}
+          </svg>
+          <div className="relative flex flex-col gap-4 md:flex-row md:items-center md:gap-7">
+            <span className="flex h-[72px] w-[72px] shrink-0 items-center justify-center rounded-full bg-white font-sora text-3xl font-bold text-brand-blue">{avatarInitial}</span>
+            <span aria-hidden="true" className="hidden h-[72px] w-px bg-white/25 md:block" />
+            <div className="min-w-0">
+              <h2 className="font-sora text-xl font-semibold leading-tight">{displayName}</h2>
+              <p className="mt-1 flex items-center gap-2 text-[13px] text-white/90 font-inter"><Mail size={14} />{user?.email || '—'}</p>
+              <p className="mt-1 text-xs text-white/75 font-inter">{roleText}</p>
             </div>
-
-            {/* Right: refresh */}
-            <div className="flex items-center gap-2 shrink-0">
-              <button
-                onClick={handleRefresh}
-                disabled={refreshing || loading}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-gray-200 text-sm text-gray-500 font-inter hover:bg-gray-50 transition-colors disabled:opacity-50"
-              >
-                <RefreshCw size={13} className={refreshing ? 'animate-spin' : ''} />
-                Refresh
-              </button>
+            <div className="min-w-0 md:ml-2">
+              <div className="flex flex-wrap items-center gap-2">
+                {user?.emailVerified && <span className="inline-flex h-8 items-center gap-2 rounded-lg border border-white/60 px-3 text-xs font-medium font-inter"><Mail size={13} />Email verified</span>}
+                {user?.isActive && <span className="inline-flex h-8 items-center gap-2 rounded-lg border border-white/60 px-3 text-xs font-medium font-inter"><CheckCircle2 size={13} />Active</span>}
+              </div>
+              {user?.id && <p className="mt-2.5 break-all font-mono text-xs text-white/85">Account ID: {user.id}</p>}
             </div>
           </div>
-        </Card>
+        </div>
 
-        <BrowserNotifications />
-
-        {/* Main content grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-5">
-
-          {/* Left — info */}
-          <div className="space-y-5">
-            <Card className="p-5">
-              <div className="flex items-center justify-between gap-3 mb-4">
-                <h3 className="font-sora font-bold text-brand-dark">Personal Information</h3>
-                {(isOrg || isSuperAdmin) && (
-                  <CardEditControl
-                    isEditing={editingPersonal}
-                    saving={savingPersonal}
-                    onEdit={startEditPersonal}
-                    onSave={savePersonal}
-                    onCancel={cancelPersonal}
-                  />
-                )}
+        <div className="mb-4 grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,0.42fr)]">
+          {/* Information */}
+          <section aria-label={isOrg ? 'Organization information' : 'Account information'} className="min-w-0 rounded-xl border border-gray-100 bg-white">
+            <div className="flex items-center justify-between gap-3 px-5 pb-2 pt-4">
+              <div className="flex items-center gap-3.5">
+                <span aria-hidden="true" className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#e8f0fe] text-brand-blue"><InfoIcon size={20} strokeWidth={1.6} /></span>
+                <h2 className="font-sora text-base font-semibold text-brand-dark">{isOrg ? 'Organization information' : 'Account information'}</h2>
               </div>
-              <div className="space-y-4">
-                {editingPersonal ? (
-                  <FieldInput
-                    icon={Building2}
-                    label="Organization Name"
-                    value={personalDraft.organizationName}
-                    onChange={(v) => updatePersonalDraft('organizationName', v)}
-                    disabled={savingPersonal}
-                  />
-                ) : (
-                  <DetailRow icon={Building2} label={isOrg ? 'Organization Name' : 'Full Name'} value={user?.name} />
-                )}
-                <div className="border-t border-gray-50" />
-                {editingPersonal && isSuperAdmin ? (
-                  <FieldInput
-                    icon={Mail}
-                    label="Email Address"
-                    value={personalDraft.email}
-                    onChange={(v) => updatePersonalDraft('email', v)}
-                    disabled={savingPersonal}
-                  />
-                ) : (
-                  <DetailRow
-                    icon={Mail}
-                    label="Email Address"
-                    value={user?.email}
-                    hint={isSuperAdmin ? undefined : 'Cannot be changed'}
-                  />
-                )}
-                <div className="border-t border-gray-50" />
-                {editingPersonal ? (
-                  <FieldInput
-                    icon={Phone}
-                    label="Phone Number"
-                    value={personalDraft.phoneNumber}
-                    onChange={(v) => updatePersonalDraft('phoneNumber', v)}
-                    disabled={savingPersonal}
-                  />
-                ) : (
-                  <DetailRow icon={Phone} label="Phone Number" value={user?.phoneNumber} />
-                )}
+              {isOrg && (editing ? <EditActions saving={saving} onSave={saveAll} onCancel={cancelAll} /> : <EditButton onClick={startEditInfo} />)}
+            </div>
+
+            <div className="divide-y divide-gray-100">
+              <div className="grid grid-cols-1 sm:grid-cols-3 sm:divide-x sm:divide-gray-100">
+                <Cell label={isOrg ? 'Organization name' : 'Full name'}>
+                  {editingPersonal
+                    ? <input aria-label="Organization name" className={input} value={personalDraft.organizationName} disabled={savingPersonal} onChange={(e) => updatePersonalDraft('organizationName', e.target.value)} />
+                    : user?.name}
+                </Cell>
+                <Cell label="Official email" hint="Cannot be changed">{user?.email}</Cell>
+                <Cell label="Phone">
+                  {editingPersonal
+                    ? <input aria-label="Phone number" className={input} value={personalDraft.phoneNumber} disabled={savingPersonal} onChange={(e) => updatePersonalDraft('phoneNumber', e.target.value)} />
+                    : user?.phoneNumber}
+                </Cell>
               </div>
-            </Card>
 
-            {/* Organization details */}
-            {isOrg && (
-              <Card className="p-6">
-                <div className="flex items-center justify-between gap-3 mb-5">
-                  <div className="flex items-center gap-2">
-                    <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center">
-                      <Building2 size={15} className="text-brand-blue" />
-                    </div>
-                    <div>
-                      <h3 className="font-sora font-bold text-brand-dark">Organization Details</h3>
-                      <p className="text-xs text-gray-400 font-inter mt-0.5">Registered business information</p>
-                    </div>
-                  </div>
-                  <CardEditControl
-                    isEditing={editingOrg}
-                    saving={savingOrg}
-                    onEdit={startEditOrg}
-                    onSave={saveOrg}
-                    onCancel={cancelOrg}
-                  />
-                </div>
-
-                <div className="space-y-4">
-                  {editingOrg ? (
-                    <div>
-                      <label className="block text-xs font-medium text-gray-500 font-inter mb-1">Service Type</label>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                        {SERVICE_TYPE_OPTIONS.map(({ value, label, icon: Icon }) => {
-                          const selected = orgDraft.serviceType === value;
-                          return (
+              {isOrg && (
+                <>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 sm:divide-x sm:divide-gray-100">
+                    <Cell label="Service type">
+                      {editingOrg ? (
+                        <div className="flex flex-wrap gap-1.5">
+                          {SERVICE_TYPE_OPTIONS.map(({ value, label }) => (
                             <button
                               key={value}
                               type="button"
                               disabled={savingOrg}
+                              aria-pressed={orgDraft.serviceType === value}
                               onClick={() => updateOrgDraft('serviceType', value)}
-                              className={`flex items-center gap-2 rounded-lg border-2 px-3 py-2 text-left transition-all duration-200 disabled:opacity-50 ${
-                                selected ? 'border-brand-blue bg-brand-blue/5' : 'border-gray-200 hover:border-gray-300'
-                              }`}
-                            >
-                              <Icon size={14} className={selected ? 'text-brand-blue' : 'text-gray-400'} />
-                              <span className="text-xs font-medium font-inter text-brand-dark">{label}</span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                      <p className="text-[11px] text-gray-400 font-inter mt-1.5">
-                        Determines which space id field(s) below apply to your organization.
-                      </p>
-                    </div>
-                  ) : (
-                    <DetailRow
-                      icon={Layers}
-                      label="Service Type"
-                      value={SERVICE_TYPE_LABELS[user?.serviceType] || 'Not set'}
-                    />
-                  )}
-                  <div className="border-t border-gray-50" />
-
-                  {editingOrg ? (
-                    <div>
-                      <label className="block text-xs font-medium text-gray-500 font-inter mb-1.5">Dhiway Spaces</label>
-                      <DhiwaysDetailsEditor
-                        value={orgDraft.dhiwaysDetails}
-                        onChange={(rows) => updateOrgDraft('dhiwaysDetails', rows)}
-                        disabled={savingOrg}
-                        onSetDefault={async (row) => {
-                          try {
-                            await authAPI.setDhiwayDefault({ spaceId: row.space_id, schemaId: row.schema_id, spaceType: row.space_type });
-                            toast.success('Default Dhiway space updated');
-                            refreshUser();
-                          } catch (err) {
-                            toast.error(getApiError(err, 'Failed to set default'));
-                            throw err;
-                          }
-                        }}
-                      />
-                    </div>
-                  ) : (
-                    <div className="flex items-start gap-3">
-                      <div className="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center shrink-0 mt-0.5">
-                        <Database size={14} className="text-gray-400" />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <p className="text-[11px] text-gray-400 font-inter uppercase tracking-wide mb-1">Dhiway Spaces</p>
-                        {(user?.dhiwaysDetails || []).length > 0 ? (
-                          <div className="space-y-0.5">
-                            {user.dhiwaysDetails.map((row, i) => (
-                              <p key={i} className="text-sm font-medium text-brand-dark font-inter break-words flex items-center gap-1.5 flex-wrap">
-                                {row.space_id || '—'}
-                                <span className="text-gray-400 font-normal"> / schema: {row.schema_id || '—'}</span>
-                                <span className="inline-flex items-center text-[10px] font-semibold text-brand-blue bg-blue-50 rounded-full px-1.5 py-0.5">
-                                  {getDhiwaySpaceTypeLabel(row.space_type)}
-                                </span>
-                                {row.default && (
-                                  <span className="inline-flex items-center gap-0.5 text-[10px] font-semibold text-amber-600 bg-amber-50 rounded-full px-1.5 py-0.5">
-                                    <Star size={9} className="fill-current" /> Default
-                                  </span>
-                                )}
-                              </p>
-                            ))}
-                          </div>
-                        ) : (
-                          <p className="text-sm font-medium text-brand-dark font-inter">—</p>
-                        )}
-                      </div>
-                    </div>
-                  )}
-                  <div className="border-t border-gray-50" />
-
-                  {editingOrg ? (
-                    <FieldInput
-                      icon={FileText}
-                      label="GSTIN"
-                      value={orgDraft.gstin}
-                      onChange={(v) => updateOrgDraft('gstin', v)}
-                      disabled={savingOrg}
-                    />
-                  ) : (
-                    <div className="flex items-start gap-3">
-                      <div className="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center shrink-0 mt-0.5">
-                        <FileText size={14} className="text-gray-400" />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center justify-between gap-3 flex-wrap">
-                          <div>
-                            <p className="text-[11px] text-gray-400 font-inter uppercase tracking-wide mb-0.5">GSTIN</p>
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <p className="text-sm font-medium text-brand-dark font-inter">{user?.gstin || '—'}</p>
-                              {user?.gstin && (
-                                user?.gstVerified ? (
-                                  <span className="flex items-center gap-1 text-[11px] text-green-700 bg-green-50 rounded-full px-2 py-0.5 font-inter font-medium">
-                                    <ShieldCheck size={11} /> Verified
-                                  </span>
-                                ) : (
-                                  <span className="flex items-center gap-1 text-[11px] text-orange-600 bg-orange-50 rounded-full px-2 py-0.5 font-inter font-medium">
-                                    <AlertTriangle size={11} /> Not Verified
-                                  </span>
-                                )
-                              )}
-                            </div>
-                          </div>
-                          {user?.gstin && !user?.gstVerified && (
-                            <Button variant="outline" size="sm" icon={ShieldCheck} loading={verifyingGst} onClick={handleVerifyGst}>
-                              Verify GSTIN
-                            </Button>
+                              className={`rounded-lg border px-2.5 py-1.5 text-xs font-medium font-inter transition-colors disabled:opacity-50 ${orgDraft.serviceType === value ? 'border-brand-blue bg-brand-blue/5 text-brand-blue' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}
+                            >{label}</button>
+                          ))}
+                        </div>
+                      ) : (SERVICE_TYPE_LABELS[user?.serviceType] || 'Not set')}
+                    </Cell>
+                    <Cell label="Industry" hint={editingOrg ? 'Decides which verification types a new batch offers.' : undefined}>
+                      {editingOrg ? (
+                        <CustomSelect
+                          value={orgDraft.industryType}
+                          onChange={(v) => updateOrgDraft('industryType', v)}
+                          ariaLabel="Industry type"
+                          placeholder="Select your industry"
+                          disabled={savingOrg}
+                          options={industrySelectOptions(organizationIndustryNames, organizationIndustry[0])}
+                        />
+                      ) : organizationIndustry.join(', ')}
+                    </Cell>
+                    <Cell label="GSTIN">
+                      {editingOrg ? (
+                        <input aria-label="GSTIN" className={input} value={orgDraft.gstin} disabled={savingOrg} onChange={(e) => updateOrgDraft('gstin', e.target.value)} />
+                      ) : user?.gstin ? (
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span>{user.gstin}</span>
+                          {user.gstVerified ? (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-green-50 px-2 py-0.5 text-[11px] font-medium text-green-700"><ShieldCheck size={12} />Verified</span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-orange-50 px-2 py-0.5 text-[11px] font-medium text-orange-600"><AlertTriangle size={12} />Not verified</span>
                           )}
-                          {user?.gstin && user?.gstVerified && (
-                            confirmingUnverifyGst ? (
-                              <div className="flex items-center gap-2">
-                                <span className="text-xs text-gray-500 font-inter">Revoke verification?</span>
-                                <Button variant="danger" size="sm" loading={unverifyingGst} onClick={handleUnverifyGst}>
-                                  Yes, revoke
-                                </Button>
-                                <Button variant="outline" size="sm" disabled={unverifyingGst} onClick={() => setConfirmingUnverifyGst(false)}>
-                                  Cancel
-                                </Button>
-                              </div>
-                            ) : (
-                              <Button variant="outline" size="sm" icon={ShieldOff} onClick={() => setConfirmingUnverifyGst(true)}>
-                                Unverify
-                              </Button>
-                            )
+                          {!user.gstVerified && (
+                            <button type="button" disabled={verifyingGst} onClick={handleVerifyGst} className="text-[13px] font-medium text-brand-blue hover:underline disabled:opacity-60">{verifyingGst ? 'Verifying…' : 'Verify GSTIN'}</button>
+                          )}
+                          {user.gstVerified && !confirmingUnverifyGst && (
+                            <button type="button" onClick={() => setConfirmingUnverifyGst(true)} className="text-[13px] font-medium text-brand-blue hover:underline">Unverify</button>
+                          )}
+                          {user.gstVerified && confirmingUnverifyGst && (
+                            <span className="flex flex-wrap items-center gap-2 text-xs font-normal text-gray-600">
+                              Revoke verification?
+                              <Button variant="danger" size="sm" loading={unverifyingGst} onClick={handleUnverifyGst}>Yes, revoke</Button>
+                              <Button variant="outline" size="sm" disabled={unverifyingGst} onClick={() => setConfirmingUnverifyGst(false)}>Cancel</Button>
+                            </span>
                           )}
                         </div>
-                        {gstMismatch && (
-                          <div className="flex items-start gap-2.5 mt-2.5 p-3 rounded-xl bg-red-50 border border-red-100">
-                            <AlertTriangle size={15} className="text-red-500 shrink-0 mt-0.5" />
-                            <div className="min-w-0">
-                              <p className="text-xs font-semibold text-red-700 font-inter">
-                                {gstMismatch.message || 'This GSTIN is invalid for your organization'}
-                              </p>
-                              <p className="text-xs text-red-600 font-inter mt-0.5 leading-relaxed">
-                                The GST registry has this number registered under{' '}
-                                <strong>
-                                  {[gstMismatch.legalName, gstMismatch.tradeName].filter(Boolean).join(' / ') || 'a different name'}
-                                </strong>
-                                {user?.name ? ` — it doesn't match your organization name ("${user.name}").` : ', which does not match your organization name.'}
-                                {' '}Double-check the GSTIN, or update your organization name, then verify again.
-                              </p>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )}
-                  <div className="border-t border-gray-50" />
-                  {editingOrg ? (
-                    <FieldInput
-                      icon={Hash}
-                      label="Business Registration No."
-                      value={orgDraft.businessRegNumber}
-                      onChange={(v) => updateOrgDraft('businessRegNumber', v)}
-                      disabled={savingOrg}
-                    />
-                  ) : (
-                    <DetailRow icon={Hash} label="Business Registration No." value={user?.businessRegNumber} />
-                  )}
-                  <div className="border-t border-gray-50" />
-                  {editingOrg ? (
-                    <div className="space-y-3">
-                      <FieldInput
-                        icon={MapPin}
-                        label="Address Line 1"
-                        value={orgDraft.addressLine1}
-                        onChange={(v) => updateOrgDraft('addressLine1', v)}
-                        disabled={savingOrg}
-                      />
-                      <FieldInput
-                        icon={MapPin}
-                        label="Address Line 2"
-                        value={orgDraft.addressLine2}
-                        onChange={(v) => updateOrgDraft('addressLine2', v)}
-                        disabled={savingOrg}
-                      />
-                      <FieldInput
-                        icon={MapPin}
-                        label="Address Line 3"
-                        value={orgDraft.addressLine3}
-                        onChange={(v) => updateOrgDraft('addressLine3', v)}
-                        disabled={savingOrg}
-                      />
-                    </div>
-                  ) : (
-                    <DetailRow icon={MapPin} label="Registered Address" value={addressValue} />
-                  )}
+                      ) : null}
+                    </Cell>
+                  </div>
 
-                  {organizationIndustry.length > 0 && (
-                    <>
-                      <div className="border-t border-gray-50" />
-                      <div className="flex items-start gap-3">
-                        <div className="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center shrink-0 mt-0.5">
-                          <Briefcase size={14} className="text-gray-400" />
+                  <div className="grid grid-cols-1 sm:grid-cols-[1fr_2fr] sm:divide-x sm:divide-gray-100">
+                    <Cell label="Business registration no.">
+                      {editingOrg
+                        ? <input aria-label="Business registration number" className={input} value={orgDraft.businessRegNumber} disabled={savingOrg} onChange={(e) => updateOrgDraft('businessRegNumber', e.target.value)} />
+                        : user?.businessRegNumber || <span className="font-medium text-gray-700">Not provided</span>}
+                    </Cell>
+                    <Cell label="Registered address">
+                      {editingOrg ? (
+                        <div className="space-y-2">
+                          {['addressLine1', 'addressLine2', 'addressLine3'].map((key, i) => (
+                            <input key={key} aria-label={`Address line ${i + 1}`} placeholder={`Address line ${i + 1}`} className={input} value={orgDraft[key]} disabled={savingOrg} onChange={(e) => updateOrgDraft(key, e.target.value)} />
+                          ))}
                         </div>
-                        <div>
-                          <p className="text-[11px] text-gray-400 font-inter uppercase tracking-wide mb-2">Industry Type</p>
-                          <div className="flex flex-wrap gap-1.5">
-                            {organizationIndustry.map((ind) => (
-                              <Badge key={ind} status="info">{ind}</Badge>
-                            ))}
-                          </div>
-                        </div>
-                      </div>
-                    </>
-                  )}
-                </div>
-              </Card>
-            )}
+                      ) : addressValue || <span className="font-medium text-gray-700">Not provided</span>}
+                    </Cell>
+                  </div>
+                </>
+              )}
+            </div>
 
-            {/* Separate, additive system from the legacy Dhiway Spaces
-                editor above — see OrgSchemaConfigsPanel. Each action here is
-                its own immediate API call, not tied to this card's own
-                Edit/Save/Cancel state. */}
-            {isOrg && (
-              <Card className="p-6">
-                <div className="flex items-center gap-2 mb-5">
-                  <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center">
-                    <Database size={15} className="text-brand-blue" />
-                  </div>
-                  <div>
-                    <h3 className="font-sora font-bold text-brand-dark">Schema Configurations</h3>
-                    <p className="text-xs text-gray-400 font-inter mt-0.5">Use your own Dhiway schema(s) and field names for batches instead of the default layout</p>
-                  </div>
+            {gstMismatch && (
+              <div className="mx-5 mb-4 flex items-start gap-2.5 rounded-xl border border-red-100 bg-red-50 p-3">
+                <AlertTriangle size={15} className="mt-0.5 shrink-0 text-red-500" />
+                <div className="min-w-0">
+                  <p className="text-xs font-semibold text-red-700 font-inter">{gstMismatch.message || 'This GSTIN is invalid for your organization'}</p>
+                  <p className="mt-0.5 text-xs leading-relaxed text-red-600 font-inter">
+                    The GST registry has this number registered under{' '}
+                    <strong>{[gstMismatch.legalName, gstMismatch.tradeName].filter(Boolean).join(' / ') || 'a different name'}</strong>
+                    {user?.name ? ` — it doesn't match your organization name ("${user.name}").` : ', which does not match your organization name.'}
+                    {' '}Double-check the GSTIN, or update your organization name, then verify again.
+                  </p>
                 </div>
-                <OrgSchemaConfigsPanel orgId={user?.id} onConfigsChange={syncSchemaSpaces} />
-              </Card>
-            )}
-          </div>
-
-          {/* Right sidebar — account info */}
-          <div className="h-full">
-            <Card className="p-5 h-full">
-              <h3 className="font-sora font-semibold text-brand-dark mb-3 text-sm">Account Overview</h3>
-              <div className="divide-y divide-gray-100">
-                <div className="flex items-center justify-between h-10">
-                  <span className="text-sm text-gray-500 font-inter">Status</span>
-                  <Badge status={user?.isActive ? 'success' : 'error'}>
-                    {user?.isActive ? 'Active' : 'Inactive'}
-                  </Badge>
-                </div>
-                <div className="flex items-center justify-between h-10">
-                  <span className="text-sm text-gray-500 font-inter">Email</span>
-                  <Badge status={user?.emailVerified ? 'success' : 'warning'}>
-                    {user?.emailVerified ? 'Verified' : 'Unverified'}
-                  </Badge>
-                </div>
-                {isOrg && (
-                  <div className="flex items-center justify-between h-10">
-                    <span className="text-sm text-gray-500 font-inter">Onboarding</span>
-                    <Badge status={user?.onboardingCompleted ? 'success' : 'pending'}>
-                      {user?.onboardingCompleted ? 'Complete' : 'Pending'}
-                    </Badge>
-                  </div>
-                )}
-                {memberSince && (
-                  <div className="flex items-center justify-between h-10">
-                    <span className="text-sm text-gray-500 font-inter">Member Since</span>
-                    <div className="flex items-center gap-1.5 text-sm text-brand-dark font-inter font-medium">
-                      <Calendar size={13} className="text-gray-400" />
-                      {memberSince}
-                    </div>
-                  </div>
-                )}
               </div>
-            </Card>
+            )}
+          </section>
+
+          {/* Account overview + notifications */}
+          <div className="min-w-0 space-y-4">
+            <section aria-label="Account overview" className="rounded-xl border border-gray-100 bg-white p-5">
+              <h2 className="flex items-center gap-3.5 font-sora text-base font-semibold text-brand-dark">
+                <span aria-hidden="true" className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#e8f0fe] text-brand-blue"><Layers size={20} strokeWidth={1.6} /></span>
+                Account overview
+              </h2>
+              <dl className="mt-3 divide-y divide-gray-100 text-[13px] font-inter">
+                <div className="flex items-center justify-between py-2"><dt className="text-gray-600">Account status</dt><dd><StatusPill ok={user?.isActive}>{user?.isActive ? 'Active' : 'Inactive'}</StatusPill></dd></div>
+                <div className="flex items-center justify-between py-2"><dt className="text-gray-600">Email</dt><dd><StatusPill ok={user?.emailVerified}>{user?.emailVerified ? 'Verified' : 'Unverified'}</StatusPill></dd></div>
+                {isOrg && <div className="flex items-center justify-between py-2"><dt className="text-gray-600">Onboarding</dt><dd><StatusPill ok={user?.onboardingCompleted}>{user?.onboardingCompleted ? 'Complete' : 'Pending'}</StatusPill></dd></div>}
+                {memberLabel && <div className="flex items-center justify-between py-2"><dt className="text-gray-600">Member since</dt><dd className="flex items-center gap-2 font-medium text-brand-dark"><Calendar size={15} className="text-gray-500" />{memberLabel}</dd></div>}
+              </dl>
+            </section>
+            <BrowserNotifications className="mb-0" />
           </div>
         </div>
 
-        <p className="mt-6 text-center text-xs text-gray-400 font-inter">
+        {isOrg && (
+          <>
+            {/* Dhiway spaces */}
+            <section aria-label="Dhiway spaces" className="mb-4 rounded-xl border border-gray-100 bg-white p-5">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3.5">
+                  <span aria-hidden="true" className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#e8f0fe] text-brand-blue"><Database size={20} strokeWidth={1.6} /></span>
+                  <h2 className="font-sora text-base font-semibold text-brand-dark">Dhiway spaces</h2>
+                  <span className="border-l border-gray-200 pl-3.5 text-[13px] text-gray-600 font-inter">{spaces.length} {spaces.length === 1 ? 'space' : 'spaces'}</span>
+                </div>
+                {editingOrg ? <EditActions saving={saving} onSave={saveAll} onCancel={cancelAll} /> : <EditButton onClick={startEditSpaces} />}
+              </div>
+
+              {editingOrg ? (
+                <div className="mt-4">
+                  <DhiwaysDetailsEditor
+                    value={orgDraft.dhiwaysDetails}
+                    onChange={(rows) => updateOrgDraft('dhiwaysDetails', rows)}
+                    disabled={savingOrg}
+                    onSetDefault={async (row) => {
+                      try {
+                        await authAPI.setDhiwayDefault({ spaceId: row.space_id, schemaId: row.schema_id, spaceType: row.space_type });
+                        toast.success('Default Dhiway space updated');
+                        refreshUser();
+                      } catch (err) {
+                        toast.error(getApiError(err, 'Failed to set default'));
+                        throw err;
+                      }
+                    }}
+                  />
+                </div>
+              ) : spaces.length === 0 ? (
+                <p className="mt-4 rounded-lg bg-gray-50 px-4 py-6 text-center text-sm text-gray-500 font-inter">No Dhiway spaces are set up yet.</p>
+              ) : (
+                <div className="mt-3 overflow-x-auto scrollbar-hidden">
+                  <table className="w-full min-w-[640px] border-collapse text-left text-xs font-inter">
+                    <thead>
+                      <tr>
+                        <th className="rounded-l-lg px-4 py-2.5">Verification type</th>
+                        <th className="px-4 py-2.5">Space ID</th>
+                        <th className="px-4 py-2.5">Schema ID</th>
+                        <th className="rounded-r-lg px-4 py-2.5">Default</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {spaces.map((row, i) => {
+                        const label = getDhiwaySpaceTypeLabel(row.space_type).replace('Legacy / ', '');
+                        const Icon = SPACE_ICONS[row.space_type || ''] || User;
+                        return (
+                          <tr key={`${row.space_id}-${i}`}>
+                            <td className="px-4 py-2">
+                              <div className="flex items-center gap-3 text-[13px] text-brand-dark">
+                                <span aria-hidden="true" className="flex h-7 w-7 items-center justify-center rounded-full bg-[#e8f0fe] text-brand-blue"><Icon size={14} strokeWidth={1.7} /></span>{label}
+                              </div>
+                            </td>
+                            <td className="px-4 py-2 font-mono text-[13px] text-[#2f3b52]" title={row.space_id}>{shortId(row.space_id)}</td>
+                            <td className="px-4 py-2 font-mono text-[13px] text-[#2f3b52]" title={row.schema_id}>{shortId(row.schema_id)}</td>
+                            <td className="px-4 py-2">{row.default ? <span className="rounded-full bg-[#e3ebf8] px-2.5 py-0.5 text-[11px] font-semibold text-brand-blue">Default</span> : <span className="text-gray-500">—</span>}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </section>
+
+            {/* Schema configurations: each action is its own immediate API call, independent of the Edit above. */}
+            <section aria-label="Schema configurations" className="mb-4 rounded-xl border border-gray-100 bg-white p-5">
+              <OrgSchemaConfigsPanel orgId={user?.id} onConfigsChange={syncSchemaSpaces} layout="columns" />
+            </section>
+          </>
+        )}
+
+        <p className="mt-6 text-center text-[13px] text-gray-500 font-inter">
           <Link to="/privacy-policy" className="hover:text-brand-blue hover:underline transition-colors">Privacy Policy</Link>
-          <span className="mx-2">·</span>
+          <span className="mx-3">/</span>
           <Link to="/terms-of-service" className="hover:text-brand-blue hover:underline transition-colors">Terms of Service</Link>
         </p>
       </motion.div>

@@ -2,13 +2,14 @@ import React, { useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '@/context/AppContext';
-import { HUMAN_VERIFICATION_STEPS, HUMAN_VERIFICATION_STEP_META, HUMAN_VERIFICATION_STEP_ROUTES } from '@/data/humanVerificationFlow';
 import { useAuth } from '@/context/AuthContext';
 import { AuthLayout } from '@/components/layout/AuthLayout';
 import { PageHeader } from '@/components/shared/PageHeader';
 import { Button } from '@/components/ui/Button';
-import { StepWizard } from '@/components/ui/StepWizard';
-import { humanIndustries, productIndustries } from '@/data/mockData';
+import { authAPI, getApiError } from '@/services/api';
+import { matchProfileIndustry } from '@/utils/industry';
+import { useIndustryTypes, loadIndustryTypes } from '@/hooks/useIndustryTypes';
+import { setBatchIndustry } from '@/utils/batchIndustry';
 import {
   ArrowRight,
   BriefcaseMedical,
@@ -22,6 +23,7 @@ import {
   Warehouse,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { batchOrigin } from '@/utils/batchOrigin';
 
 const humanIconMap = {
   healthcare:     BriefcaseMedical,
@@ -32,7 +34,7 @@ const humanIconMap = {
 };
 
 const productIconMap = {
-  electronics:      Cpu,
+  electronics_appliances: Cpu,
   beauty_cosmetics: Sparkles,
 };
 
@@ -45,18 +47,19 @@ const humanDescriptions = {
 };
 
 const productDescriptions = {
-  electronics:      'Device warranty and serial number certificates.',
+  electronics_appliances: 'Device warranty and serial number certificates.',
   beauty_cosmetics: 'Authenticity certificates with lab reports and batch proofs.',
 };
 
 export const SelectIndustry = () => {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, updateUserProfile, refreshUser } = useAuth();
+  const [saving, setSaving] = React.useState(false);
   const { batchEntityType, selectedIndustry, setSelectedIndustry } = useApp();
 
   const isProduct     = batchEntityType === 'product';
-  const industries    = isProduct ? productIndustries : humanIndustries;
-  const iconMap       = isProduct ? productIconMap    : humanIconMap;
+  const { items: industries } = useIndustryTypes(isProduct ? 'product' : 'human');
+  const iconMap      = isProduct ? productIconMap    : humanIconMap;
   const descMap       = isProduct ? productDescriptions : humanDescriptions;
 
   const selectedIndustries = useMemo(() => {
@@ -69,13 +72,8 @@ export const SelectIndustry = () => {
   // Pre-select from user profile on first visit
   useEffect(() => {
     if (selectedIndustries.length > 0) return;
-    const saved = Array.isArray(user?.industryType)
-      ? user.industryType
-      : (user?.industryType ? [user.industryType] : []);
-    const matched = saved
-      .map((item) => industries.find((ind) => ind.name.toLowerCase() === String(item).toLowerCase()))
-      .filter(Boolean);
-    if (matched.length > 0) setSelectedIndustry([matched[0]]);
+    const matched = matchProfileIndustry(user?.industryType, industries);
+    if (matched) setSelectedIndustry([matched]);
   }, [selectedIndustries.length, setSelectedIndustry, user?.industryType, industries]);
 
   const toggleIndustry = (industry) => {
@@ -83,12 +81,36 @@ export const SelectIndustry = () => {
     setSelectedIndustry(exists ? null : [industry]);
   };
 
-  const handleContinue = () => {
+  // This page is only reached when the profile has no industry the batch flow supports. The
+  // choice is remembered for this user so it is asked once. The profile industry is validated
+  // against the organization list, so it is only updated too when the choice is on that list.
+  const handleContinue = async () => {
     if (selectedIndustries.length === 0) {
-      toast.error('Please select at least one industry');
+      toast.error('Please select an industry');
       return;
     }
-    navigate('/org/verifications');
+    const name = selectedIndustries[0].name;
+    if (!isProduct) {
+      setBatchIndustry(user?.id, name);
+      if (name !== user?.industryType) {
+        setSaving(true);
+        try {
+          const { items: orgIndustries } = await loadIndustryTypes('organization');
+          const onOrgList = orgIndustries.find((item) => item.name.toLowerCase() === name.toLowerCase());
+          if (onOrgList) {
+            await authAPI.updateOwnProfile({ industryType: onOrgList.name });
+            updateUserProfile?.({ industryType: onOrgList.name });
+            await refreshUser?.();
+          }
+        } catch (err) {
+          // The batch goes ahead with the choice made here; the profile just keeps its old value.
+          toast.error(`${getApiError(err, 'Could not save your industry')}. You can set it in Profile.`);
+        } finally {
+          setSaving(false);
+        }
+      }
+    }
+    navigate('/org/verifications', { replace: true });
   };
 
   const selectedNames = selectedIndustries.map((ind) => ind.name).join(', ');
@@ -96,22 +118,17 @@ export const SelectIndustry = () => {
   return (
     <AuthLayout title="Select Industry">
       <div className="w-full mx-auto lg:max-w-none">
-        <StepWizard
-          steps={HUMAN_VERIFICATION_STEPS}
-          currentStep={HUMAN_VERIFICATION_STEP_META.industry.currentStep}
-          stepRoutes={HUMAN_VERIFICATION_STEP_ROUTES}
-        />
         <PageHeader
           title="Select Industry"
           subtitle={
             selectedIndustries.length > 0
               ? `Selected • ${selectedNames}`
-              : `Choose an industry for your ${isProduct ? 'product' : 'human'} verification batch`
+              : 'Pick your organization’s industry — you only need to do this once. You can change it any time in Profile.'
           }
           action={
             <button
               type="button"
-              onClick={() => navigate('/org/create-batch')}
+              onClick={() => navigate(batchOrigin())}
               className="flex items-center gap-2 px-4 py-2 rounded-xl border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors font-inter"
             >
               ← Back
@@ -174,7 +191,7 @@ export const SelectIndustry = () => {
             variant="outline"
             size="lg"
             className="w-full sm:w-auto"
-            onClick={() => navigate('/org/create-batch')}
+            onClick={() => navigate(batchOrigin())}
           >
             Back
           </Button>
@@ -184,6 +201,7 @@ export const SelectIndustry = () => {
             className="w-full sm:w-auto"
             onClick={handleContinue}
             icon={ArrowRight}
+            loading={saving}
           >
             Continue
           </Button>

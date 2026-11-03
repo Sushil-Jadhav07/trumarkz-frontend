@@ -1,3 +1,4 @@
+import { SlidingTabs } from '@/components/ui/SlidingTabs';
 import { LoadingSkeleton } from '@/components/shared/LoadingSkeleton';
 import { useState } from 'react';
 import { Bell, Check, RefreshCw } from 'lucide-react';
@@ -18,7 +19,9 @@ export const Notifications = () => {
     <PageHeader title="Notifications" subtitle="Updates for your organization."
       action={notificationsEnabled && <div className="flex flex-wrap items-center gap-2"><Button variant="ghost" size="sm" icon={RefreshCw} disabled={feed.loading} onClick={fetchNotifications}>Refresh</Button><Button variant="outline" size="sm" icon={Check} disabled={busy || !unreadCountKnown || unreadCount === 0} onClick={markAllRead}>{markingAllNotifications ? 'Updating…' : 'Mark all as read'}</Button></div>} />
     {!notificationsEnabled ? <p className="rounded-xl border border-gray-200 bg-white p-6 text-sm text-gray-500">Notifications are available for organization accounts.</p> : <section className="overflow-hidden rounded-xl border border-gray-200 bg-white">
-      <nav aria-label="Notification filters" className="flex gap-2 border-b border-gray-100 p-3">{[['all', 'All'], ['unread', 'Unread']].map(([key, label]) => <button key={key} type="button" aria-pressed={filter === key} onClick={() => setFilter(key)} className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40 ${filter === key ? 'bg-blue-50 text-brand-blue' : 'text-gray-500 hover:bg-gray-50'}`}>{label}</button>)}</nav>
+      <div className="border-b border-gray-100 p-3">
+        <SlidingTabs toggle ariaLabel="Notification filters" className="w-fit !border-0 !p-0" value={filter} onChange={setFilter} tabs={[{ value: 'all', label: 'All' }, { value: 'unread', label: 'Unread' }]} />
+      </div>
       {notificationActionError && <p role="alert" className="border-b border-red-100 bg-red-50 px-5 py-3 text-sm text-red-700">{notificationActionError}</p>}
       {feed.error && <div role="alert" className="space-y-2 border-b border-amber-100 bg-amber-50 px-5 py-4 text-sm leading-6 text-amber-800"><p>{feed.error}</p><button type="button" onClick={fetchNotifications} className="font-semibold underline">Try again</button></div>}
       {feed.loading && feed.items.length === 0 ? <LoadingSkeleton variant="list" label="Loading notifications" className="px-5" />

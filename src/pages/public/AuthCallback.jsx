@@ -43,6 +43,12 @@ export const AuthCallback = () => {
       const error  = searchParams.get('error');
       const message = searchParams.get('message');
 
+      if (error === 'access_denied') {
+        window.history.replaceState(null, '', '/auth/callback');
+        navigate('/login?error=cancelled', { replace: true });
+        return;
+      }
+
       if (error) {
         window.history.replaceState(null, '', '/auth/callback');
         navigate(`/auth/error?message=${encodeURIComponent(message || error)}`, { replace: true });

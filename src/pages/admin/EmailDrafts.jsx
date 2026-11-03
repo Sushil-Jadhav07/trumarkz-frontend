@@ -1,17 +1,18 @@
+import { SlidingTabs } from '@/components/ui/SlidingTabs';
 import { LoadingSkeleton } from '@/components/shared/LoadingSkeleton';
 import React, { useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { AuthLayout } from '@/components/layout/AuthLayout';
 import { Card } from '@/components/ui/Card';
-import { Button } from '@/components/ui/Button';
+import { PageIntro, SummaryBanner } from '@/components/shared/AdminPageParts';
 import { Input } from '@/components/ui/Input';
 import { CustomSelect } from '@/components/ui/CustomSelect';
 import { Modal } from '@/components/ui/Modal';
-import { EmailDraftRecipients } from '@/components/shared/EmailDraftRecipients';
+import { EmailDraftRecipients, PairArt } from '@/components/shared/EmailDraftRecipients';
 import { verificationAPI, getApiError } from '@/services/api';
 import {
   Plus, Pencil, Trash2, RefreshCw, FileText,
-  AlertTriangle, Save, History, Eye, Search,
+  AlertTriangle, Save, History, Eye, Search, Mail, Info,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -29,7 +30,7 @@ const TypeSelector = ({ value, onChange, types, loading }) => (
     options={types.map((type) => ({ value: type.name, label: type.name }))}
     placeholder={loading ? 'Loading verification types…' : 'Choose verification type'}
     disabled={loading} ariaLabel="Verification type" searchable searchPlaceholder="Search verification types"
-    className="[&>button]:min-h-11 [&>button]:rounded-xl [&>button]:px-3.5" />
+    className="[&>button]:min-h-11 [&>button]:rounded-lg [&>button]:px-3.5" />
 );
 
 // ── Draft form modal ───────────────────────────────────────────────────────────
@@ -461,60 +462,85 @@ export const EmailDrafts = () => {
 
   const refresh = () => fetchDrafts(selectedType);
 
+  const templatesPanel = (
+    <section aria-label="Saved email templates" className="min-w-0 overflow-hidden rounded-xl border border-gray-100 bg-white">
+      <div className="flex flex-wrap items-start gap-3 px-5 pt-4">
+        <FileText size={22} strokeWidth={1.5} className="mt-0.5 shrink-0 text-brand-blue" />
+        <div className="min-w-0 flex-1">
+          <h3 className="flex items-center gap-2 font-sora text-base font-semibold text-brand-dark">Saved templates{selectedType && !loading && <span className="rounded-full bg-[#e3ebf8] px-2.5 py-0.5 text-xs font-semibold tabular-nums text-brand-blue">{drafts.length}</span>}</h3>
+          <p className="mt-0.5 text-xs text-gray-500">Reusable across batches{selectedType ? ` for ${selectedType}` : ''}.</p>
+        </div>
+        <div className="flex items-center gap-2">
+          {!selectedType && <span className="hidden text-xs text-gray-500 xl:inline">Select a verification type to enable.</span>}
+          {selectedType && <button type="button" aria-label="Refresh templates" title="Refresh templates" onClick={refresh} disabled={loading}
+            className="flex h-9 w-9 items-center justify-center rounded-lg border border-gray-200 text-gray-500 transition-colors hover:bg-gray-50 disabled:opacity-50"><RefreshCw size={15} className={loading ? 'animate-spin' : ''} /></button>}
+          <button type="button" onClick={() => setCreateOpen(true)} disabled={!selectedType}
+            className="inline-flex h-9 items-center gap-2 rounded-lg bg-brand-blue px-4 text-sm font-semibold text-white transition-colors hover:bg-brand-blue-hover disabled:bg-[#a9c1f5] disabled:cursor-not-allowed"><Plus size={15} />New draft</button>
+        </div>
+      </div>
+      <div className="mx-4 mb-2 mt-3 rounded-md bg-[#eef3fb] px-3 py-2 text-[13px] font-semibold text-brand-dark">Template library</div>
+      {!selectedType ? (
+        <div className="px-5 pb-8 pt-4 text-center">
+          <PairArt icons={[FileText, Mail]} />
+          <p className="mt-3 text-[15px] font-medium text-brand-dark">Choose a verification type</p>
+          <p className="mt-1 text-[13px] text-gray-500">View or create its reusable email drafts.</p>
+          <p className="mt-3 inline-flex items-center gap-1.5 text-xs text-gray-500"><Info size={14} /> No batch selection needed.</p>
+        </div>
+      ) : loading ? (
+        <div role="status" className="grid gap-3 px-5 pb-5" aria-label="Loading templates">{[1,2].map((key) => <div key={key} className="space-y-3 rounded-xl border border-gray-100 p-4 motion-safe:animate-pulse"><div className="h-4 w-2/3 rounded bg-gray-100" /><div className="h-3 rounded bg-gray-50" /><div className="h-3 w-4/5 rounded bg-gray-50" /></div>)}</div>
+      ) : drafts.length === 0 ? (
+        <div className="px-5 pb-8 pt-4 text-center">
+          <PairArt icons={[FileText, Mail]} />
+          <p className="mt-3 text-[15px] font-medium text-brand-dark">No templates for this type yet</p>
+          <p className="mt-1 text-[13px] text-gray-500">Save a draft to reuse for future verification requests.</p>
+          <button type="button" onClick={() => setCreateOpen(true)} className="mt-3 text-sm font-semibold text-brand-blue hover:underline">Create your first draft</button>
+        </div>
+      ) : (
+        <div className="grid gap-3 px-5 pb-5">{drafts.map((draft, index) => <DraftCard key={draft.id} draft={draft} index={index} onEdit={(item) => setEditModal({ open: true, draft: item })} onDelete={(item) => setDeleteModal({ open: true, draft: item })} />)}</div>
+      )}
+    </section>
+  );
+
   return (
     <AuthLayout title="Email Drafts">
-      <div className="mx-auto max-w-[1440px] space-y-5 font-inter">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <p className="mb-1 text-xs font-medium text-gray-500">Verification communications</p>
-            <h2 className="font-sora text-2xl font-semibold tracking-tight text-brand-dark">Email workspace</h2>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-gray-500">Manage reusable templates, review batch recipients, and track sent emails.</p>
-          </div>
-          <nav aria-label="Email workspace" className="flex shrink-0 items-center gap-1 rounded-xl border border-gray-200 bg-white p-1">
-            {[
-              { key: 'templates', label: 'Templates', icon: FileText },
-              { key: 'history', label: 'Send History', icon: History },
-            ].map((tab) => (
-              <button key={tab.key} type="button" aria-current={activeTab === tab.key ? 'page' : undefined}
-                onClick={() => setActiveTab(tab.key)}
-                className={`flex items-center gap-2 rounded-lg px-3.5 py-2.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue/40 ${activeTab === tab.key ? 'bg-blue-50 text-brand-blue' : 'text-gray-500 hover:bg-gray-50 hover:text-brand-dark'}`}>
-                <tab.icon size={16} />{tab.label}
-              </button>
-            ))}
-          </nav>
-        </div>
+      <div className="w-full mx-auto lg:max-w-none">
+        <PageIntro
+          eyebrow="Verification communications"
+          title="Email workspace"
+          subtitle="Manage templates, review recipients and track sent emails."
+          actions={(
+            <SlidingTabs
+              ariaLabel="Email workspace"
+              value={activeTab}
+              onChange={setActiveTab}
+              tabs={[
+                { value: 'templates', label: 'Templates', icon: FileText },
+                { value: 'history', label: 'Send history', icon: History },
+              ]}
+            />
+          )}
+        />
+
+        <SummaryBanner
+          icon={Mail}
+          label="Manual verification types"
+          value={typesLoading ? '—' : verificationTypes.length}
+          segments={[
+            'Reusable templates for every verification type.',
+            selectedType ? `${loading ? '…' : drafts.length} saved for ${selectedType}` : 'Choose a type to see its templates',
+          ]}
+        />
 
         {activeTab === 'history' ? <EmailHistoryPanel /> : (
           <>
-            <EmailDraftRecipients verificationType={selectedType} verificationSelector={
-              <TypeSelector value={selectedType} onChange={setSelectedType} types={verificationTypes} loading={typesLoading} />
-            } />
-
-            <section aria-label="Saved email templates" className="overflow-hidden rounded-2xl border border-gray-200 bg-white">
-              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 px-5 py-4 sm:px-6">
-                <div>
-                  <div className="flex items-center gap-2"><h3 className="text-base font-semibold text-brand-dark">Saved templates</h3>{selectedType && !loading && <span className="rounded-md bg-gray-100 px-2 py-0.5 text-xs font-medium tabular-nums text-gray-600">{drafts.length}</span>}</div>
-                  <p className="mt-1 text-xs leading-5 text-gray-500">Reusable across batches for {selectedType || 'each verification type'}.</p>
-                </div>
-                <div className="flex items-center gap-2">
-                  {selectedType && <button type="button" aria-label="Refresh templates" title="Refresh templates" onClick={refresh} disabled={loading}
-                    className="rounded-lg border border-gray-200 p-2.5 text-gray-500 transition-colors hover:bg-gray-50 disabled:opacity-50"><RefreshCw size={16} className={loading ? 'animate-spin' : ''} /></button>}
-                  <Button variant="primary" size="sm" icon={Plus} onClick={() => setCreateOpen(true)} disabled={!selectedType}>New Draft</Button>
-                </div>
-              </div>
-              {!selectedType ? (
-                <div className="flex items-start gap-3 px-5 py-6 sm:px-6">
-                  <FileText size={20} className="mt-0.5 shrink-0 text-gray-400" />
-                  <div><p className="text-sm font-medium text-gray-700">Your template library</p><p className="mt-1 text-sm leading-6 text-gray-500">Choose a verification type above to view or create its email drafts. No batch selection is needed.</p></div>
-                </div>
-              ) : loading ? (
-                <div role="status" className="grid gap-4 p-5 sm:grid-cols-2 sm:p-6" aria-label="Loading templates">{[1,2].map((key) => <div key={key} className="space-y-3 rounded-xl border border-gray-100 p-4 motion-safe:animate-pulse"><div className="h-4 w-2/3 rounded bg-gray-100" /><div className="h-3 rounded bg-gray-50" /><div className="h-3 w-4/5 rounded bg-gray-50" /></div>)}</div>
-              ) : drafts.length === 0 ? (
-                <div className="flex flex-wrap items-center justify-between gap-4 px-5 py-7 sm:px-6"><div><p className="text-sm font-medium text-gray-700">No templates for this type yet</p><p className="mt-1 text-sm text-gray-500">Save a draft to reuse for future verification requests.</p></div><button type="button" onClick={() => setCreateOpen(true)} className="text-sm font-semibold text-brand-blue hover:underline">Create your first draft</button></div>
-              ) : (
-                <div className="grid gap-4 p-5 sm:p-6 xl:grid-cols-2">{drafts.map((draft, index) => <DraftCard key={draft.id} draft={draft} index={index} onEdit={(item) => setEditModal({ open: true, draft: item })} onDelete={(item) => setDeleteModal({ open: true, draft: item })} />)}</div>
-              )}
-            </section>
+            <EmailDraftRecipients
+              verificationType={selectedType}
+              verificationSelector={<TypeSelector value={selectedType} onChange={setSelectedType} types={verificationTypes} loading={typesLoading} />}
+              aside={templatesPanel}
+            />
+            <p className="mt-4 flex items-center gap-2 text-[13px] text-gray-500">
+              <Info size={16} strokeWidth={1.5} /> Templates are saved by verification type and can be reused across batches.
+            </p>
           </>
         )}
       </div>

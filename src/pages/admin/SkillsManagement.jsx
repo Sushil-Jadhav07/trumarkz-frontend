@@ -1,9 +1,9 @@
 import { LoadingSkeleton } from '@/components/shared/LoadingSkeleton';
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AuthLayout } from '@/components/layout/AuthLayout';
-import { PageHeader } from '@/components/shared/PageHeader';
-import { Card } from '@/components/ui/Card';
+import { CustomSelect } from '@/components/ui/CustomSelect';
+import { PageIntro, OutlineButton, SummaryBanner, SearchField } from '@/components/shared/AdminPageParts';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
@@ -16,7 +16,6 @@ import {
   Clock,
   Send,
   RefreshCw,
-  Filter,
   GraduationCap,
   Code2,
   Heart,
@@ -24,8 +23,10 @@ import {
   FileText,
   User,
   Loader2,
-  ChevronDown,
-  Check,
+  ArrowRight,
+  ChevronsUpDown,
+  Info,
+  Star,
   Eye,
   LayoutList,
 } from 'lucide-react';
@@ -44,70 +45,6 @@ const typeOptions = [
   { value: 'soft', label: 'Soft Skill' },
   { value: 'project', label: 'Project' },
 ];
-
-const FilterDropdown = ({ value, onChange, options, width = 'w-36' }) => {
-  const [open, setOpen] = useState(false);
-  const ref = useRef(null);
-
-  useEffect(() => {
-    const handler = (e) => {
-      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, []);
-
-  const selected = options.find((o) => o.value === value) || options[0];
-
-  return (
-    <div ref={ref} className={`relative ${width}`}>
-      <button
-        type="button"
-        onClick={() => setOpen((p) => !p)}
-        className={`flex w-full items-center justify-between gap-2 rounded-xl border-2 px-3 py-2 text-sm font-inter transition-all duration-200 ${
-          open ? 'border-brand-blue ring-3 ring-brand-blue/10' : 'border-gray-200 hover:border-gray-300'
-        }`}
-      >
-        <span className="truncate text-brand-dark">{selected.label}</span>
-        <ChevronDown
-          size={14}
-          className={`shrink-0 text-gray-400 transition-transform duration-200 ${open ? 'rotate-180' : ''}`}
-        />
-      </button>
-
-      <AnimatePresence>
-        {open && (
-          <motion.div
-            initial={{ opacity: 0, y: -4 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -4 }}
-            transition={{ duration: 0.15 }}
-            className="absolute left-0 right-0 z-30 mt-1 overflow-hidden rounded-xl border border-gray-200 bg-white shadow-lg"
-          >
-            {options.map((opt) => (
-              <button
-                key={opt.value}
-                type="button"
-                onClick={() => {
-                  onChange(opt.value);
-                  setOpen(false);
-                }}
-                className={`flex w-full items-center justify-between px-3 py-2 text-sm font-inter transition-colors ${
-                  value === opt.value
-                    ? 'bg-brand-blue/5 font-medium text-brand-blue'
-                    : 'text-brand-dark hover:bg-gray-50'
-                }`}
-              >
-                <span>{opt.label}</span>
-                {value === opt.value && <Check size={13} className="text-brand-blue" />}
-              </button>
-            ))}
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
-  );
-};
 
 const typeIcons = {
   education: GraduationCap,
@@ -142,6 +79,8 @@ export const SkillsManagement = () => {
   const [loading, setLoading] = useState(true);
   const [filterStatus, setFilterStatus] = useState('');
   const [filterType, setFilterType] = useState('');
+  const [sort, setSort] = useState({ key: '', dir: 'asc' });
+  const [query, setQuery] = useState('');
   const [actionModal,  setActionModal]  = useState(null);
   const [verifyModal,  setVerifyModal]  = useState(null);
   const [reason,       setReason]       = useState('');
@@ -313,6 +252,23 @@ export const SkillsManagement = () => {
     return Object.values(map);
   }, [skills]);
 
+  const rows = useMemo(() => {
+    const counts = (g) => ({
+      total: g.skills.length,
+      pending: g.skills.filter((x) => x.status === 'pending').length,
+      verified: g.skills.filter((x) => x.status === 'verified').length,
+      rejected: g.skills.filter((x) => x.status === 'rejected').length,
+    });
+    const q = query.trim().toLowerCase();
+    const list = groupedByIndividual
+      .map((g) => ({ ...g, ...counts(g), displayName: g.individual_name || 'Individual account' }))
+      .filter((g) => !q || g.displayName.toLowerCase().includes(q) || String(g.individual_id).toLowerCase().includes(q));
+    if (!sort.key) return list;
+    const sign = sort.dir === 'asc' ? 1 : -1;
+    return [...list].sort((a, b) => sign * (sort.key === 'name' ? a.displayName.localeCompare(b.displayName) : a[sort.key] - b[sort.key]));
+  }, [groupedByIndividual, sort, query]);
+  const toggleSort = (key) => setSort((prev) => (prev.key === key ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' }));
+
   // Always derived from live skills — updates automatically after approve/reject
   const reviewGroup = useMemo(
     () => (reviewIndividualId ? (groupedByIndividual.find((g) => g.individual_id === reviewIndividualId) ?? null) : null),
@@ -320,131 +276,132 @@ export const SkillsManagement = () => {
   );
 
 
+  const sortHead = (label, k, align = 'left') => (
+    <button
+      type="button"
+      onClick={() => toggleSort(k)}
+      aria-label={`Sort by ${label}`}
+      className={`inline-flex items-center gap-1.5 font-semibold text-brand-dark transition-colors hover:text-brand-blue ${align === 'center' ? 'justify-center' : ''}`}
+    >
+      {label}
+      <ChevronsUpDown size={13} className={sort.key === k ? 'text-brand-blue' : 'text-gray-500'} aria-hidden="true" />
+    </button>
+  );
+  const ariaSort = (k) => (sort.key === k ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none');
+  const chip = 'inline-flex min-w-[40px] items-center justify-center rounded-lg px-3 py-1 text-[13px] font-semibold font-inter';
+
   return (
     <AuthLayout title="Skills Management">
-      <PageHeader
-        title="Skills Management"
-        subtitle="Review, verify, and manage skills submitted by individuals"
-      />
+      <div className="w-full mx-auto lg:max-w-none">
+        <PageIntro
+          eyebrow="Verification operations"
+          title="Skills management"
+          subtitle="Review, verify and manage skills submitted by individuals."
+          actions={<OutlineButton icon={RefreshCw} onClick={fetchSkills} disabled={loading}>Refresh</OutlineButton>}
+        />
 
-      <div className="mb-5 grid grid-cols-1 gap-4 sm:grid-cols-3">
-        {[
-          { label: 'Pending Review', value: pendingCount, icon: Clock, surface: 'bg-orange-50', text: 'text-orange-600' },
-          { label: 'Verified', value: verifiedCount, icon: CheckCircle, surface: 'bg-green-50', text: 'text-green-600' },
-          { label: 'Rejected', value: rejectedCount, icon: XCircle, surface: 'bg-red-50', text: 'text-red-500' },
-        ].map((stat) => {
-          const Icon = stat.icon;
-          return (
-            <Card key={stat.label} className="p-4">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-xs text-gray-500 font-inter">{stat.label}</p>
-                  <p className="mt-1 font-sora text-2xl font-bold text-brand-dark">{stat.value}</p>
-                </div>
-                <div className={`flex h-11 w-11 items-center justify-center rounded-xl ${stat.surface}`}>
-                  <Icon size={20} className={stat.text} />
-                </div>
-              </div>
-            </Card>
-          );
-        })}
-      </div>
+        <SummaryBanner
+          icon={Star}
+          label="Total skills"
+          value={loading ? '—' : skills.length}
+          segments={[
+            'Individual skill submissions',
+            <span key="p" className="flex items-center gap-2"><span aria-hidden="true" className="h-2.5 w-2.5 rounded-full bg-amber-300" /><b className="text-xl font-bold">{loading ? '—' : pendingCount}</b> Pending review</span>,
+            <span key="v" className="flex items-center gap-2"><span aria-hidden="true" className="h-2.5 w-2.5 rounded-full bg-emerald-300" /><b className="text-xl font-bold">{loading ? '—' : verifiedCount}</b> Verified</span>,
+            <span key="r" className="flex items-center gap-2"><span aria-hidden="true" className="h-2.5 w-2.5 rounded-full bg-pink-300" /><b className="text-xl font-bold">{loading ? '—' : rejectedCount}</b> Rejected</span>,
+          ]}
+        />
 
-      <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }}>
-        <Card className="overflow-hidden border border-gray-100 p-0">
-          <div className="flex flex-col justify-between gap-3 border-b border-gray-100 bg-white px-5 py-4 sm:flex-row sm:items-center">
-            <div className="flex items-center gap-2">
-              <Filter size={16} className="text-gray-400" />
-              <h3 className="font-sora text-brand-dark font-semibold">All Skills</h3>
-              <Badge status="info">{skills.length} Total</Badge>
+        <motion.section
+          aria-label="Individual submissions"
+          initial={{ opacity: 0, y: 14 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.25 }}
+          className="overflow-hidden rounded-xl border border-gray-100 bg-white"
+        >
+          <div className="flex flex-col gap-3 px-5 pb-3 pt-4 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <h2 className="flex items-center gap-2.5 font-sora text-base font-semibold text-brand-dark">
+                Individual submissions
+                {!loading && (
+                  <span className="rounded-full bg-[#e3ebf8] px-2.5 py-0.5 text-xs font-semibold text-brand-blue font-inter">
+                    {groupedByIndividual.length} {groupedByIndividual.length === 1 ? 'individual' : 'individuals'}
+                  </span>
+                )}
+              </h2>
+              <p className="mt-1 text-xs text-gray-500 font-inter">Open an individual to review their submitted skills.</p>
             </div>
-
-            <div className="flex flex-wrap items-center gap-2">
-              <FilterDropdown value={filterStatus} onChange={setFilterStatus} options={statusOptions} width="w-36" />
-              <FilterDropdown value={filterType} onChange={setFilterType} options={typeOptions} width="w-36" />
-              <button
-                type="button"
-                onClick={fetchSkills}
-                className="rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-brand-blue"
-              >
-                <RefreshCw size={16} />
-              </button>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <SearchField search={query} onSearch={setQuery} placeholder="Search individuals" className="w-full sm:w-56" />
+              <CustomSelect value={filterStatus} onChange={setFilterStatus} options={statusOptions} ariaLabel="Filter by status" className="sm:w-40 [&>button]:h-10 [&>button]:text-[13px] [&>button]:font-medium [&>button]:rounded-lg" />
+              <CustomSelect value={filterType} onChange={setFilterType} options={typeOptions} ariaLabel="Filter by type" className="sm:w-40 [&>button]:h-10 [&>button]:text-[13px] [&>button]:font-medium [&>button]:rounded-lg" />
             </div>
           </div>
 
           {loading ? (
-            <LoadingSkeleton variant="table" />
-          ) : skills.length === 0 ? (
-            <div className="p-10 text-center">
-              <CheckCircle size={40} className="mx-auto mb-3 text-green-500" />
-              <p className="font-sora font-semibold text-brand-dark">No skills found</p>
-              <p className="text-sm text-gray-400 font-inter">Try adjusting your filters.</p>
+            <div className="px-5 pb-5"><LoadingSkeleton variant="table" label="Loading skills" columns={6} /></div>
+          ) : rows.length === 0 ? (
+            <div className="border-t border-gray-100 py-14 text-center">
+              <CheckCircle size={30} className="mx-auto mb-2 text-green-500" />
+              <p className="text-sm font-medium text-gray-600 font-inter">No skills found</p>
+              <p className="mt-1 text-xs text-gray-500 font-inter">Try adjusting your filters or search.</p>
             </div>
           ) : (
-            <div className="grid gap-4 p-4 sm:p-5 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
-              {groupedByIndividual.map((group, gi) => {
-                const pendingG  = group.skills.filter((s) => s.status === 'pending').length;
-                const verifiedG = group.skills.filter((s) => s.status === 'verified').length;
-                const rejectedG = group.skills.filter((s) => s.status === 'rejected').length;
-
-                return (
-                  <motion.div
-                    key={group.individual_id}
-                    initial={{ opacity: 0, y: 8 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: gi * 0.04 }}
-                    className="flex flex-col rounded-xl border border-gray-100 bg-white p-4"
-                  >
-                    {/* Individual identity */}
-                    <div className="flex items-center gap-3">
-                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-brand-blue/10 text-brand-blue">
-                        <User size={18} />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        {group.individual_name && (
-                          <p className="truncate text-sm font-semibold text-brand-dark font-inter">{group.individual_name}</p>
-                        )}
-                        <p className="truncate text-xs text-gray-400 font-mono">{group.individual_id}</p>
-                      </div>
-                    </div>
-
-                    {/* Skill count stats */}
-                    <div className="mt-4 grid grid-cols-3 gap-2">
-                      <div className="flex flex-col items-center rounded-xl bg-orange-50 py-3">
-                        <p className="font-sora text-xl font-bold text-orange-500">{pendingG}</p>
-                        <p className="mt-0.5 text-[11px] font-medium text-orange-400 font-inter">Pending</p>
-                      </div>
-                      <div className="flex flex-col items-center rounded-xl bg-green-50 py-3">
-                        <p className="font-sora text-xl font-bold text-green-600">{verifiedG}</p>
-                        <p className="mt-0.5 text-[11px] font-medium text-green-500 font-inter">Verified</p>
-                      </div>
-                      <div className="flex flex-col items-center rounded-xl bg-red-50 py-3">
-                        <p className="font-sora text-xl font-bold text-red-500">{rejectedG}</p>
-                        <p className="mt-0.5 text-[11px] font-medium text-red-400 font-inter">Rejected</p>
-                      </div>
-                    </div>
-
-                    <p className="mt-3 text-center text-[11px] text-gray-400 font-inter">
-                      {group.skills.length} skill{group.skills.length !== 1 ? 's' : ''} total
-                    </p>
-
-                    {/* CTA */}
-                    <div className="mt-auto pt-4">
-                      <button
-                        type="button"
-                        onClick={() => setReviewIndividualId(group.individual_id)}
-                        className="w-full rounded-xl bg-brand-blue py-2.5 text-sm font-semibold text-white font-inter transition-opacity hover:opacity-90"
-                      >
-                        View Skills
-                      </button>
-                    </div>
-                  </motion.div>
-                );
-              })}
-            </div>
+            <>
+              <div className="overflow-x-auto scrollbar-hidden">
+                <table className="w-full min-w-[820px] border-collapse text-left text-xs font-inter">
+                  <thead>
+                    <tr>
+                      <th className="px-5 py-3" aria-sort={ariaSort('name')}>{sortHead('Individual', 'name')}</th>
+                      <th className="px-3 py-3 text-center" aria-sort={ariaSort('total')}>{sortHead('Total skills', 'total', 'center')}</th>
+                      <th className="px-3 py-3 text-center" aria-sort={ariaSort('pending')}>{sortHead('Pending', 'pending', 'center')}</th>
+                      <th className="px-3 py-3 text-center" aria-sort={ariaSort('verified')}>{sortHead('Verified', 'verified', 'center')}</th>
+                      <th className="px-3 py-3 text-center" aria-sort={ariaSort('rejected')}>{sortHead('Rejected', 'rejected', 'center')}</th>
+                      <th className="px-5 py-3 text-right">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {rows.map((group) => (
+                      <tr key={group.individual_id} className="transition-colors hover:bg-blue-50/30">
+                        <td className="px-5 py-3">
+                          <div className="flex items-center gap-3.5">
+                            <span aria-hidden="true" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[#e8f0fe] text-brand-blue"><User size={19} strokeWidth={1.6} /></span>
+                            <div className="min-w-0">
+                              <p className="truncate text-sm font-semibold text-brand-dark">{group.displayName}</p>
+                              <p className="mt-0.5 truncate font-mono text-[11px] text-gray-500">{group.individual_id}</p>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-3 py-3 text-center"><span className={`${chip} bg-[#e3ebf8] text-brand-blue`}>{group.total}</span></td>
+                        <td className="px-3 py-3 text-center"><span className={`${chip} bg-orange-100 text-orange-700`}>{group.pending}</span></td>
+                        <td className="px-3 py-3 text-center"><span className={`${chip} bg-green-100 text-green-700`}>{group.verified}</span></td>
+                        <td className="px-3 py-3 text-center"><span className={`${chip} bg-gray-100 text-gray-700`}>{group.rejected}</span></td>
+                        <td className="px-5 py-3 text-right">
+                          <button
+                            type="button"
+                            onClick={() => setReviewIndividualId(group.individual_id)}
+                            className="inline-flex h-9 items-center gap-2 rounded-lg border-2 border-brand-blue/80 bg-white px-4 text-[13px] font-semibold text-brand-blue transition-colors hover:bg-blue-50"
+                          >
+                            View skills <ArrowRight size={15} />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="flex flex-col justify-between gap-1 border-t border-gray-100 px-5 py-3 text-xs text-gray-600 font-inter sm:flex-row sm:items-center">
+                <p>Showing {rows.length} of {groupedByIndividual.length} {groupedByIndividual.length === 1 ? 'individual' : 'individuals'}</p>
+                <p>{skills.length} {skills.length === 1 ? 'skill' : 'skills'} submitted</p>
+              </div>
+            </>
           )}
-        </Card>
-      </motion.div>
+        </motion.section>
+
+        <p className="mt-4 flex items-center gap-2 text-[13px] text-gray-500 font-inter">
+          <Info size={16} strokeWidth={1.5} /> Select View skills to review evidence and update verification status.
+        </p>
+      </div>
 
       <Modal
         isOpen={!!actionModal}

@@ -445,6 +445,21 @@ export const adminAPI = {
   getAuditLogs: authAPI.getAuditLogs,
 };
 
+// Industry lists, one per entity type (human | product | organization). Listing active industries
+// needs no token; include_inactive and every write need a SuperAdmin session.
+export const industryTypesAPI = {
+  list: (entityType, { includeInactive = false } = {}) =>
+    verificationApi.get('/verification/industry-types', {
+      params: { entity_type: entityType, ...(includeInactive ? { include_inactive: true } : {}) },
+    }),
+  create: ({ name, entityType }) =>
+    verificationApi.post('/verification/industry-types', { name, entity_type: entityType }),
+  update: (id, body) =>
+    verificationApi.patch(`/verification/industry-types/${encodeURIComponent(id)}`, body),
+  deactivate: (id) =>
+    verificationApi.delete(`/verification/industry-types/${encodeURIComponent(id)}`),
+};
+
 export const verificationAPI = {
   getConsentInfo: (token, { signal } = {}) =>
     verificationApi.get(`/verification/consent/${encodeURIComponent(token)}`, { signal }),
@@ -949,15 +964,9 @@ export const verificationAPI = {
   // frontend no longer calls it at all — Submitted Reports is read-only.
 
   // ── Email Drafts ──────────────────────────────────────────────────────────
-  // NOTE: the latest backend integration doc documents these five CRUD
-  // routes at a bare `/email-drafts/...` prefix (no `/verification`). The
-  // paths below are the ones already live and working in this app — left
-  // unchanged here rather than guessed-rewritten from doc text, per this
-  // project's own rule of trusting a live swagger check over changelog docs
-  // when the two disagree. Verify against swagger before touching these; if
-  // the backend really did move them, update all four in one pass together
-  // with the two new below (which use the documented path since they're
-  // brand new and can't yet be "already working" one way or the other).
+  // Every email-draft route lives under /verification (confirmed against the live OpenAPI:
+  // /verification/email-drafts, /admin/all, /history, /{type}, /{type}/recipients, /{id}).
+  // The bare /email-drafts/... prefix from an older integration doc returns 404.
   createEmailDraft: (payload) =>
     verificationApi.post('/verification/email-drafts', cleanObject({
       verification_type: payload.verification_type,
@@ -986,12 +995,12 @@ export const verificationAPI = {
   deleteEmailDraft: (draftId) =>
     verificationApi.delete(`/verification/email-drafts/${draftId}`),
 
-  // GET /email-drafts/admin/all — Superadmin only: reusable draft templates
+  // GET /verification/email-drafts/admin/all — Superadmin only: reusable draft templates
   // across every organization (unlike getEmailDraftsByType, which is always
   // scoped to the caller's own org). organizationId/verificationType filter,
   // limit defaults to 50 server-side (max 200).
   getEmailDraftsAdmin: (filters = {}) =>
-    verificationApi.get('/email-drafts/admin/all', {
+    verificationApi.get('/verification/email-drafts/admin/all', {
       params: cleanObject({
         organization_id: filters.organizationId || filters.organization_id,
         verification_type: filters.verificationType || filters.verification_type,
@@ -1000,14 +1009,14 @@ export const verificationAPI = {
       }),
     }),
 
-  // GET /email-drafts/history — actual email SEND history, distinct from the
+  // GET /verification/email-drafts/history — actual email SEND history, distinct from the
   // reusable draft library above (manual_verification_requests, not
   // email_drafts). Org callers are auto-scoped to their own org; superadmin
   // may pass organization_id to view one org or omit it for all. Only ever
   // contains rows where SMTP delivery actually succeeded — a failed dispatch
   // never appears here, by backend design.
   getEmailHistory: (filters = {}) =>
-    verificationApi.get('/email-drafts/history', {
+    verificationApi.get('/verification/email-drafts/history', {
       params: cleanObject({
         organization_id: filters.organizationId || filters.organization_id,
         batch_id: filters.batchId || filters.batch_id,

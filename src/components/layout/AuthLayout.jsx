@@ -32,7 +32,7 @@ export const AuthLayout = ({ children, title = 'Dashboard', breadcrumb }) => {
           breadcrumb={breadcrumb}
           onMenuToggle={() => setMobileMenuOpen(!mobileMenuOpen)}
         />
-        <main className="p-4 lg:p-8 pb-6 lg:pb-8">
+        <main className="p-4 lg:p-6 pb-6 lg:pb-6">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}

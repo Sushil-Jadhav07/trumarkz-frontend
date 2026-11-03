@@ -1,3 +1,4 @@
+import { SlidingTabs } from '@/components/ui/SlidingTabs';
 import { LoadingSkeleton } from '@/components/shared/LoadingSkeleton';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -106,14 +107,14 @@ export const statusBadge = (status) => {
 };
 
 export const batchStatusMeta = {
-  pending:                   { label: 'Pending',                   badge: 'warning', tone: 'bg-orange-50 text-orange-700 border-orange-100' },
-  processing:                { label: 'Processing',                badge: 'info',    tone: 'bg-blue-50 text-brand-blue border-blue-100' },
-  verification_in_progress: { label: 'Verification In Progress',  badge: 'info',    tone: 'bg-blue-50 text-brand-blue border-blue-100' },
-  verification_completed:   { label: 'Verification Completed',    badge: 'success', tone: 'bg-green-50 text-green-700 border-green-100' },
-  sdc_generated:             { label: 'SDC Generated',             badge: 'success', tone: 'bg-emerald-50 text-emerald-700 border-emerald-100' },
+  pending:                   { label: 'Pending',                   badge: 'warning', tone: 'bg-orange-100 text-orange-700 border-orange-100' },
+  processing:                { label: 'Processing',                badge: 'info',    tone: 'bg-blue-100 text-brand-blue border-blue-100' },
+  verification_in_progress: { label: 'Verification In Progress',  badge: 'info',    tone: 'bg-blue-100 text-brand-blue border-blue-100' },
+  verification_completed:   { label: 'Verification Completed',    badge: 'success', tone: 'bg-green-100 text-green-700 border-green-100' },
+  sdc_generated:             { label: 'SDC Generated',             badge: 'success', tone: 'bg-green-100 text-green-700 border-green-100' },
   // Warranty batches are auto-approved on upload — no verification pipeline,
   // so "approved" is their terminal status straight out of the backend.
-  approved:                  { label: 'Approved',                  badge: 'success', tone: 'bg-emerald-50 text-emerald-700 border-emerald-100' },
+  approved:                  { label: 'Approved',                  badge: 'success', tone: 'bg-green-100 text-green-700 border-green-100' },
 };
 
 export const WORKFLOW_STEPS = [
@@ -2905,25 +2906,20 @@ export const BatchMonitor = () => {
 
         {/* Quick status pills */}
         <div className="mt-4 flex flex-wrap items-center gap-2">
-          {[
-            { key: 'all', label: 'All' },
-            { key: 'in_progress', label: 'In progress' },
-            { key: 'pending', label: 'Pending' },
-            { key: 'completed', label: 'Verification completed' },
-            { key: 'failed', label: 'Failed' },
-          ].map((pill) => (
-            <button
-              key={pill.key}
-              type="button"
-              aria-pressed={statusFilter === pill.key}
-              onClick={() => setStatusFilter(pill.key)}
-              className={`h-8 rounded-lg px-4 text-xs font-medium font-inter transition-colors ${
-                statusFilter === pill.key ? 'bg-brand-blue text-white' : 'border border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
-              }`}
-            >
-              {pill.label}
-            </button>
-          ))}
+          <SlidingTabs
+            variant="solid"
+            toggle
+            ariaLabel="Filter by batch status"
+            value={statusFilter}
+            onChange={setStatusFilter}
+            tabs={[
+              { value: 'all', label: 'All' },
+              { value: 'in_progress', label: 'In progress' },
+              { value: 'pending', label: 'Pending' },
+              { value: 'completed', label: 'Verification completed' },
+              { value: 'failed', label: 'Failed' },
+            ]}
+          />
           <div className="ml-auto flex items-center gap-5">
             <span role="status" className="text-xs text-gray-500 font-inter">{filtersBusy ? 'Checking verification types…' : `${visibleBatches.length} of ${batches.length} batches`}</span>
             <button type="button" onClick={clearAllFilters} disabled={!hasActiveFilters} className="text-xs font-semibold text-brand-blue font-inter hover:underline disabled:cursor-default disabled:no-underline">
@@ -2964,12 +2960,12 @@ export const BatchMonitor = () => {
                 </h2>
                 <p className="mt-0.5 text-xs text-gray-500 font-inter">Manage verifier handoff, uploads and organization sharing.</p>
               </div>
-              <span className="self-start rounded-full bg-gray-100 px-3 py-1 text-xs font-semibold text-brand-dark font-inter sm:self-auto">{visibleBatches.length} batches</span>
+              <span className="self-start rounded-full bg-[#e3ebf8] px-3 py-1 text-xs font-semibold text-brand-dark font-inter sm:self-auto">{visibleBatches.length} batches</span>
             </div>
             <div className="overflow-x-auto scrollbar-hidden">
-              <table className="w-full min-w-[1080px] border-collapse">
+              <table className="w-full min-w-[980px] border-collapse">
                 <thead>
-                  <tr className="bg-gray-50/80 text-xs font-medium text-gray-600 font-inter">
+                  <tr className="text-xs font-medium font-inter">
                     {[
                       { label: 'Batch name', sortKey: 'name', align: 'text-left' },
                       { label: 'Organization', align: 'text-left' },
@@ -2985,12 +2981,12 @@ export const BatchMonitor = () => {
                       <th
                         key={col.label}
                         aria-sort={col.sortKey && sort.key === col.sortKey ? (sort.dir === 'asc' ? 'ascending' : 'descending') : undefined}
-                        className={`px-4 py-2.5 font-medium ${col.align} ${col.divider ? 'border-l border-gray-200' : ''}`}
+                        className={`px-3 py-2.5 font-medium ${col.align} ${col.divider ? 'border-l border-[#d3dcee]' : ''}`}
                       >
                         {col.sortKey ? (
                           <button type="button" onClick={() => toggleSort(col.sortKey)} className="inline-flex items-center gap-1.5 hover:text-brand-dark">
                             {col.label}
-                            <ChevronsUpDown size={13} className={sort.key === col.sortKey ? 'text-brand-blue' : 'text-gray-400'} />
+                            <ChevronsUpDown size={13} className={sort.key === col.sortKey ? 'text-brand-blue' : 'text-[#5a82cf]'} />
                           </button>
                         ) : col.label}
                       </th>
@@ -3012,31 +3008,31 @@ export const BatchMonitor = () => {
                         }}
                         className="cursor-pointer text-xs font-inter transition-colors hover:bg-blue-50/30 focus-visible:bg-blue-50/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-blue"
                       >
-                        <td className="px-4 py-1.5">
+                        <td className="px-3 py-1.5">
                           <p title={batch.id} className="max-w-[240px] truncate text-[13px] text-brand-dark">{batch.name}</p>
                         </td>
-                        <td className="px-4 py-1.5">
-                          <p className="max-w-[210px] truncate text-gray-500">{batch.orgName}</p>
+                        <td className="px-3 py-1.5">
+                          <p className="max-w-[210px] truncate text-[#5f7bad]">{batch.orgName}</p>
                         </td>
-                        <td className="px-4 py-1.5">
+                        <td className="px-3 py-1.5">
                           <div className="flex items-center gap-3">
-                            <div className="h-1.5 w-20 overflow-hidden rounded-full bg-gray-200">
+                            <div className="h-1.5 w-16 overflow-hidden rounded-full bg-[#e3e8f0]">
                               <div className="h-full rounded-full bg-brand-blue" style={{ width: `${complete}%` }} />
                             </div>
                             <span className="w-9 shrink-0 text-gray-500 tabular-nums">{complete}%</span>
                           </div>
                         </td>
-                        <td className="px-4 py-1.5 text-center text-gray-700 tabular-nums">{batch.total}</td>
-                        <td className="px-4 py-1.5 text-center text-gray-700 tabular-nums">{batch.pending}</td>
-                        <td className="px-4 py-1.5 text-center text-gray-700 tabular-nums">{batch.verified}</td>
-                        <td className="px-4 py-1.5 text-center text-gray-700 tabular-nums">{batch.failed}</td>
-                        <td className="px-4 py-1.5">
-                          <span className={`inline-flex rounded-md border px-2 py-0.5 text-[11px] font-medium ${batch.statusMeta.tone}`}>{sentenceCase(batch.statusMeta.label)}</span>
-                          {batch.sharedWithOrganization && <p className="mt-0.5 text-[11px] text-gray-500">Shared with org</p>}
+                        <td className="px-3 py-1.5 text-center text-brand-dark tabular-nums">{batch.total}</td>
+                        <td className="px-3 py-1.5 text-center text-brand-dark tabular-nums">{batch.pending}</td>
+                        <td className="px-3 py-1.5 text-center text-brand-dark tabular-nums">{batch.verified}</td>
+                        <td className="px-3 py-1.5 text-center text-brand-dark tabular-nums">{batch.failed}</td>
+                        <td className="px-3 py-1.5">
+                          <span className={`inline-flex whitespace-nowrap rounded-md border px-2 py-0.5 text-[11px] font-medium ${batch.statusMeta.tone}`}>{sentenceCase(batch.statusMeta.label)}</span>
+                          {batch.sharedWithOrganization && <p className="mt-0.5 whitespace-nowrap text-[11px] text-gray-500">Shared with org</p>}
                           <ReportsProtectedBadge mode={batch.certificateAccessMode} className="mt-1" />
                         </td>
-                        <td className="whitespace-nowrap px-4 py-1.5 text-gray-500">{formatCreatedAt(batch.createdAt)}</td>
-                        <td className="px-4 py-1.5">
+                        <td className="whitespace-nowrap px-3 py-1.5 text-[#5f7bad]">{formatCreatedAt(batch.createdAt)}</td>
+                        <td className="px-3 py-1.5">
                           <div className="flex justify-center">
                             <button
                               type="button"

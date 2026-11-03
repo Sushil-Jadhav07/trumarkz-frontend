@@ -2,11 +2,9 @@ import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
-import { Button } from '@/components/ui/Button';
+import { HeroPanel, AuthStepper, AuthTopBar } from '@/components/auth/AuthShell';
 import { OTPInput } from '@/components/ui/OTPInput';
-import { StepWizard } from '@/components/ui/StepWizard';
-import { Card } from '@/components/ui/Card';
-import { ArrowLeft, AlertCircle, Mail, RefreshCw } from 'lucide-react';
+import { ArrowLeft, ArrowRight, AlertCircle, Mail, RefreshCw } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 export const OTPVerification = () => {
@@ -97,88 +95,87 @@ export const OTPVerification = () => {
   const backRoute = isOrg ? '/org-registration' : '/register/individual';
 
   return (
-    <div className="min-h-screen bg-brand-bg flex items-center justify-center p-4">
-      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="w-full max-w-md">
-        <Card className="p-6 sm:p-8">
-          <StepWizard
-            steps={isOrg ? ['Registration', 'OTP Verification', 'Onboarding'] : ['Registration', 'OTP', 'Welcome']}
-            currentStep={1}
-          />
+    <div className="flex h-[100dvh] gap-5 overflow-hidden bg-white p-3 sm:p-5">
+      <HeroPanel />
 
-          <div className="text-center mb-6">
-            <div className="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-xl bg-brand-blue/10 text-brand-blue">
-              <Mail size={22} />
-            </div>
-            <h2 className="font-sora font-bold text-xl text-brand-dark mb-1">Verify Your Email</h2>
+      <div className="relative flex h-full min-h-0 flex-1 flex-col overflow-y-auto px-4 sm:px-8">
+        <AuthTopBar backLabel="Back to registration" onBack={() => navigate(backRoute, { replace: true })} />
+
+        <motion.div
+          initial={{ opacity: 0, y: 14 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="mx-auto my-auto w-full max-w-[740px] pb-3"
+        >
+          <AuthStepper steps={isOrg ? ['Registration', 'OTP verification', 'Onboarding'] : ['Registration', 'OTP verification', 'Welcome']} current={1} />
+
+          <div className="mx-auto mt-6 w-full max-w-[440px] text-center">
+            <span className="mx-auto mb-3 flex h-[52px] w-[52px] items-center justify-center rounded-2xl bg-[#e9f1fe] text-brand-blue">
+              <Mail size={24} strokeWidth={1.6} />
+            </span>
+            <h1 className="font-inter text-[26px] font-semibold leading-tight tracking-[-0.01em] text-brand-dark">Verify your email</h1>
             {email ? (
-              <p className="text-sm text-gray-500 font-inter">
-                Enter the 6-digit OTP sent to your email<br />
+              <p className="mt-1.5 text-[13px] leading-relaxed text-[#5b6a85] font-inter">
+                Enter the 6-digit code sent to<br />
                 <span className="font-semibold text-brand-dark">{email}</span>
               </p>
             ) : (
-              <div className="flex items-center justify-center gap-2 text-orange-500 text-sm mt-1">
-                <AlertCircle size={16} />
-                <span className="font-inter">Session lost. Please go back and register again.</span>
+              <div role="alert" className="mt-2 flex items-center justify-center gap-2 text-[13px] text-orange-600 font-inter">
+                <AlertCircle size={15} />
+                <span>Session lost. Please go back and register again.</span>
               </div>
             )}
-            <p className="text-xs text-gray-400 font-inter mt-1">OTP expires in 10 minutes</p>
-          </div>
+            <p className="mt-1 text-xs text-[#7b879d] font-inter">The code expires in 10 minutes.</p>
 
-          <div className="mb-6">
-            <OTPInput
-              value={otp}
-              onChange={val => { setOtp(val); setError(''); }}
-              error={!!error}
-              disabled={!email || successState}
-            />
-            {error && (
-              <p className="text-center text-xs text-red-500 font-inter mt-2 flex items-center justify-center gap-1">
-                <AlertCircle size={12} /> {error}
-              </p>
-            )}
-          </div>
+            <div className="mt-6">
+              <OTPInput
+                value={otp}
+                onChange={val => { setOtp(val); setError(''); }}
+                error={!!error}
+                disabled={!email || successState}
+              />
+              {error && (
+                <p role="alert" className="mt-2.5 flex items-center justify-center gap-1 text-xs text-red-500 font-inter">
+                  <AlertCircle size={12} /> {error}
+                </p>
+              )}
+            </div>
 
-          <Button
-            variant="primary"
-            size="lg"
-            className="w-full mb-4"
-            onClick={handleVerify}
-            disabled={submitting || successState || !email || otp.length !== 6}
-          >
-            {successState ? 'Verified' : submitting ? 'Verifying...' : 'Verify OTP'}
-          </Button>
-
-          {/* Resend */}
-          <div className="text-center">
-            {canResend ? (
-              <button
-                onClick={handleResend}
-                disabled={resending || successState}
-                className="inline-flex items-center gap-1.5 text-sm text-brand-blue font-inter hover:underline disabled:opacity-60"
-              >
-                <RefreshCw size={14} className={resending ? 'animate-spin' : ''} />
-                {resending ? 'Resending...' : 'Resend OTP'}
-              </button>
-            ) : (
-              <p className="text-sm text-gray-500 font-inter">
-                Resend OTP in{' '}
-                <span className="font-semibold text-brand-dark">
-                  00:{timer.toString().padStart(2, '0')}
-                </span>
-              </p>
-            )}
-          </div>
-
-          <div className="mt-4 text-center">
             <button
-              onClick={() => navigate(backRoute, { replace: true })}
-              className="text-sm text-brand-blue font-inter hover:underline inline-flex items-center gap-1"
+              type="button"
+              onClick={handleVerify}
+              disabled={submitting || successState || !email || otp.length !== 6}
+              className="mt-6 flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-brand-blue text-sm font-semibold text-white font-inter transition-colors hover:bg-brand-blue-hover disabled:cursor-not-allowed disabled:opacity-60"
             >
-              <ArrowLeft size={14} /> Back to Registration
+              {successState ? 'Verified' : submitting ? 'Verifying…' : 'Verify code'}
+              {!submitting && !successState && <ArrowRight size={16} />}
             </button>
+
+            <div className="mt-4 text-[13px] font-inter">
+              {canResend ? (
+                <button
+                  type="button"
+                  onClick={handleResend}
+                  disabled={resending || successState}
+                  className="inline-flex items-center gap-1.5 font-medium text-brand-blue hover:underline disabled:opacity-60"
+                >
+                  <RefreshCw size={14} className={resending ? 'animate-spin' : ''} />
+                  {resending ? 'Resending…' : 'Resend code'}
+                </button>
+              ) : (
+                <p className="text-[#5b6a85]">
+                  Resend code in{' '}
+                  <span className="font-semibold text-brand-dark">00:{timer.toString().padStart(2, '0')}</span>
+                </p>
+              )}
+            </div>
+
+            <div className="mt-5 border-t border-[#e1e7f0] pt-4 text-[13px] text-[#5b6a85] font-inter">
+              Wrong email?{' '}
+              <button type="button" onClick={() => navigate(backRoute, { replace: true })} className="font-semibold text-brand-blue hover:underline">Back to registration</button>
+            </div>
           </div>
-        </Card>
-      </motion.div>
+        </motion.div>
+      </div>
     </div>
   );
 };

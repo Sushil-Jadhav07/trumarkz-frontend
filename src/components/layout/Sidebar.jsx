@@ -1,4 +1,5 @@
-﻿import React from 'react';
+﻿import React, { useLayoutEffect, useRef } from 'react';
+import { animate } from 'framer-motion';
 import { useAuth } from '@/context/AuthContext';
 import { Logo } from '@/components/ui/Logo';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -7,15 +8,32 @@ import {
   Wallet, HelpCircle, User, LogOut, ChevronLeft, ChevronRight, ChevronDown,
   GitBranch, Share2, Building2, Briefcase,
   ShieldCheck, UserCog, UserSearch,
-  Mail, Package, Star,
+  Mail, Package, Star, Tags,
 } from 'lucide-react';
 import clsx from 'clsx';
+
+// Every page renders its own Sidebar, so the highlight can't use a shared layout animation. The
+// vertical position of the last active item is kept here and the new highlight starts from it.
+let lastActiveTop = null;
 
 export const Sidebar = ({ collapsed, onToggle, mobileOpen = false, onMobileClose }) => {
   const { user, logout, role } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
   const isCompact = collapsed && !mobileOpen;
+
+  const navRef = useRef(null);
+  const highlightRef = useRef(null);
+  useLayoutEffect(() => {
+    const active = navRef.current?.querySelector('[aria-current="page"]');
+    if (!active) return;
+    const top = active.offsetTop;
+    const from = lastActiveTop;
+    lastActiveTop = top;
+    if (from === null || from === top || !highlightRef.current) return;
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
+    animate(highlightRef.current, { y: [from - top, 0] }, { type: 'spring', stiffness: 420, damping: 38 });
+  }, [location.pathname, isCompact]);
 
   const handleLogout = async () => {
     await logout();
@@ -57,6 +75,7 @@ export const Sidebar = ({ collapsed, onToggle, mobileOpen = false, onMobileClose
         { path: '/admin/user-list', label: 'User List', icon: UserSearch },
         { section: 'Operations' },
         { path: '/admin/verifiers', label: 'Verifiers', icon: Building2 },
+        { path: '/admin/industries', label: 'Industries', icon: Tags },
         { path: '/admin/product-warranty', label: 'Warranty Review', icon: Package },
         { path: '/admin/skills-management', label: 'Skills Review', icon: Star },
         { path: '/admin/email-drafts', label: 'Email Drafts', icon: Mail },
@@ -69,7 +88,8 @@ export const Sidebar = ({ collapsed, onToggle, mobileOpen = false, onMobileClose
   };
 
   const navItems = getNavItems();
-  const hasSections = navItems.some((item) => item.section);
+  // Every role uses the same modern sidebar; only the super admin has labelled sections.
+  const hasSections = true;
 
   return (
     <aside className={clsx('fixed left-0 top-0 h-full bg-brand-dark z-50 flex flex-col transition-transform duration-300', 'w-60 -translate-x-full lg:translate-x-0', mobileOpen && 'translate-x-0', isCompact ? 'lg:w-20' : 'lg:w-60')}>
@@ -85,7 +105,7 @@ export const Sidebar = ({ collapsed, onToggle, mobileOpen = false, onMobileClose
         </button>
       </div>
 
-      <nav className={clsx('flex-1 px-3 overflow-y-auto', hasSections ? 'py-3' : 'py-4 space-y-1')}>
+      <nav ref={navRef} className={clsx('relative flex-1 px-3 overflow-y-auto', hasSections ? 'py-3' : 'py-4 space-y-1')}>
         {navItems.map((item, index) => {
           if (item.section) {
             if (isCompact) {
@@ -99,9 +119,10 @@ export const Sidebar = ({ collapsed, onToggle, mobileOpen = false, onMobileClose
           }
           const isActive = location.pathname === item.path || location.pathname.startsWith(item.path + '/');
           return (
-            <button key={item.path} type="button" title={isCompact ? item.label : undefined} aria-label={isCompact ? item.label : undefined} aria-current={isActive ? 'page' : undefined} onClick={() => { onMobileClose?.(); navigate(item.path); }} className={clsx('w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 group text-left', hasSections && 'mb-1', isActive ? 'bg-brand-blue text-white shadow-lg shadow-brand-blue/20' : clsx(hasSections ? 'text-gray-200' : 'text-gray-400', 'hover:text-white hover:bg-white/5'))}>
-              <item.icon size={20} strokeWidth={hasSections ? 1.75 : 2} className={isActive ? 'text-white' : clsx(hasSections ? 'text-gray-300' : 'text-gray-400', 'group-hover:text-white')} />
-              {!isCompact && <span className="text-sm font-medium font-inter">{item.label}</span>}
+            <button key={item.path} type="button" title={isCompact ? item.label : undefined} aria-label={isCompact ? item.label : undefined} aria-current={isActive ? 'page' : undefined} onClick={() => { onMobileClose?.(); navigate(item.path); }} className={clsx('relative w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-colors duration-200 group text-left', hasSections && 'mb-1', isActive ? 'text-white' : clsx(hasSections ? 'text-gray-200' : 'text-gray-400', 'hover:text-white hover:bg-white/5'))}>
+              {isActive && <span ref={highlightRef} aria-hidden="true" className="absolute inset-0 rounded-xl bg-brand-blue shadow-lg shadow-brand-blue/20" />}
+              <item.icon size={20} strokeWidth={hasSections ? 1.75 : 2} className={isActive ? 'relative text-white' : clsx(hasSections ? 'text-gray-300' : 'text-gray-400', 'group-hover:text-white')} />
+              {!isCompact && <span className="relative text-sm font-medium font-inter">{item.label}</span>}
             </button>
           );
         })}
@@ -125,7 +146,7 @@ export const Sidebar = ({ collapsed, onToggle, mobileOpen = false, onMobileClose
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm font-semibold text-white font-inter">{user?.name || 'User'}</span>
-                  <span className="block truncate text-xs text-gray-400 font-inter">{user?.role || 'Account'}</span>
+                  <span className="block truncate text-xs capitalize text-gray-400 font-inter">{(user?.role || 'Account').replace(/[-_]/g, ' ')}</span>
                 </span>
                 <ChevronDown size={16} className="shrink-0 text-gray-400" />
               </button>

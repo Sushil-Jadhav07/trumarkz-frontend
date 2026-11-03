@@ -14,8 +14,11 @@ import { Badge } from '@/components/ui/Badge';
 import { Modal } from '@/components/ui/Modal';
 import { Dropdown } from '@/components/ui/Dropdown';
 import { StepWizard } from '@/components/ui/StepWizard';
-import { verificationAPI, getApiError, triggerBlobDownload } from '@/services/api';
+import { verificationAPI, authAPI, getApiError, triggerBlobDownload } from '@/services/api';
+import { matchProfileIndustry } from '@/utils/industry';
 import { verificationTypes } from '@/data/mockData';
+import { loadIndustryTypes } from '@/hooks/useIndustryTypes';
+import { getBatchIndustry } from '@/utils/batchIndustry';
 import {
   getHumanTemplateHeaders,
   getIndustryTypeList,
@@ -1125,13 +1128,24 @@ export const CreateBatch = () => {
     }
   }, [hasVerificationFlow, batchType, subMode, flowSubMode]);
 
-  const startHumanFlow = () => {
+  // The organization's industry lives in Profile, so a new batch starts at Verifications with it
+  // applied. The one-time picker is only shown when the profile has no industry the batch flow supports.
+  const startHumanFlow = async () => {
     setBatchEntityType('human');
-    setSelectedIndustry(null);
     setSelectedVerifications([]);
     setSelectedTemplate(null);
     setSelectedFields([]);
-    navigate('/org/industry');
+    const { items: humanList } = await loadIndustryTypes('human');
+    let industry = matchProfileIndustry(user?.industryType, humanList)
+      || matchProfileIndustry(getBatchIndustry(user?.id), humanList);
+    if (!industry && user?.organizationId) {
+      try {
+        const { data } = await authAPI.getOrganizationIndustryType(user.organizationId);
+        industry = matchProfileIndustry(data, humanList);
+      } catch { /* fall through to the picker */ }
+    }
+    setSelectedIndustry(industry ? [industry] : null);
+    navigate(industry ? '/org/verifications' : '/org/industry', { replace: true });
   };
 
   const startProductFlow = () => {
@@ -1348,7 +1362,7 @@ export const CreateBatch = () => {
         <div className="w-full mx-auto lg:max-w-none">
           {!isHuman && <ProductProgress step={1} />}
           {hasVerificationFlow && (
-            <StepWizard steps={['Industry', 'Verifications', 'Permissions', 'Template', 'Batch']} currentStep={4} />
+            <StepWizard steps={['Verifications', 'Permissions', 'Template', 'Batch']} currentStep={3} />
           )}
           <div className="flex items-center gap-3 mb-6">
             <button
@@ -1398,7 +1412,7 @@ export const CreateBatch = () => {
               <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
                 <div>
                   <p className="font-sora font-semibold text-brand-dark text-sm">
-                    {selectedIndustryLabel || 'Selected industry'} verification batch
+                    {selectedIndustryLabel || 'Human'} verification batch
                   </p>
                   <p className="text-xs text-gray-500 font-inter mt-1">
                     {selectedVerificationNames.length > 0
@@ -1407,7 +1421,6 @@ export const CreateBatch = () => {
                   </p>
                 </div>
                 <div className="flex gap-2 flex-wrap">
-                  <Button variant="ghost" size="sm" onClick={() => { setBatchEntityType(batchType || 'human'); navigate('/org/industry'); }}>Change Industry</Button>
                   <Button variant="ghost" size="sm" onClick={() => navigate('/org/verifications')}>Change Checks</Button>
                 </div>
               </div>
@@ -1508,7 +1521,7 @@ export const CreateBatch = () => {
       <div className="w-full mx-auto lg:max-w-none">
         {!isHuman && <ProductProgress step={1} />}
         {hasVerificationFlow && (
-          <StepWizard steps={['Industry', 'Verifications', 'Permissions', 'Template', 'Batch']} currentStep={4} />
+          <StepWizard steps={['Verifications', 'Permissions', 'Template', 'Batch']} currentStep={3} />
         )}
         {/* Breadcrumb */}
         <div className="flex items-center gap-3 mb-6 flex-wrap">

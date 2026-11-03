@@ -1,6 +1,7 @@
 import OrganizationDetail from '@/pages/admin/OrganizationDetail';
 import React from 'react';
 import { Navigate, Routes, Route, useLocation } from 'react-router-dom';
+import { trackBatchOrigin } from '@/utils/batchOrigin';
 import { AnimatePresence, motion } from 'framer-motion';
 import toast, { Toaster } from 'react-hot-toast';
 import { AuthProvider, useAuth } from '@/context/AuthContext';
@@ -77,6 +78,7 @@ import AdminDashboard from '@/pages/admin/AdminDashboard';
 import BatchMonitor, { WarrantyControlCenter } from '@/pages/admin/BatchMonitor';
 import BatchControlCenter from '@/pages/admin/BatchControlCenter';
 import Verifiers from '@/pages/admin/Verifiers';
+import IndustryManagement from '@/pages/admin/IndustryManagement';
 import SDCVerification from '@/pages/admin/SDCVerification';
 import PromoteSuperAdmin from '@/pages/admin/PromoteSuperAdmin';
 import CreateSuperAdmin from '@/pages/admin/CreateSuperAdmin';
@@ -134,6 +136,8 @@ const AnimatedRoutes = () => {
   // once at the app root, so toasts survive route changes unless dismissed
   // here explicitly.
   React.useEffect(() => { toast.dismiss(); }, [location.pathname]);
+  // Remember the last non-wizard page so Back on a new batch's first step returns there.
+  React.useEffect(() => { trackBatchOrigin(location.pathname); }, [location.pathname]);
   React.useEffect(() => { window.scrollTo({ top: 0, left: 0, behavior: 'auto' }); }, [location.pathname]);
   return (
     <AnimatePresence mode="wait">
@@ -231,6 +235,7 @@ const AnimatedRoutes = () => {
           <Route path="/admin/batch-monitor/:batchId" element={<ProtectedRoute><AdminRoute><BatchControlCenter /></AdminRoute></ProtectedRoute>} />
           <Route path="/admin/batch-monitor/warranty/:batchId" element={<ProtectedRoute><AdminRoute><WarrantyControlCenter /></AdminRoute></ProtectedRoute>} />
           <Route path="/admin/verifiers" element={<ProtectedRoute><AdminRoute><Verifiers /></AdminRoute></ProtectedRoute>} />
+          <Route path="/admin/industries" element={<ProtectedRoute><AdminRoute><IndustryManagement /></AdminRoute></ProtectedRoute>} />
           <Route path="/admin/sdc-verification" element={<ProtectedRoute><AdminRoute><SDCVerification /></AdminRoute></ProtectedRoute>} />
           <Route path="/admin/promote-super-admin" element={<ProtectedRoute><AdminRoute><PromoteSuperAdmin /></AdminRoute></ProtectedRoute>} />
           <Route path="/admin/create-super-admin" element={<ProtectedRoute><AdminRoute><CreateSuperAdmin /></AdminRoute></ProtectedRoute>} />

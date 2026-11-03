@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Plus, Trash2, Star, RefreshCw, Lock, Pencil, EyeOff, ChevronDown, ChevronUp, Braces } from 'lucide-react';
+import { Plus, Trash2, Star, RefreshCw, Lock, Pencil, EyeOff, ChevronDown, ChevronUp, Braces, Layers, Package, ShieldCheck, User } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { Modal } from '@/components/ui/Modal';
 import { Input } from '@/components/ui/Input';
@@ -26,7 +26,12 @@ import {
 // set-default/deactivate a config whose created_by_role is "super_admin".
 // `onConfigsChange(configs)` fires after every (re)load, so the host page can bring the configs'
 // Dhiway space/schema into its own Dhiway Spaces list.
-export const OrgSchemaConfigsPanel = ({ orgId, isSuperAdminViewer = false, onConfigsChange }) => {
+// `layout="columns"` is the organization profile's look: its own header (icon, title, deactivated toggle)
+// and one card per schema type side by side. The default is the stacked accordion used by SuperAdmin.
+const TYPE_ICONS = { human: User, product: Package, warranty: ShieldCheck, '': User };
+
+export const OrgSchemaConfigsPanel = ({ orgId, isSuperAdminViewer = false, onConfigsChange, layout = 'accordion' }) => {
+  const columns = layout === 'columns';
   const [configs, setConfigs] = useState([]);
   const [loading, setLoading] = useState(false);
   const [showInactive, setShowInactive] = useState(false);
@@ -273,8 +278,26 @@ export const OrgSchemaConfigsPanel = ({ orgId, isSuperAdminViewer = false, onCon
   };
 
   return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between gap-3">
+    <div className={columns ? '' : 'space-y-3'}>
+      {columns && (
+        <div className="mb-4 flex items-start justify-between gap-3">
+          <div className="flex items-center gap-3.5">
+            <span aria-hidden="true" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[#e8f0fe] text-brand-blue"><Layers size={21} strokeWidth={1.6} /></span>
+            <div>
+              <h3 className="font-sora text-base font-semibold text-brand-dark">Schema configurations</h3>
+              <p className="mt-0.5 text-[13px] text-gray-500 font-inter">Optional custom schemas for your batches. Use the default layout or register your own.</p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowInactive((s) => !s)}
+            className="flex shrink-0 items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-medium font-inter text-gray-600 hover:bg-gray-50"
+          >
+            <EyeOff size={14} /> {showInactive ? 'Hide deactivated' : 'Show deactivated'}
+          </button>
+        </div>
+      )}
+      {!columns && <div className="flex items-center justify-between gap-3">
         <div>
           <p className="text-sm font-medium text-brand-dark font-inter">Schema Configurations</p>
           <p className="mt-0.5 text-xs text-gray-400 font-inter">
@@ -288,17 +311,31 @@ export const OrgSchemaConfigsPanel = ({ orgId, isSuperAdminViewer = false, onCon
         >
           <EyeOff size={12} /> {showInactive ? 'Hide deactivated' : 'Show deactivated'}
         </button>
-      </div>
+      </div>}
 
       {loading ? (
         <div className="flex items-center justify-center py-8"><RefreshCw size={18} className="animate-spin text-brand-blue" /></div>
       ) : (
-        SCHEMA_SPACE_TYPE_OPTIONS.map(({ value: spaceType, label: spaceLabel }) => {
+        <div className={columns ? 'grid grid-cols-1 gap-3 lg:grid-cols-3' : 'space-y-3'}>
+        {SCHEMA_SPACE_TYPE_OPTIONS.map(({ value: spaceType, label: spaceLabel }) => {
           const list = grouped[spaceType] || [];
           const isCollapsed = !!collapsed[spaceType];
           return (
-            <div key={spaceType} className="rounded-xl border border-gray-200 overflow-hidden">
-              <button
+            <div key={spaceType} className={`rounded-xl border overflow-hidden ${columns ? 'border-gray-100 bg-white' : 'border-gray-200'}`}>
+              {columns && (() => {
+                const TypeIcon = TYPE_ICONS[spaceType] || User;
+                const shown = spaceLabel.replace('Legacy / ', '');
+                return (
+                  <div className="flex items-center gap-3.5 px-4 pb-1 pt-4">
+                    <span aria-hidden="true" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[#e8f0fe] text-brand-blue"><TypeIcon size={21} strokeWidth={1.6} /></span>
+                    <div className="min-w-0">
+                      <p className="flex items-center gap-2 text-[15px] font-semibold text-brand-dark font-inter">{shown}<span className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-semibold text-gray-600">{list.length}</span></p>
+                      <p className="text-xs text-gray-500 font-inter">{list.length === 0 ? 'Default layout · No custom schema' : `${list.length} custom schema${list.length === 1 ? '' : 's'}`}</p>
+                    </div>
+                  </div>
+                );
+              })()}
+              {!columns && <button
                 type="button"
                 onClick={() => setCollapsed((c) => ({ ...c, [spaceType]: !c[spaceType] }))}
                 className="flex w-full items-center justify-between gap-2 bg-gray-50/70 px-3.5 py-2.5"
@@ -308,11 +345,11 @@ export const OrgSchemaConfigsPanel = ({ orgId, isSuperAdminViewer = false, onCon
                   <span className="rounded-full bg-gray-200 px-2 py-0.5 text-[10px] font-semibold text-gray-600">{list.length}</span>
                 </span>
                 {isCollapsed ? <ChevronDown size={14} className="text-gray-400" /> : <ChevronUp size={14} className="text-gray-400" />}
-              </button>
-              {!isCollapsed && (
+              </button>}
+              {(columns || !isCollapsed) && (
                 <div className="divide-y divide-gray-100 bg-white">
                   {list.length === 0 ? (
-                    <p className="px-3.5 py-3 text-xs text-gray-400 font-inter">No {spaceLabel.toLowerCase()} schema configured — using the default layout.</p>
+                    columns ? null : <p className="px-3.5 py-3 text-xs text-gray-400 font-inter">No {spaceLabel.toLowerCase()} schema configured — using the default layout.</p>
                   ) : (
                     list.map((config) => {
                       const locked = !canManage(config);
@@ -434,14 +471,15 @@ export const OrgSchemaConfigsPanel = ({ orgId, isSuperAdminViewer = false, onCon
                       onClick={() => openCreate(spaceType)}
                       className="flex items-center gap-1.5 text-xs font-semibold font-inter text-brand-blue hover:underline"
                     >
-                      <Plus size={13} /> Register a {spaceLabel.toLowerCase()} schema
+                      <Plus size={13} /> {columns ? `Register ${spaceLabel.replace('Legacy / ', '').toLowerCase()} schema` : `Register a ${spaceLabel.toLowerCase()} schema`}
                     </button>
                   </div>
                 </div>
               )}
             </div>
           );
-        })
+        })}
+        </div>
       )}
 
       <Modal

@@ -2,27 +2,14 @@ import React, { useState } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
-import { Button } from '@/components/ui/Button';
-import { Input } from '@/components/ui/Input';
-import { Card } from '@/components/ui/Card';
-import {
-  Building2, FileText, MapPin, ArrowRight, CheckCircle, Briefcase,
-  ChevronDown, ChevronUp, Info, PackageCheck, UserCheck
-} from 'lucide-react';
+import { HeroPanel, AuthField, AuthStepper, AuthTopBar } from '@/components/auth/AuthShell';
+import { IndustrySelect } from '@/components/shared/IndustrySelect';
+import { FileText, MapPin, ArrowRight, Briefcase, Check, Info, PackageCheck, UserCheck } from 'lucide-react';
 import toast from 'react-hot-toast';
 
-const INDUSTRY_OPTIONS = [
-  'Technology', 'Healthcare', 'Education', 'Finance & Banking',
-  'Manufacturing', 'Retail & E-commerce', 'Construction',
-  'Logistics & Transportation', 'Hospitality', 'Agriculture',
-  'Energy & Utilities', 'Media & Entertainment', 'Legal & Compliance',
-  'Non-Profit', 'Government', 'Other',
-];
+const STEPS = ['Registration', 'OTP verification', 'Onboarding'];
 
-// Backend now stores industry_type as a single string, not a list — reuse
-// the card-style single-select pattern from OrgRegistration.jsx's "What
-// does your organization verify?" picker instead of a multi-select dropdown.
-
+// Backend now stores industry_type as a single string, not a list.
 const USE_CASE_OPTIONS = [
   {
     key: 'primary',
@@ -53,7 +40,6 @@ export const OrgOnboarding = () => {
   });
   const [errors, setErrors] = useState({});
   const [submitting, setSubmitting] = useState(false);
-  const [industryOpen, setIndustryOpen] = useState(false);
 
   const validate = () => {
     const newErrors = {};
@@ -85,12 +71,6 @@ export const OrgOnboarding = () => {
     navigate('/dashboard');
   };
 
-  const selectIndustry = (industry) => {
-    setForm(prev => ({ ...prev, industryType: industry }));
-    setIndustryOpen(false);
-    if (errors.industryType) setErrors(prev => ({ ...prev, industryType: '' }));
-  };
-
   const toggleUseCase = (option) => {
     setForm(prev => {
       const updated = { ...prev.useCases };
@@ -107,170 +87,106 @@ export const OrgOnboarding = () => {
   };
 
   return (
-    <div className="min-h-screen bg-brand-bg flex items-center justify-center p-4">
-      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="w-full max-w-3xl">
-        <Card className="p-6 sm:p-7">
-          {/* Header */}
-          <div className="text-center mb-5">
-            <div className="mx-auto mb-2.5 flex h-11 w-11 items-center justify-center rounded-2xl bg-brand-blue/10">
-              <Building2 size={22} className="text-brand-blue" />
-            </div>
-            <h2 className="font-sora font-bold text-xl text-brand-dark mb-1">
-              Complete Your Profile
-            </h2>
-            <p className="text-sm text-gray-500 font-inter">
-              Set up your organization to start using TruMarkZ
-            </p>
-          </div>
+    <div className="flex h-[100dvh] gap-5 overflow-hidden bg-white p-3 sm:p-5">
+      <HeroPanel />
 
-          <form onSubmit={handleSubmit} className="space-y-4">
-            {/* ── Industry Type ── */}
-            <div>
-              <label className="block text-sm font-medium text-brand-dark font-inter mb-1.5">
-                Industry Type <span className="text-red-500">*</span>
-              </label>
-              <button
-                type="button"
-                onClick={() => setIndustryOpen(o => !o)}
-                className={`w-full flex items-center justify-between px-4 py-2.5 rounded-xl border text-sm font-inter transition-colors ${
-                  errors.industryType ? 'border-red-400 bg-red-50' : 'border-gray-200 bg-white hover:border-brand-blue'
-                }`}
-              >
-                <span className={form.industryType ? 'text-brand-dark' : 'text-gray-400'}>
-                  {form.industryType || 'Select an industry type'}
-                </span>
-                {industryOpen ? <ChevronUp size={16} className="text-gray-400" /> : <ChevronDown size={16} className="text-gray-400" />}
-              </button>
-              {errors.industryType && <p className="text-xs text-red-500 mt-1 font-inter">{errors.industryType}</p>}
+      <div className="relative flex h-full min-h-0 flex-1 flex-col overflow-y-auto px-4 sm:px-8">
+        <AuthTopBar />
 
-              {industryOpen && (
-                <motion.div
-                  initial={{ opacity: 0, y: -8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="mt-1 border border-gray-200 rounded-xl bg-white shadow-lg overflow-hidden max-h-52 overflow-y-auto"
-                >
-                  {INDUSTRY_OPTIONS.map(industry => (
-                    <button
-                      key={industry}
-                      type="button"
-                      onClick={() => selectIndustry(industry)}
-                      className="w-full flex items-center justify-between px-4 py-2.5 hover:bg-gray-50 text-sm font-inter text-brand-dark transition-colors"
-                    >
-                      <span>{industry}</span>
-                      {form.industryType === industry && <CheckCircle size={16} className="text-brand-blue" />}
-                    </button>
-                  ))}
-                </motion.div>
-              )}
-            </div>
+        <motion.div
+          initial={{ opacity: 0, y: 14 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="mx-auto my-auto w-full max-w-[740px] pb-3"
+        >
+          <AuthStepper steps={STEPS} current={2} />
 
-            {/* ── GSTIN / Business Reg No — side by side now that the card
-                is wide enough, instead of two full-width stacked rows. ── */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <Input
-                label="GSTIN *"
-                placeholder="e.g. 27ABCDE1234F1Z5"
-                value={form.gstin}
-                onChange={e => updateField('gstin', e.target.value.toUpperCase())}
-                error={errors.gstin}
-                icon={FileText}
+          <h1 className="mt-4 font-inter text-[26px] font-semibold leading-tight tracking-[-0.01em] text-brand-dark">Complete your profile</h1>
+          <p className="mt-1 text-[13px] text-[#5b6a85] font-inter">Set up your organization to start using TruMarkZ.</p>
+
+          <form onSubmit={handleSubmit} noValidate className="mt-4 space-y-3.5">
+            <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
+              <IndustrySelect
+                label="Industry type"
+                value={form.industryType}
+                onChange={(v) => updateField('industryType', v)}
+                error={errors.industryType}
+                placeholder="Select an industry type"
               />
-              <Input
-                label="Business Registration Number *"
-                placeholder="e.g. U74999MH2020PTC123456"
-                value={form.businessRegNumber}
-                onChange={e => updateField('businessRegNumber', e.target.value)}
-                error={errors.businessRegNumber}
-                icon={Briefcase}
+              <AuthField
+                id="ob-gstin" label="GSTIN" icon={FileText} placeholder="e.g. 27ABCDE1234F1Z5" maxLength={15}
+                value={form.gstin} onChange={(e) => updateField('gstin', e.target.value.toUpperCase())} error={errors.gstin}
               />
             </div>
 
-            {/* ── Address — all three lines across one row at this width ── */}
-            <div className="space-y-1.5">
-              <label className="block text-sm font-medium text-brand-dark font-inter">
-                Registered Address <span className="text-red-500">*</span>
-              </label>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <Input
-                  placeholder="Address Line 1 (Building, Street)"
-                  value={form.addressLine1}
-                  onChange={e => updateField('addressLine1', e.target.value)}
-                  error={errors.addressLine1}
-                  icon={MapPin}
+            <AuthField
+              id="ob-reg" label="Business registration number" icon={Briefcase} placeholder="e.g. U74999MH2020PTC123456"
+              value={form.businessRegNumber} onChange={(e) => updateField('businessRegNumber', e.target.value)} error={errors.businessRegNumber}
+            />
+
+            <fieldset>
+              <legend className="mb-1.5 text-[13px] font-medium text-brand-dark font-inter">Registered address</legend>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <AuthField
+                  id="ob-a1" icon={MapPin} placeholder="Building, street" aria-label="Address line 1"
+                  value={form.addressLine1} onChange={(e) => updateField('addressLine1', e.target.value)} error={errors.addressLine1}
                 />
-                <Input
-                  placeholder="Address Line 2 (Area, Locality)"
-                  value={form.addressLine2}
-                  onChange={e => updateField('addressLine2', e.target.value)}
-                  error={errors.addressLine2}
+                <AuthField
+                  id="ob-a2" icon={MapPin} placeholder="Area, locality" aria-label="Address line 2"
+                  value={form.addressLine2} onChange={(e) => updateField('addressLine2', e.target.value)} error={errors.addressLine2}
                 />
-                <Input
-                  placeholder="Address Line 3 (City, State, PIN)"
-                  value={form.addressLine3}
-                  onChange={e => updateField('addressLine3', e.target.value)}
-                  error={errors.addressLine3}
+                <AuthField
+                  id="ob-a3" icon={MapPin} placeholder="City, state, PIN" aria-label="Address line 3"
+                  value={form.addressLine3} onChange={(e) => updateField('addressLine3', e.target.value)} error={errors.addressLine3}
                 />
               </div>
-            </div>
+            </fieldset>
 
-            {/* ── Use Cases ── */}
-            <div>
-              <label className="block text-sm font-medium text-brand-dark font-inter mb-1.5">
-                Use Cases <span className="text-red-500">*</span>
-              </label>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {USE_CASE_OPTIONS.map(uc => {
+            <fieldset>
+              <legend className="mb-1.5 text-[13px] font-medium text-brand-dark font-inter">What will you use TruMarkZ for?</legend>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                {USE_CASE_OPTIONS.map((uc) => {
                   const Icon = uc.icon;
                   const selected = Boolean(form.useCases[uc.key]);
                   return (
-                    <button
+                    <label
                       key={uc.key}
-                      type="button"
-                      onClick={() => toggleUseCase(uc)}
-                      className={`group flex items-start gap-3 rounded-2xl border p-3 text-left transition-all ${
+                      className={`relative flex cursor-pointer items-start gap-3 rounded-xl border px-3.5 py-3 transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-brand-blue/30 ${
                         selected
-                          ? 'border-brand-blue bg-brand-blue/5 shadow-sm ring-1 ring-brand-blue/15'
-                          : errors.useCases
-                            ? 'border-red-200 bg-red-50/40 hover:border-red-300'
-                            : 'border-gray-200 bg-white hover:border-brand-blue/50 hover:shadow-sm'
+                          ? 'border-2 border-brand-blue bg-[#f1f6fe]'
+                          : errors.useCases ? 'border-red-300 bg-red-50/30' : 'border-[#dfe6f1] bg-white hover:border-[#c5d1e4]'
                       }`}
                     >
-                      <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl transition-colors ${
-                        selected ? 'bg-brand-blue text-white' : 'bg-gray-100 text-gray-500 group-hover:bg-brand-blue/10 group-hover:text-brand-blue'
-                      }`}>
-                        <Icon size={18} />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="mb-1 flex items-start justify-between gap-2">
-                          <p className={`font-sora text-sm font-semibold leading-snug ${selected ? 'text-brand-blue' : 'text-brand-dark'}`}>
-                            {uc.label}
-                          </p>
-                          {selected
-                            ? <CheckCircle size={17} className="mt-0.5 shrink-0 text-brand-blue" />
-                            : <span className="mt-0.5 h-4 w-4 shrink-0 rounded border-2 border-gray-300 bg-white" />
-                          }
-                        </div>
-                        <p className="text-xs leading-relaxed text-gray-500 font-inter">{uc.description}</p>
-                      </div>
-                    </button>
+                      <input type="checkbox" checked={selected} onChange={() => toggleUseCase(uc)} className="sr-only" />
+                      <Icon size={22} strokeWidth={1.5} className="mt-0.5 shrink-0 text-brand-blue" />
+                      <span className="min-w-0 flex-1 pr-6">
+                        <span className="block text-sm font-semibold text-brand-dark font-inter">{uc.label}</span>
+                        <span className="mt-0.5 block text-xs leading-snug text-[#5b6a85] font-inter">{uc.description}</span>
+                      </span>
+                      <span className={`absolute right-3 top-3 flex h-[18px] w-[18px] items-center justify-center rounded border-2 ${selected ? 'border-brand-blue bg-brand-blue text-white' : 'border-[#c5d1e4] text-transparent'}`}>
+                        <Check size={12} strokeWidth={3} />
+                      </span>
+                    </label>
                   );
                 })}
               </div>
-              {errors.useCases && <p className="text-xs text-red-500 mt-1.5 font-inter">{errors.useCases}</p>}
+              {errors.useCases && <p className="mt-1.5 text-xs text-red-500 font-inter">{errors.useCases}</p>}
+            </fieldset>
+
+            <div className="flex items-start gap-2 rounded-lg bg-[#eef4fd] px-3 py-2 text-xs text-[#2f5fb8] font-inter">
+              <Info size={14} className="mt-0.5 shrink-0" />
+              <span>Your organization details will be reviewed for compliance. You can update them later from your profile.</span>
             </div>
 
-            {/* Info note */}
-            <div className="flex items-start gap-2 p-3 bg-blue-50 rounded-xl text-xs text-blue-700 font-inter">
-              <Info size={14} className="mt-0.5 shrink-0 text-blue-500" />
-              <span>Your organization details will be reviewed for compliance. You can update this information from your profile settings.</span>
-            </div>
-
-            <Button type="submit" variant="primary" size="lg" className="w-full" disabled={submitting}>
-              {submitting ? 'Completing Setup...' : 'Complete Setup'} <ArrowRight size={18} />
-            </Button>
+            <button
+              type="submit"
+              disabled={submitting}
+              className="flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-brand-blue text-sm font-semibold text-white font-inter transition-colors hover:bg-brand-blue-hover disabled:opacity-70"
+            >
+              {submitting ? 'Completing setup…' : 'Complete setup'} <ArrowRight size={16} />
+            </button>
           </form>
-        </Card>
-      </motion.div>
+        </motion.div>
+      </div>
     </div>
   );
 };

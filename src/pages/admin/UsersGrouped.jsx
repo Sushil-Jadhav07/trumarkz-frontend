@@ -1,3 +1,4 @@
+import { SlidingTabs } from '@/components/ui/SlidingTabs';
 import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AuthLayout } from '@/components/layout/AuthLayout';
@@ -277,22 +278,7 @@ export const UsersGrouped = () => {
             icon={Search}
           />
         </div>
-        <div className="flex gap-2 overflow-x-auto pb-0.5 no-scrollbar">
-          {USER_TYPE_TABS.map((tab) => (
-            <button
-              key={tab.value}
-              type="button"
-              onClick={() => setTypeFilter(tab.value)}
-              className={`px-4 py-2 rounded-full text-sm font-medium font-inter whitespace-nowrap transition-colors ${
-                typeFilter === tab.value
-                  ? 'bg-brand-blue text-white'
-                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
+        <SlidingTabs variant="chips" toggle ariaLabel="Account type" value={typeFilter} onChange={setTypeFilter} tabs={USER_TYPE_TABS} />
       </motion.div>
 
       {/* Content */}

@@ -1,15 +1,21 @@
+import { SlidingTabs } from '@/components/ui/SlidingTabs';
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { motion } from 'framer-motion';
-import { Area, AreaChart, ResponsiveContainer } from 'recharts';
 import { AuthLayout } from '@/components/layout/AuthLayout';
 import { PageHeader } from '@/components/shared/PageHeader';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
 import { Modal } from '@/components/ui/Modal';
+import { IndustrySelect } from '@/components/shared/IndustrySelect';
 import { DhiwaysDetailsEditor } from '@/components/shared/DhiwaysDetailsEditor';
 import { SERVICE_TYPE_OPTIONS } from '@/data/serviceTypeOptions';
 import { normalizeDhiwayDetails } from '@/utils/dhiway';
 import { adminAPI, getApiError } from '@/services/api';
+import { CustomSelect } from '@/components/ui/CustomSelect';
+import {
+  PageIntro, OutlineButton, SolidButton, SummaryBanner, DirectoryBar, StatusText, CheckMark, Avatar, RowActionMenu, NumberedPager, SortLabel,
+} from '@/components/shared/AdminPageParts';
+import { pageRange } from '@/utils/pagination';
 import { useAuth } from '@/context/AuthContext';
 import {
   Search,
@@ -410,11 +416,10 @@ const CreateUserModal = ({ isOpen, onClose, onSuccess }) => {
               </div>
             </div>
 
-            <Input
-              label="Industry Type"
-              placeholder="e.g. Healthcare"
+            <IndustrySelect
               value={form.industry_type}
-              onChange={set('industry_type')}
+              onChange={(v) => setForm((f) => ({ ...f, industry_type: v }))}
+              disabled={submitting}
             />
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -666,12 +671,11 @@ const EditUserModal = ({ isOpen, onClose, user, onSuccess }) => {
               {/* Industry Type / GSTIN / Business Reg. No. — three across
                   instead of two stacked rows, now that there's room. */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <Input
+                <IndustrySelect
                   dense
-                  label="Industry Type"
-                  placeholder="e.g. Healthcare"
                   value={form.industry_type}
-                  onChange={set('industry_type')}
+                  onChange={(v) => setForm((f) => ({ ...f, industry_type: v }))}
+                  disabled={submitting}
                 />
                 <Input dense label="GSTIN" value={form.gstin} onChange={set('gstin')} placeholder="27ABCDE1234F1Z5" />
                 <Input
@@ -1107,16 +1111,29 @@ const PermanentDeleteModal = ({ isOpen, onClose, user, onSuccess }) => {
   );
 };
 
-// ─── Grid template (7 columns) ────────────────────────────────────────────────
-const GRID = 'grid-cols-[minmax(0,2fr)_minmax(0,2fr)_minmax(0,1.3fr)_minmax(0,1.1fr)_minmax(0,1.8fr)_minmax(0,0.9fr)_80px]';
-
-// ─── Main Page ────────────────────────────────────────────────────────────────
-
 // GET /auth/users caps `limit` at 500 (confirmed live: limit=1000 returns a
 // 422 "Input should be less than or equal to 500"). That's comfortably above
 // the platform's current user count, so it's used as a practical "fetch
 // everything" ceiling below.
 const USERS_FETCH_LIMIT = 500;
+
+const PAGE_SIZE_OPTIONS = [10, 25, 50, 100].map((n) => ({ value: n, label: `${n} / page` }));
+const muted = 'text-[#7d8aa5]';
+
+// Verification marks per account type: an Individual has no approval or GST step and a Super
+// Admin has none of the three, so those show "n/a" instead of a misleading "not confirmed".
+const verificationMarks = (user) => {
+  const type = user.user_type === 'super-admin' ? 'super_admin' : user.user_type;
+  const yes = (v) => (v ? 'yes' : 'no');
+  return {
+    email: yes(user.email_verified),
+    approval: type === 'organization' ? yes(user.org_approved) : 'na',
+    gst: type === 'organization' ? yes(user.gst_verified) : 'na',
+    setup: type === 'super_admin' ? 'na' : yes(user.onboarding_completed),
+  };
+};
+
+const displayName = (u) => u.full_name || u.organization_name || '';
 
 export const AllUsersList = () => {
   const { user: currentUser } = useAuth();
@@ -1126,6 +1143,7 @@ export const AllUsersList = () => {
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
+  const [sort, setSort] = useState({ key: 'joined', dir: 'desc' });
 
   const [createOpen, setCreateOpen] = useState(false);
   const [editModal, setEditModal] = useState({ open: false, user: null });
@@ -1165,11 +1183,6 @@ export const AllUsersList = () => {
     setPage(1);
   };
 
-  const handlePageSizeChange = (size) => {
-    setPageSize(size);
-    setPage(1);
-  };
-
   const refresh = () => fetchUsers(typeFilter);
 
   const handleApprove = async (user) => {
@@ -1195,361 +1208,162 @@ export const AllUsersList = () => {
     );
   }, [users, search]);
 
-  // Real join trend for the full type-filtered user list, bucketed by day
-  // over the last 7 days.
-  const sparkData = useMemo(() => {
-    const days = Array.from({ length: 7 }).map((_, i) => {
-      const d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - (6 - i)); return d;
-    });
-    return days.map((day, i) => {
-      const next = new Date(day); next.setDate(day.getDate() + 1);
-      const value = users.filter((u) => {
-        if (!u.created_at) return false;
-        const t = new Date(u.created_at).getTime();
-        return t >= day.getTime() && t < next.getTime();
-      }).length;
-      return { i, value };
-    });
-  }, [users]);
+  const toggleSort = (key) => setSort((cur) => (cur.key === key ? { key, dir: cur.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: key === 'joined' ? 'desc' : 'asc' }));
+  const sortedUsers = useMemo(() => {
+    const dir = sort.dir === 'asc' ? 1 : -1;
+    return [...filteredUsers].sort((a, b) => dir * (sort.key === 'joined'
+      ? new Date(a.created_at || 0) - new Date(b.created_at || 0)
+      : (displayName(a) || a.email || '').localeCompare(displayName(b) || b.email || '')));
+  }, [filteredUsers, sort]);
 
-  // Pagination runs client-side over filteredUsers (the full type-filtered +
-  // search-filtered list), so the page count and "Showing X of Y" always
-  // match what search actually found, and paging never depends on which
-  // server page happens to be loaded.
-  const totalPages = Math.max(1, Math.ceil(filteredUsers.length / pageSize));
+  // Pagination runs client-side over the full type-filtered + search-filtered list, so the page
+  // count and "Showing X of Y" always match what search found.
+  const totalPages = Math.max(1, Math.ceil(sortedUsers.length / pageSize));
   const safePage = Math.min(page, totalPages);
-  const paginatedUsers = filteredUsers.slice((safePage - 1) * pageSize, safePage * pageSize);
-  const startIdx = filteredUsers.length === 0 ? 0 : (safePage - 1) * pageSize + 1;
-  const endIdx = Math.min(safePage * pageSize, filteredUsers.length);
-  const activeTabLabel = USER_TYPE_TABS.find((t) => t.value === typeFilter)?.label || 'All Users';
+  const paginatedUsers = sortedUsers.slice((safePage - 1) * pageSize, safePage * pageSize);
+  const { from: startIdx, to: endIdx } = pageRange(safePage, pageSize, sortedUsers.length);
+
+  const openEdit = (user) => (
+    user.user_type === 'super_admin' || user.user_type === 'super-admin'
+      ? setEditSuperAdminModal({ open: true, user })
+      : setEditModal({ open: true, user })
+  );
+
+  const rowMenu = (user) => [
+    { label: 'Mark organization approved', icon: CheckCircle, hidden: user.user_type !== 'organization' || !!user.org_approved, disabled: approvingId === user.id, onClick: () => handleApprove(user) },
+    { label: 'Revoke GST verification', icon: ShieldOff, tone: 'warning', hidden: user.user_type !== 'organization' || !user.gst_verified, onClick: () => setUnverifyGstModal({ open: true, user }) },
+    { label: 'Deactivate user', icon: UserX, tone: 'danger', hidden: !user.is_active || user.id === currentUser?.id, onClick: () => setDeactivateModal({ open: true, user }) },
+    { label: 'Delete permanently', icon: Trash2, tone: 'danger', hidden: user.id === currentUser?.id, onClick: () => setPermanentDeleteModal({ open: true, user }) },
+  ];
 
   return (
-    <AuthLayout title="User List">
-      <PageHeader
-        title="User List"
-        subtitle="Manage all platform users — create, edit, or deactivate accounts"
-        action={
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setCreateOpen(true)}
-              className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-brand-blue text-white text-sm font-medium font-inter hover:bg-brand-blue/90 transition-colors shadow-sm"
-            >
-              <UserPlus size={14} />
-              Create User
-            </button>
-            <button
-              type="button"
-              onClick={refresh}
-              disabled={loading}
-              className="flex items-center gap-2 px-3 py-2 rounded-xl border border-gray-200 text-sm text-gray-600 hover:bg-gray-50 transition-colors font-inter disabled:opacity-50"
-            >
-              <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
-              Refresh
-            </button>
-          </div>
-        }
+    <AuthLayout title="User List" breadcrumb={['Administration', 'User List']}>
+      <PageIntro
+        eyebrow="Account management"
+        title="User list"
+        subtitle="Manage platform users and account access."
+        actions={(
+          <>
+            <OutlineButton icon={RefreshCw} onClick={refresh} disabled={loading}>Refresh</OutlineButton>
+            <SolidButton icon={UserPlus} onClick={() => setCreateOpen(true)}>Create user</SolidButton>
+          </>
+        )}
       />
 
-      {/* Stats */}
-      <motion.div
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.22 }}
-        className="mb-5"
-      >
-        <Card className="px-5 py-4 flex items-center gap-4">
-          <div className="w-11 h-11 rounded-xl bg-blue-50 flex items-center justify-center shrink-0">
-            <Users size={20} className="text-brand-blue" />
-          </div>
-          <div className="min-w-[140px]">
-            <p className="text-xs text-gray-500 font-inter">Total Users</p>
-            <p className="text-2xl font-bold text-brand-dark font-sora leading-none mt-1">
-              {loading ? '—' : users.length}
-            </p>
-            <p className="text-xs text-gray-400 font-inter mt-1">{activeTabLabel}</p>
-          </div>
-          <div className="w-36 h-12 ml-auto shrink-0 hidden sm:block">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={sparkData} margin={{ top: 2, right: 4, left: 4, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="spark-users" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#2563eb" stopOpacity={0.3} />
-                    <stop offset="100%" stopColor="#2563eb" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <Area type="monotone" dataKey="value" stroke="#2563eb" strokeWidth={1.75} fill="url(#spark-users)" isAnimationActive={false} />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-        </Card>
-      </motion.div>
+      <SummaryBanner
+        icon={Users}
+        label="Total users"
+        value={loading ? '—' : users.length}
+        segments={['All registered accounts', 'Individual · Organization · Super Admin']}
+      />
 
-      {/* Filters */}
-      <motion.div
-        initial={{ opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.22, delay: 0.04 }}
-        className="flex flex-col sm:flex-row gap-3 mb-5"
-      >
-        <div className="flex-1 max-w-sm">
-          <Input
-            type="text"
-            placeholder="Search by name, email, or org…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            icon={Search}
+      <section aria-label="Users" className="overflow-hidden rounded-xl border border-gray-100 bg-white">
+        <DirectoryBar search={search} onSearch={(v) => { setSearch(v); setPage(1); }} placeholder="Search name, email or organization">
+          <SlidingTabs
+            variant="underline"
+            ariaLabel="Account type"
+            className="!border-b-0 overflow-x-auto"
+            value={typeFilter}
+            onChange={handleTypeChange}
+            tabs={USER_TYPE_TABS.map((tab) => ({
+              value: tab.value,
+              label: tab.label.replace('All Users', 'All users'),
+              count: typeFilter === tab.value && !loading ? users.length : null,
+            }))}
           />
-        </div>
-        <div className="flex gap-2 overflow-x-auto pb-0.5 no-scrollbar">
-          {USER_TYPE_TABS.map((tab) => (
-            <button
-              key={tab.value}
-              type="button"
-              onClick={() => handleTypeChange(tab.value)}
-              className={`px-4 py-2 rounded-full text-sm font-medium font-inter whitespace-nowrap transition-colors ${
-                typeFilter === tab.value
-                  ? 'bg-brand-blue text-white'
-                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-      </motion.div>
+        </DirectoryBar>
 
-      {/* Table */}
-      <motion.div
-        initial={{ opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.22, delay: 0.08 }}
-      >
-        <Card className="overflow-hidden">
-          <div className="overflow-x-auto">
-            <div className="min-w-[880px]">
-              {/* Header */}
-              <div className={`grid ${GRID} gap-3 px-5 py-3 bg-brand-bg border-b border-gray-100`}>
-                {['User', 'Email', 'Phone', 'Type', 'Status', 'Joined', 'Actions'].map((h) => (
-                  <span
-                    key={h}
-                    className={`text-[11px] font-semibold text-gray-400 uppercase tracking-wide font-inter ${h === 'Actions' ? 'text-right' : ''}`}
-                  >
-                    {h}
-                  </span>
-                ))}
-              </div>
+        <div className="overflow-x-auto scrollbar-hidden">
+          <table className="w-full min-w-[1040px] border-collapse text-left text-xs font-inter">
+            <thead>
+              <tr>
+                <th rowSpan={2} aria-sort={sort.key === 'name' ? (sort.dir === 'asc' ? 'ascending' : 'descending') : undefined} className="px-4 py-2.5"><SortLabel label="User & contact" active={sort.key === 'name'} onClick={() => toggleSort('name')} /></th>
+                <th rowSpan={2} className="px-3 py-2.5">Phone</th>
+                <th rowSpan={2} className="px-3 py-2.5">Account type</th>
+                <th rowSpan={2} className="px-3 py-2.5">Account</th>
+                <th colSpan={4} className="border-b border-[#d3dcee] px-3 py-1.5 text-center">Verification</th>
+                <th rowSpan={2} aria-sort={sort.key === 'joined' ? (sort.dir === 'asc' ? 'ascending' : 'descending') : undefined} className="px-3 py-2.5"><SortLabel label="Joined" active={sort.key === 'joined'} onClick={() => toggleSort('joined')} /></th>
+                <th rowSpan={2} className="px-3 py-2.5 text-right">Actions</th>
+              </tr>
+              <tr>
+                {['Email', 'Approval', 'GST', 'Setup'].map((h) => <th key={h} className="px-3 py-1.5 text-center">{h}</th>)}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {loading && Array.from({ length: 8 }).map((_, i) => (
+                <tr key={i} aria-hidden="true" className="motion-safe:animate-pulse">
+                  {Array.from({ length: 10 }).map((__, j) => <td key={j} className="px-4 py-3.5"><div className="h-3.5 w-3/4 rounded bg-gray-100" /></td>)}
+                </tr>
+              ))}
 
-              {/* Skeleton */}
-              {loading && (
-                <div role="status" aria-busy="true" aria-label="Loading users" className="divide-y divide-gray-50">
-                  {Array.from({ length: 8 }).map((_, i) => (
-                    <div key={i} className={`grid ${GRID} gap-3 px-5 py-4 motion-safe:animate-pulse items-center`}>
-                      <div className="flex items-center gap-2.5">
-                        <div className="w-7 h-7 rounded-full bg-gray-100 shrink-0" />
-                        <div className="h-3.5 bg-gray-100 rounded w-24" />
-                      </div>
-                      <div className="h-3.5 bg-gray-100 rounded w-36" />
-                      <div className="h-3.5 bg-gray-100 rounded w-20" />
-                      <div className="h-6 bg-gray-100 rounded-full w-20" />
-                      <div className="space-y-1.5">
-                        <div className="h-3 bg-gray-100 rounded w-24" />
-                        <div className="h-3 bg-gray-100 rounded w-14" />
-                        <div className="h-3 bg-gray-100 rounded w-18" />
-                      </div>
-                      <div className="h-3.5 bg-gray-100 rounded w-16" />
-                      <div className="flex gap-1 justify-end">
-                        <div className="w-7 h-7 bg-gray-100 rounded-lg" />
-                        <div className="w-7 h-7 bg-gray-100 rounded-lg" />
-                      </div>
-                    </div>
-                  ))}
-                </div>
+              {!loading && sortedUsers.length === 0 && (
+                <tr>
+                  <td colSpan={10} className="py-14 text-center">
+                    <Users size={22} className="mx-auto mb-2 text-gray-400" />
+                    <p className="text-sm font-medium text-brand-dark font-sora">No users found</p>
+                    <p className="mt-1 text-xs text-gray-500">{search ? 'Try a different search term.' : 'No users match this filter.'}</p>
+                  </td>
+                </tr>
               )}
 
-              {/* Empty */}
-              {!loading && filteredUsers.length === 0 && (
-                <div className="flex flex-col items-center justify-center py-16 text-center">
-                  <div className="w-12 h-12 rounded-2xl bg-gray-100 flex items-center justify-center mb-3">
-                    <Users size={20} className="text-gray-400" />
-                  </div>
-                  <p className="text-sm font-medium text-brand-dark font-sora">No users found</p>
-                  <p className="text-xs text-gray-400 font-inter mt-1">
-                    {search ? 'Try a different search term.' : 'No users match this filter.'}
-                  </p>
-                </div>
-              )}
-
-              {/* Rows */}
-              {!loading && filteredUsers.length > 0 && (
-                <div className="divide-y divide-gray-50">
-                  {paginatedUsers.map((user, i) => (
-                    <motion.div
-                      key={user.id || i}
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      transition={{ delay: i * 0.012 }}
-                      className={`grid ${GRID} gap-3 px-5 py-3.5 items-center hover:bg-gray-50/60 transition-colors ${!user.is_active ? 'opacity-60' : ''}`}
-                    >
-                      {/* User */}
-                      <div className="flex items-center gap-2.5 min-w-0">
-                        <div className="w-7 h-7 rounded-full bg-brand-blue/10 flex items-center justify-center shrink-0 text-[11px] font-bold text-brand-blue font-sora uppercase">
-                          {user.full_name?.[0] || user.organization_name?.[0] || user.email?.[0] || '?'}
+              {!loading && paginatedUsers.map((user) => {
+                const marks = verificationMarks(user);
+                const name = displayName(user);
+                return (
+                  <tr key={user.id} className={`transition-colors hover:bg-blue-50/30 ${!user.is_active ? 'opacity-60' : ''}`}>
+                    <td className="px-4 py-2">
+                      <div className="flex min-w-0 items-center gap-2.5">
+                        <Avatar name={name || user.email} />
+                        <div className="min-w-0">
+                          <p className="truncate text-[13px] text-brand-dark">{name || '—'}</p>
+                          <p className={`truncate ${muted}`}>{user.email || '—'}</p>
                         </div>
-                        <span className="text-sm font-medium text-brand-dark font-inter truncate">
-                          {user.full_name || user.organization_name || '—'}
-                        </span>
                       </div>
-
-                      {/* Email */}
-                      <div className="flex items-center gap-1.5 min-w-0">
-                        <Mail size={11} className="text-gray-400 shrink-0" />
-                        <span className="text-sm text-gray-500 font-inter truncate">{user.email || '—'}</span>
+                    </td>
+                    <td className={`whitespace-nowrap px-3 py-2 ${muted}`}>{user.phone_number || '—'}</td>
+                    <td className="px-3 py-2"><UserTypeBadge type={user.user_type} /></td>
+                    <td className="px-3 py-2"><StatusText kind={user.is_active ? 'active' : 'inactive'}>{user.is_active ? 'Active' : 'Inactive'}</StatusText></td>
+                    <td className="px-3 py-2 text-center"><CheckMark label="Email" state={marks.email} /></td>
+                    <td className="px-3 py-2 text-center"><CheckMark label="Approval" state={marks.approval} /></td>
+                    <td className="px-3 py-2 text-center"><CheckMark label="GST" state={marks.gst} /></td>
+                    <td className="px-3 py-2 text-center"><CheckMark label="Setup" state={marks.setup} /></td>
+                    <td className={`whitespace-nowrap px-3 py-2 ${muted}`}>{formatDate(user.created_at)}</td>
+                    <td className="px-3 py-2">
+                      <div className="flex items-center justify-end gap-2">
+                        <button type="button" onClick={() => openEdit(user)} aria-label={`Edit ${name || user.email || 'user'}`} className="rounded px-1 text-xs font-semibold text-brand-blue hover:underline">Edit</button>
+                        <RowActionMenu label={`Actions for ${name || user.email || 'user'}`} items={rowMenu(user)} />
                       </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
 
-                      {/* Phone */}
-                      <div className="flex items-center gap-1.5 min-w-0">
-                        <Phone size={11} className="text-gray-400 shrink-0" />
-                        <span className="text-sm text-gray-500 font-inter truncate">
-                          {user.phone_number || '—'}
-                        </span>
-                      </div>
-
-                      {/* Type */}
-                      <div>
-                        <UserTypeBadge type={user.user_type} />
-                      </div>
-
-                      {/* Status */}
-                      <div className="flex flex-col gap-1">
-                        <StatusPill active={user.email_verified} label="Email verified" />
-                        <StatusPill active={user.is_active} label="Active" />
-                        {user.user_type === 'organization' && (
-                          <>
-                            <StatusPill active={user.org_approved} label="Approved" />
-                            <StatusPill active={user.gst_verified} label="GST verified" />
-                          </>
-                        )}
-                        <StatusPill active={user.onboarding_completed} label="Onboarded" />
-                      </div>
-
-                      {/* Joined */}
-                      <span className="text-xs text-gray-400 font-inter">{formatDate(user.created_at)}</span>
-
-                      {/* Actions */}
-                      <div className="flex items-center gap-1 justify-end">
-                        <button
-                          type="button"
-                          onClick={() => (
-                            user.user_type === 'super_admin'
-                              ? setEditSuperAdminModal({ open: true, user })
-                              : setEditModal({ open: true, user })
-                          )}
-                          title={user.user_type === 'super_admin' ? 'Edit superadmin' : 'Edit user'}
-                          className="p-1.5 rounded-lg text-gray-400 hover:text-brand-blue hover:bg-blue-50 transition-colors"
-                        >
-                          <Pencil size={14} />
-                        </button>
-                        {user.user_type === 'organization' && !user.org_approved && (
-                          <button
-                            type="button"
-                            onClick={() => handleApprove(user)}
-                            disabled={approvingId === user.id}
-                            title="Mark organization as approved (informational only — no longer required for access)"
-                            className="p-1.5 rounded-lg text-gray-400 hover:text-green-600 hover:bg-green-50 transition-colors disabled:opacity-50"
-                          >
-                            {approvingId === user.id
-                              ? <RefreshCw size={14} className="animate-spin" />
-                              : <CheckCircle size={14} />}
-                          </button>
-                        )}
-                        {user.user_type === 'organization' && user.gst_verified && (
-                          <button
-                            type="button"
-                            onClick={() => setUnverifyGstModal({ open: true, user })}
-                            title="Revoke GST verification"
-                            className="p-1.5 rounded-lg text-gray-400 hover:text-amber-600 hover:bg-amber-50 transition-colors"
-                          >
-                            <ShieldOff size={14} />
-                          </button>
-                        )}
-                        {user.is_active && user.id !== currentUser?.id && (
-                          <button
-                            type="button"
-                            onClick={() => setDeactivateModal({ open: true, user })}
-                            title="Deactivate user"
-                            className="p-1.5 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors"
-                          >
-                            <UserX size={14} />
-                          </button>
-                        )}
-                        {user.id !== currentUser?.id && (
-                          <button
-                            type="button"
-                            onClick={() => setPermanentDeleteModal({ open: true, user })}
-                            title="Permanently delete user"
-                            className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
-                          >
-                            <Trash2 size={14} />
-                          </button>
-                        )}
-                      </div>
-                    </motion.div>
-                  ))}
-                </div>
-              )}
+        {!loading && sortedUsers.length > 0 && (
+          <div className="flex flex-col justify-between gap-3 border-t border-gray-100 px-5 py-3 lg:flex-row lg:items-center">
+            <div>
+              <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-600 font-inter">
+                <span className="inline-flex items-center gap-1"><CheckMark label="Legend" state="yes" /> Confirmed</span>
+                <span className="inline-flex items-center gap-1"><CheckMark label="Legend" state="no" /> Not confirmed</span>
+                <span className="inline-flex items-center gap-1"><span className="text-[#8895ad]">n/a</span> Not applicable</span>
+              </p>
+              <p className="mt-1 text-xs text-gray-600 font-inter">Showing {startIdx} to {endIdx} of {sortedUsers.length} users</p>
+            </div>
+            <div className="flex flex-wrap items-center gap-3">
+              <NumberedPager page={safePage} totalPages={totalPages} onPage={setPage} />
+              <CustomSelect
+                value={pageSize}
+                onChange={(size) => { setPageSize(size); setPage(1); }}
+                ariaLabel="Rows per page"
+                className="w-28"
+                options={PAGE_SIZE_OPTIONS}
+              />
             </div>
           </div>
-
-          {/* Pagination */}
-          {!loading && filteredUsers.length > 0 && (
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-5 py-3.5 border-t border-gray-100 bg-brand-bg">
-              <p className="text-xs text-gray-400 font-inter">
-                Showing {startIdx}–{endIdx} of {filteredUsers.length} users
-              </p>
-              <div className="flex items-center gap-3">
-                <div className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    onClick={() => setPage((p) => Math.max(1, p - 1))}
-                    disabled={safePage === 1}
-                    className="p-1.5 rounded-lg border border-gray-200 text-gray-500 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50"
-                  >
-                    <ChevronLeft size={14} />
-                  </button>
-                  {Array.from({ length: totalPages }).slice(0, 5).map((_, i) => (
-                    <button
-                      key={i}
-                      type="button"
-                      onClick={() => setPage(i + 1)}
-                      className={`w-7 h-7 rounded-lg text-xs font-semibold font-inter ${
-                        safePage === i + 1 ? 'bg-brand-blue text-white' : 'text-gray-500 hover:bg-white border border-gray-200'
-                      }`}
-                    >
-                      {i + 1}
-                    </button>
-                  ))}
-                  <button
-                    type="button"
-                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                    disabled={safePage >= totalPages}
-                    className="p-1.5 rounded-lg border border-gray-200 text-gray-500 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50"
-                  >
-                    <ChevronRight size={14} />
-                  </button>
-                </div>
-                <select
-                  value={pageSize}
-                  onChange={(e) => handlePageSizeChange(Number(e.target.value))}
-                  className="rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-semibold font-inter text-gray-600 focus:outline-none focus:ring-2 focus:ring-brand-blue/20"
-                >
-                  {[10, 25, 50, 100].map((n) => <option key={n} value={n}>{n} / page</option>)}
-                </select>
-              </div>
-            </div>
-          )}
-        </Card>
-      </motion.div>
+        )}
+      </section>
 
       {/* Modals */}
       <CreateUserModal

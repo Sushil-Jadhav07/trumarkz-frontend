@@ -1,26 +1,24 @@
 import { Modal } from '@/components/ui/Modal';
 import { SkeletonTableRows } from '@/components/shared/LoadingSkeleton';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { AnimatePresence } from 'framer-motion';
 import { AuthLayout } from '@/components/layout/AuthLayout';
-import { PageHeader } from '@/components/shared/PageHeader';
-import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
-import { Input } from '@/components/ui/Input';
+import { CustomSelect } from '@/components/ui/CustomSelect';
+import { StackedSheets } from '@/components/shared/KpiCard';
+import {
+  PageIntro, SearchField, Avatar, NumberedPager, SortLabel,
+} from '@/components/shared/AdminPageParts';
+import { pageRange } from '@/utils/pagination';
+import { isValidEmail } from '@/utils/certificateAccess';
 import { adminAPI, getApiError } from '@/services/api';
 import {
   ShieldCheck,
   Mail,
-  CheckCircle,
-  AlertCircle,
+  CheckCircle2,
   History,
-  X,
-  Search,
-  RefreshCw,
   Building2,
   UserRound,
-  ChevronLeft,
-  ChevronRight,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -39,6 +37,17 @@ const ROLE_LABELS = {
   super_admin: 'Super Admin',
   'super-admin': 'Super Admin',
 };
+
+const PERMISSIONS = [
+  'Approve or reject organization registrations',
+  'Monitor all platform batches',
+  'Manage verifiers and pricing',
+  'Resolve operational issues',
+  'Create and promote other Super Admins',
+];
+
+const PAGE_SIZE_OPTIONS = [5, 10, 25, 50].map((n) => ({ value: n, label: `${n} / page` }));
+const muted = 'text-[#7d8aa5]';
 
 const formatJoined = (value) => {
   if (!value) return '—';
@@ -59,6 +68,7 @@ export const PromoteSuperAdmin = () => {
   const [orgFilter, setOrgFilter] = useState('');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(5);
+  const [sort, setSort] = useState({ key: null, dir: 'asc' });
 
   const loadUsers = useCallback(async () => {
     setUsersLoading(true);
@@ -77,7 +87,12 @@ export const PromoteSuperAdmin = () => {
   const allUsers = useMemo(() => flattenUsers(groupedUsers), [groupedUsers]);
 
   const orgOptions = useMemo(
-    () => Array.from(new Set(allUsers.map((u) => u.organizationName).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
+    () => [
+      { value: '', label: 'All organizations' },
+      ...Array.from(new Set(allUsers.map((u) => u.organizationName).filter(Boolean)))
+        .sort((a, b) => a.localeCompare(b))
+        .map((org) => ({ value: org, label: org })),
+    ],
     [allUsers]
   );
 
@@ -92,18 +107,26 @@ export const PromoteSuperAdmin = () => {
     });
   }, [allUsers, search, orgFilter]);
 
+  const toggleSort = (key) => setSort((cur) => (cur.key === key ? { key, dir: cur.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: key === 'joined' ? 'desc' : 'asc' }));
+  const sortedUsers = useMemo(() => {
+    if (!sort.key) return filteredUsers;
+    const dir = sort.dir === 'asc' ? 1 : -1;
+    return [...filteredUsers].sort((a, b) => dir * (sort.key === 'joined'
+      ? new Date(a.created_at || 0) - new Date(b.created_at || 0)
+      : String(a.full_name || a.email || '').localeCompare(String(b.full_name || b.email || ''))));
+  }, [filteredUsers, sort]);
+
   useEffect(() => { setPage(1); }, [search, orgFilter]);
 
-  const totalPages = Math.max(1, Math.ceil(filteredUsers.length / pageSize));
+  const totalPages = Math.max(1, Math.ceil(sortedUsers.length / pageSize));
   const safePage = Math.min(page, totalPages);
-  const pagedUsers = filteredUsers.slice((safePage - 1) * pageSize, safePage * pageSize);
+  const pagedUsers = sortedUsers.slice((safePage - 1) * pageSize, safePage * pageSize);
+  const { from: startIdx, to: endIdx } = pageRange(safePage, pageSize, sortedUsers.length);
 
   const selectedUser = useMemo(
     () => allUsers.find((user) => user.email?.toLowerCase() === email.trim().toLowerCase()),
     [allUsers, email]
   );
-
-  const isValidEmail = (v) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim());
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -149,278 +172,197 @@ export const PromoteSuperAdmin = () => {
   };
 
   return (
-    <AuthLayout title="Promote Super Admin">
-      <PageHeader
+    <AuthLayout title="Promote Super Admin" breadcrumb={['Administration', 'Promote Admin']}>
+      <PageIntro
+        eyebrow="Access management"
         title="Promote Super Admin"
-        subtitle="Grant super-admin privileges to an existing user account"
+        subtitle="Grant super-admin privileges to an existing account."
       />
 
-      <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)] gap-6">
-        <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }}>
-          <Card className="p-6 h-full">
-            <div className="flex items-start gap-3 p-4 rounded-xl bg-amber-50 border border-amber-200 mb-6">
-              <AlertCircle size={18} className="text-amber-500 shrink-0 mt-0.5" />
-              <div>
-                <p className="text-sm font-semibold text-amber-800 font-inter">Existing account only</p>
-                <p className="text-xs text-amber-700 font-inter mt-0.5">
-                  This action elevates an existing user. Pick from the live user list below or enter
-                  the email manually if you already know it.
-                </p>
-              </div>
-            </div>
-
-            <form onSubmit={handleSubmit} className="space-y-5">
-              <div>
-                <label className="block text-sm font-medium text-brand-dark font-inter mb-1.5">
-                  User Email Address
-                </label>
-                <Input
-                  type="email"
-                  placeholder="user@example.com"
-                  value={email}
-                  onChange={(e) => { setEmail(e.target.value); setError(''); }}
-                  icon={Mail}
-                  error={error}
-                  disabled={loading}
-                />
-                <p className="text-xs text-gray-400 font-inter mt-1.5">
-                  The account should already exist before promotion.
-                </p>
-              </div>
-
-              {selectedUser && (
-                <div className="rounded-2xl border border-brand-blue/20 bg-brand-blue/[0.04] p-4">
-                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-brand-blue">Selected account</p>
-                  <div className="mt-3 flex items-start gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-brand-blue/10 flex items-center justify-center shrink-0">
-                      <UserRound size={18} className="text-brand-blue" />
-                    </div>
-                    <div>
-                      <p className="text-sm font-semibold text-slate-950 font-inter">
-                        {selectedUser.full_name || 'Existing user'}
-                      </p>
-                      <p className="text-xs text-slate-500 font-inter">{selectedUser.email}</p>
-                      <p className="text-xs text-slate-400 font-inter mt-1">{selectedUser.organizationName}</p>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              <Button
-                type="submit"
-                variant="primary"
-                icon={ShieldCheck}
-                loading={loading}
-                className="w-full sm:w-auto"
-              >
-                Promote to Super Admin
-              </Button>
-            </form>
-          </Card>
-        </motion.div>
-
-        <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25, delay: 0.08 }}>
-          <Card className="p-5 h-full">
-            <div className="flex items-center gap-2 mb-4">
-              <div className="w-8 h-8 rounded-lg bg-brand-blue/10 flex items-center justify-center">
-                <ShieldCheck size={16} className="text-brand-blue" />
-              </div>
-              <h3 className="font-sora font-semibold text-brand-dark text-sm">Super Admin Permissions</h3>
-            </div>
-            <ul className="space-y-2">
-              {[
-                'Approve or reject organisation registrations',
-                'Monitor all platform batches',
-                'Manage verifiers and pricing',
-                'Resolve disputes and operational issues',
-                'Create and promote other super admins',
-              ].map((item) => (
-                <li key={item} className="flex items-start gap-2 text-xs text-gray-600 font-inter">
-                  <CheckCircle size={13} className="text-green-500 mt-0.5 shrink-0" />
-                  {item}
-                </li>
-              ))}
-            </ul>
-          </Card>
-        </motion.div>
+      {/* What this does */}
+      <div className="relative mb-4 overflow-hidden rounded-xl bg-gradient-to-r from-[#1D5CF2] to-[#2B6BFA] px-5 py-3.5 text-white shadow-[0_10px_24px_-14px_rgba(29,92,242,0.6)]">
+        <StackedSheets className="pointer-events-none absolute -right-6 top-1/2 h-[110%] -translate-y-1/2" />
+        <div className="relative flex items-center gap-3.5">
+          <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-white/15"><ShieldCheck size={22} strokeWidth={1.75} /></span>
+          <div>
+            <p className="text-sm font-semibold">Existing accounts only</p>
+            <p className="mt-0.5 text-sm text-white/90">Select a user from the directory or enter their email.</p>
+          </div>
+        </div>
       </div>
 
-      {/* User Directory */}
-      <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25, delay: 0.12 }} className="mt-6">
-        <Card className="p-0 overflow-hidden border border-gray-200 shadow-sm">
-          <div className="px-6 py-5 border-b border-gray-100 bg-gradient-to-r from-white to-gray-50/70">
-            <h3 className="font-sora font-semibold text-brand-dark text-lg">User Directory</h3>
-            <p className="text-sm text-gray-500 font-inter mt-1">
-              Search existing users and click promote to grant super-admin privileges.
-            </p>
-          </div>
+      <div className="mb-4 grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.4fr)_minmax(320px,1fr)]">
+        <section aria-label="Promote by email" className="rounded-xl border border-gray-100 bg-white p-5">
+          <h2 className="font-sora text-base font-semibold text-brand-dark">Promote by email</h2>
+          <p className="mt-0.5 text-xs text-gray-500 font-inter">The account must already exist.</p>
 
-          <div className="p-4 flex flex-col sm:flex-row gap-3 border-b border-gray-100">
-            <div className="flex-1">
-              <Input
-                type="text"
-                placeholder="Search by name, email, or organization"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                icon={Search}
+          <form onSubmit={handleSubmit} noValidate className="mt-4">
+            <label htmlFor="promote-email" className="block text-xs font-medium text-gray-700 font-inter">User email address</label>
+            <div className="relative mt-1.5">
+              <Mail size={16} strokeWidth={1.75} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
+              <input
+                id="promote-email"
+                type="email"
+                inputMode="email"
+                autoComplete="off"
+                placeholder="user@example.com"
+                value={email}
+                onChange={(e) => { setEmail(e.target.value); setError(''); }}
+                disabled={loading}
+                aria-invalid={!!error}
+                aria-describedby={error ? 'promote-email-error' : undefined}
+                className={`h-11 w-full rounded-lg border bg-white pl-10 pr-3 text-sm text-gray-700 font-inter placeholder:text-gray-500 focus:outline-none focus:ring-2 disabled:bg-gray-50 ${error ? 'border-red-400 focus:ring-red-200' : 'border-gray-200 focus:border-brand-blue focus:ring-brand-blue/20'}`}
               />
             </div>
-            <div className="flex items-center gap-2">
-              <Building2 size={14} className="text-gray-400 shrink-0" />
-              <select
-                value={orgFilter}
-                onChange={(e) => setOrgFilter(e.target.value)}
-                className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold font-inter text-gray-600 focus:outline-none focus:ring-2 focus:ring-brand-blue/20 min-w-[200px]"
-              >
-                <option value="">All Organizations</option>
-                {orgOptions.map((org) => (
-                  <option key={org} value={org}>{org}</option>
-                ))}
-              </select>
-              {usersLoading && <RefreshCw size={16} className="animate-spin text-gray-400 shrink-0" />}
-            </div>
-          </div>
+            {error && <p id="promote-email-error" role="alert" className="mt-1.5 text-xs text-red-600 font-inter">{error}</p>}
 
-          <div className="overflow-x-auto scrollbar-hidden">
-            <table className="w-full min-w-[820px] border-collapse">
-              <thead>
-                <tr className="bg-gray-50 border-b border-gray-100">
-                  {['User', 'Organization', 'Email', 'Role', 'Joined', 'Action'].map((h) => (
-                    <th key={h} className={`px-5 py-3 text-[11px] font-semibold uppercase tracking-wide text-gray-500 font-inter ${h === 'Action' ? 'text-right' : 'text-left'}`}>
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100 bg-white">
-                {usersLoading ? (
-                  <SkeletonTableRows columns={6} label="Loading users" />
-                ) : pagedUsers.length === 0 ? (
-                  <tr><td colSpan={6} className="py-10 text-center text-sm text-gray-400 font-inter">No users found</td></tr>
-                ) : (
-                  pagedUsers.map((user) => {
-                    const isSelected = email.trim().toLowerCase() === String(user.email || '').toLowerCase();
-                    const roleLabel = ROLE_LABELS[user.user_type] || 'User';
-                    return (
-                      <tr key={`${user.id}-${user.email}`} className={`transition-colors ${isSelected ? 'bg-brand-blue/[0.04]' : 'hover:bg-gray-50/70'}`}>
-                        <td className="px-5 py-4">
-                          <div className="flex items-center gap-3">
-                            <div className="w-8 h-8 rounded-full bg-brand-blue/10 text-brand-blue flex items-center justify-center shrink-0 text-xs font-semibold font-inter">
-                              {(user.full_name || 'U').slice(0, 1).toUpperCase()}
-                            </div>
-                            <div className="min-w-0">
-                              <p className="text-sm font-semibold text-brand-dark font-inter truncate">{user.full_name || 'Existing user'}</p>
-                              <p className="text-xs text-gray-400 font-inter truncate">{user.email}</p>
-                            </div>
-                          </div>
-                        </td>
-                        <td className="px-5 py-4">
-                          <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-[11px] text-slate-600 font-inter">
-                            <Building2 size={11} />
-                            {user.organizationName}
-                          </span>
-                        </td>
-                        <td className="px-5 py-4 text-xs text-gray-500 font-inter">{user.email}</td>
-                        <td className="px-5 py-4">
-                          <span className="px-2.5 py-1 rounded-lg bg-gray-100 text-xs text-gray-600 font-inter border border-gray-200">{roleLabel}</span>
-                        </td>
-                        <td className="px-5 py-4 text-xs text-gray-500 font-inter whitespace-nowrap">{formatJoined(user.created_at)}</td>
-                        <td className="px-5 py-4 text-right">
-                          <Button variant="outline" size="sm" icon={ShieldCheck} onClick={() => handlePromoteRow(user.email)} disabled={loading}>
-                            Promote
-                          </Button>
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
-
-          {!usersLoading && filteredUsers.length > 0 && (
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-6 py-4 border-t border-gray-100">
-              <p className="text-xs text-gray-400 font-inter">
-                Showing {(safePage - 1) * pageSize + 1} to {Math.min(safePage * pageSize, filteredUsers.length)} of {filteredUsers.length} users
-              </p>
-              <div className="flex items-center gap-3">
-                <div className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    disabled={safePage <= 1}
-                    onClick={() => setPage((p) => Math.max(1, p - 1))}
-                    className="p-1.5 rounded-lg border border-gray-200 text-gray-500 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50"
-                  >
-                    <ChevronLeft size={14} />
-                  </button>
-                  {Array.from({ length: totalPages }).slice(0, 5).map((_, i) => {
-                    const pageNum = i + 1;
-                    return (
-                      <button
-                        key={pageNum}
-                        type="button"
-                        onClick={() => setPage(pageNum)}
-                        className={`w-7 h-7 rounded-lg text-xs font-semibold font-inter ${
-                          safePage === pageNum ? 'bg-brand-blue text-white' : 'text-gray-500 hover:bg-gray-50 border border-gray-200'
-                        }`}
-                      >
-                        {pageNum}
-                      </button>
-                    );
-                  })}
-                  <button
-                    type="button"
-                    disabled={safePage >= totalPages}
-                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                    className="p-1.5 rounded-lg border border-gray-200 text-gray-500 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50"
-                  >
-                    <ChevronRight size={14} />
-                  </button>
+            {selectedUser && (
+              <div className="mt-3 flex items-center gap-3 rounded-lg border border-brand-blue/20 bg-brand-blue/[0.04] px-3 py-2.5">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand-blue/10"><UserRound size={16} className="text-brand-blue" /></span>
+                <div className="min-w-0">
+                  <p className="truncate text-[13px] font-semibold text-brand-dark font-inter">{selectedUser.full_name || 'Existing user'}</p>
+                  <p className="truncate text-xs text-gray-500 font-inter">{selectedUser.email} · {selectedUser.organizationName}</p>
                 </div>
-                <select
-                  value={pageSize}
-                  onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }}
-                  className="rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-semibold font-inter text-gray-600 focus:outline-none focus:ring-2 focus:ring-brand-blue/20"
-                >
-                  {[5, 10, 25, 50].map((n) => <option key={n} value={n}>{n} / page</option>)}
-                </select>
               </div>
+            )}
+
+            <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <p className="text-xs text-gray-500 font-inter">Promotion grants access across the platform.</p>
+              <Button type="submit" variant="primary" icon={ShieldCheck} loading={loading} disabled={!email.trim()} className="w-full sm:w-auto">
+                Promote to Super Admin
+              </Button>
             </div>
-          )}
-        </Card>
-      </motion.div>
+          </form>
+        </section>
+
+        <section aria-label="Super Admin permissions" className="rounded-xl border border-gray-100 bg-white p-5">
+          <div className="flex items-center gap-3">
+            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#e3ebf8]"><ShieldCheck size={17} className="text-brand-blue" /></span>
+            <h2 className="font-sora text-base font-semibold text-brand-dark">Super Admin permissions</h2>
+          </div>
+          <ul className="mt-4 space-y-2.5">
+            {PERMISSIONS.map((item) => (
+              <li key={item} className="flex items-start gap-2.5 text-sm text-gray-600 font-inter">
+                <CheckCircle2 size={17} strokeWidth={1.75} className="mt-0.5 shrink-0 text-brand-blue" />
+                {item}
+              </li>
+            ))}
+          </ul>
+        </section>
+      </div>
+
+      {/* User directory */}
+      <section aria-label="User directory" className="overflow-hidden rounded-xl border border-gray-100 bg-white">
+        <div className="flex flex-col gap-3 px-5 pb-3 pt-4 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <h2 className="flex items-center gap-2.5 font-sora text-base font-semibold text-brand-dark">
+              User directory
+              {!usersLoading && <span className="rounded-full bg-[#e3ebf8] px-2.5 py-0.5 text-xs font-semibold text-brand-blue font-inter">{allUsers.length} users</span>}
+            </h2>
+            <p className="mt-0.5 text-xs text-gray-500 font-inter">Select an account to review before promotion.</p>
+          </div>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <SearchField search={search} onSearch={setSearch} placeholder="Search name, email or organization" />
+            <CustomSelect
+              value={orgFilter}
+              onChange={setOrgFilter}
+              options={orgOptions}
+              ariaLabel="Filter by organization"
+              searchable
+              icon={Building2}
+              className="w-full sm:w-52"
+            />
+          </div>
+        </div>
+
+        <div className="overflow-x-auto scrollbar-hidden">
+          <table className="w-full min-w-[820px] border-collapse text-left text-xs font-inter">
+            <thead>
+              <tr>
+                <th aria-sort={sort.key === 'name' ? (sort.dir === 'asc' ? 'ascending' : 'descending') : undefined} className="px-4 py-2.5"><SortLabel label="User" active={sort.key === 'name'} onClick={() => toggleSort('name')} /></th>
+                <th className="px-4 py-2.5">Organization</th>
+                <th className="px-4 py-2.5">Email</th>
+                <th className="px-4 py-2.5">Current role</th>
+                <th aria-sort={sort.key === 'joined' ? (sort.dir === 'asc' ? 'ascending' : 'descending') : undefined} className="px-4 py-2.5"><SortLabel label="Joined" active={sort.key === 'joined'} onClick={() => toggleSort('joined')} /></th>
+                <th className="px-4 py-2.5 text-right">Action</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {usersLoading ? (
+                <SkeletonTableRows columns={6} label="Loading users" />
+              ) : pagedUsers.length === 0 ? (
+                <tr><td colSpan={6} className="py-12 text-center text-sm text-gray-500">No users found</td></tr>
+              ) : (
+                pagedUsers.map((user) => {
+                  const isSelected = email.trim().toLowerCase() === String(user.email || '').toLowerCase();
+                  const roleLabel = ROLE_LABELS[user.user_type] || 'User';
+                  return (
+                    <tr key={`${user.id}-${user.email}`} className={`transition-colors ${isSelected ? 'bg-brand-blue/[0.05]' : 'hover:bg-blue-50/30'}`}>
+                      <td className="px-4 py-2">
+                        <div className="flex min-w-0 items-center gap-2.5">
+                          <Avatar name={user.full_name || user.email} />
+                          <span className="truncate text-[13px] text-brand-dark">{user.full_name || 'Existing user'}</span>
+                        </div>
+                      </td>
+                      <td className={`px-4 py-2.5 ${muted}`}>{user.organizationName}</td>
+                      <td className={`px-4 py-2.5 ${muted}`}>{user.email || '—'}</td>
+                      <td className="px-4 py-2.5"><span className="inline-flex rounded-md bg-gray-100 px-2.5 py-1 text-[11px] font-medium text-gray-600">{roleLabel}</span></td>
+                      <td className={`whitespace-nowrap px-4 py-2.5 ${muted}`}>{formatJoined(user.created_at)}</td>
+                      <td className="px-4 py-2 text-right">
+                        <button
+                          type="button"
+                          onClick={() => handlePromoteRow(user.email)}
+                          disabled={loading || !user.email}
+                          title={user.email ? undefined : "This account has no email on file, so it can't be promoted from here"}
+                          aria-label={`Promote ${user.full_name || user.email || 'user'} to Super Admin`}
+                          className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-brand-blue/70 bg-white px-3 text-xs font-semibold text-brand-blue transition-colors hover:bg-blue-50 disabled:opacity-50"
+                        >
+                          <ShieldCheck size={14} /> Promote
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {!usersLoading && sortedUsers.length > 0 && (
+          <div className="flex flex-col justify-between gap-3 border-t border-gray-100 px-5 py-3 lg:flex-row lg:items-center">
+            <p className="text-xs text-gray-600 font-inter">Showing {startIdx}–{endIdx} of {sortedUsers.length} users</p>
+            <div className="flex flex-wrap items-center gap-3">
+              <NumberedPager page={safePage} totalPages={totalPages} onPage={setPage} />
+              <CustomSelect
+                value={pageSize}
+                onChange={(n) => { setPageSize(n); setPage(1); }}
+                options={PAGE_SIZE_OPTIONS}
+                ariaLabel="Rows per page"
+                className="w-28"
+              />
+            </div>
+          </div>
+        )}
+      </section>
 
       {history.length > 0 && (
-        <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }} className="mt-6">
-          <Card className="p-0 overflow-hidden border border-gray-100">
-            <div className="px-5 py-4 border-b border-gray-100 flex items-center gap-2">
-              <History size={16} className="text-gray-400" />
-              <h3 className="font-sora font-semibold text-brand-dark">Session Promotion Log</h3>
-            </div>
-            <div className="divide-y divide-gray-100">
-              {history.map((entry, i) => (
-                <motion.div
-                  key={`${entry.email}-${i}`}
-                  initial={{ opacity: 0, x: -8 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: i * 0.05 }}
-                  className="flex items-center justify-between px-5 py-3.5"
-                >
-                  <div>
-                    <p className="text-sm font-medium text-brand-dark font-inter">{entry.name}</p>
-                    <p className="text-xs text-gray-500 font-inter">{entry.email}</p>
-                    <p className="text-xs text-gray-400 font-inter mt-0.5">
-                      {entry.organizationName} · {entry.promotedAt}
-                    </p>
-                  </div>
-                  <span className="text-xs font-medium text-green-600 bg-green-50 px-2.5 py-1 rounded-lg font-inter">
-                    Promoted
-                  </span>
-                </motion.div>
-              ))}
-            </div>
-          </Card>
-        </motion.div>
+        <section aria-label="Promotions this session" className="mt-4 overflow-hidden rounded-xl border border-gray-100 bg-white">
+          <div className="flex items-center gap-2 border-b border-gray-100 px-5 py-3">
+            <History size={16} className="text-gray-500" />
+            <h2 className="font-sora text-base font-semibold text-brand-dark">Promoted this session</h2>
+          </div>
+          <ul className="divide-y divide-gray-100">
+            {history.map((entry, i) => (
+              <li key={`${entry.email}-${i}`} className="flex items-center justify-between gap-3 px-5 py-3">
+                <div className="min-w-0">
+                  <p className="truncate text-[13px] font-medium text-brand-dark font-inter">{entry.name}</p>
+                  <p className="truncate text-xs text-gray-500 font-inter">{entry.email} · {entry.organizationName} · {entry.promotedAt}</p>
+                </div>
+                <span className="shrink-0 rounded-md bg-green-100 px-2.5 py-1 text-[11px] font-medium text-green-700 font-inter">Promoted</span>
+              </li>
+            ))}
+          </ul>
+        </section>
       )}
 
       <AnimatePresence>
@@ -438,7 +380,7 @@ export const PromoteSuperAdmin = () => {
                   </p>
                 )}
               </div>
-              <p className="text-xs text-gray-400 font-inter mb-5">
+              <p className="text-xs text-gray-500 font-inter mb-5">
                 This will give the user full administrative access to the platform.
               </p>
 

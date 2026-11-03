@@ -31,6 +31,11 @@ export const GoogleCallback = () => {
       const error = searchParams.get('error');
       const message = searchParams.get('message');
 
+      if (error === 'access_denied') {
+        navigate('/login?error=cancelled', { replace: true });
+        return;
+      }
+
       if (error) {
         toast.error('Google login was cancelled or failed.');
         navigate(`/auth/error?message=${encodeURIComponent(message || error)}`, { replace: true });

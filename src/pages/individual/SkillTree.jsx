@@ -3,7 +3,7 @@ import React, { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { AuthLayout } from '@/components/layout/AuthLayout';
-import { PageHeader } from '@/components/shared/PageHeader';
+import { PageIntro } from '@/components/shared/AdminPageParts';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
@@ -16,8 +16,12 @@ import {
   AlertTriangle,
   ArrowRight,
   CheckCircle,
+  CheckCircle2,
+  ChevronRight,
   Clock,
   Code2,
+  Share2,
+  ShieldCheck,
   ExternalLink,
   FileText,
   FolderKanban,
@@ -33,23 +37,26 @@ import {
 } from 'lucide-react';
 
 const sections = [
-  { key: 'education', label: 'Education', icon: GraduationCap, color: 'text-brand-blue', bg: 'bg-blue-50' },
-  { key: 'technical', label: 'Technical Skills', icon: Code2, color: 'text-green-600', bg: 'bg-green-50' },
-  { key: 'soft', label: 'Soft Skills', icon: Heart, color: 'text-purple-600', bg: 'bg-purple-50' },
-  { key: 'project', label: 'Projects', icon: FolderKanban, color: 'text-orange-500', bg: 'bg-orange-50' },
+  { key: 'education', label: 'Education', itemLabel: 'Education', addLabel: 'Add education', icon: GraduationCap },
+  { key: 'technical', label: 'Technical skills', itemLabel: 'Technical skill', addLabel: 'Add skill', icon: Code2 },
+  { key: 'soft', label: 'Soft skills', itemLabel: 'Soft skill', addLabel: 'Add soft skill', icon: Heart },
+  { key: 'project', label: 'Projects', itemLabel: 'Project', addLabel: 'Add project', icon: FolderKanban },
 ];
 
-const statusBadge = (status) => {
-  if (status === 'verified') return { status: 'verified', label: 'Verified' };
-  if (status === 'rejected') return { status: 'failed', label: 'Rejected' };
-  return { status: 'pending', label: 'Pending' };
+const STATUS_PILL = {
+  verified: { label: 'Verified', icon: CheckCircle2, tone: 'bg-green-50 text-green-700' },
+  rejected: { label: 'Rejected', icon: XCircle, tone: 'bg-red-50 text-red-600' },
+  pending: { label: 'Pending', icon: Clock, tone: 'bg-orange-100 text-orange-700' },
 };
+
+const statusPill = (status) => STATUS_PILL[status] || STATUS_PILL.pending;
 
 export const SkillTree = () => {
   const navigate = useNavigate();
   const [skills, setSkills] = useState([]);
   const [individualId, setIndividualId] = useState('');
   const [loading, setLoading] = useState(true);
+  const [activeKey, setActiveKey] = useState(null); // null = the first category that has entries
   const [uploadModal, setUploadModal] = useState(null);
   const [deleteModal, setDeleteModal] = useState(null);
   const [deleteAllModal, setDeleteAllModal] = useState(false);
@@ -165,6 +172,11 @@ export const SkillTree = () => {
   const verifiedCount = skills.filter((skill) => skill.status === 'verified').length;
   const pendingCount = skills.filter((skill) => skill.status === 'pending').length;
 
+  const current = sections.find((section) => section.key === activeKey)
+    || sections.find((section) => (grouped[section.key] || []).length > 0)
+    || sections[0];
+  const currentItems = grouped[current.key] || [];
+
   if (loading) {
     return (
       <AuthLayout title="My Skill Tree">
@@ -175,196 +187,220 @@ export const SkillTree = () => {
 
   return (
     <AuthLayout title="My Skill Tree">
-      <div className="w-full mx-auto lg:max-w-none space-y-6">
-        <PageHeader
+      <div className="w-full mx-auto lg:max-w-none">
+        <PageIntro
           title="My Skill Tree"
-          subtitle="Your verified digital resume - every skill is tracked and verifiable"
-          action={
-            <div className="flex flex-wrap gap-2">
+          subtitle="Build and manage your verifiable digital resume."
+          actions={(
+            <>
               {skills.length > 0 && (
-                <Button variant="danger" size="sm" icon={Trash2} onClick={() => setDeleteAllModal(true)}>
-                  Delete All
-                </Button>
+                <button
+                  type="button"
+                  onClick={() => setDeleteAllModal(true)}
+                  className="inline-flex h-9 items-center gap-2 rounded-lg border border-red-300 bg-white px-4 text-sm font-semibold text-red-600 transition-colors hover:bg-red-50 font-inter"
+                >
+                  <Trash2 size={16} /> Delete all
+                </button>
               )}
-              <Button variant="primary" size="sm" icon={ArrowRight} onClick={() => navigate('/individual/share')}>
-                Share
-              </Button>
-            </div>
-          }
+              <button
+                type="button"
+                onClick={() => navigate('/individual/share')}
+                className="inline-flex h-9 items-center gap-2 rounded-lg bg-brand-blue px-4 text-sm font-semibold text-white transition-colors hover:bg-brand-blue-hover font-inter"
+              >
+                <Share2 size={16} /> Share profile
+              </button>
+            </>
+          )}
         />
 
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-          <Card className="p-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-brand-blue/10">
-                <Layers size={18} className="text-brand-blue" />
+        {/* Totals */}
+        <div className="relative mb-4 overflow-hidden rounded-xl bg-gradient-to-r from-[#1D5CF2] to-[#2B6BFA] px-6 py-5 text-white shadow-[0_10px_24px_-14px_rgba(29,92,242,0.6)]">
+          <svg aria-hidden="true" className="pointer-events-none absolute right-6 top-1/2 hidden h-16 w-28 -translate-y-1/2 sm:block" viewBox="0 0 112 64" fill="#fff" fillOpacity="0.4">
+            {Array.from({ length: 5 }).flatMap((_, row) => Array.from({ length: 8 }).map((__, col) => <circle key={`${row}-${col}`} cx={4 + col * 14} cy={4 + row * 14} r="1.6" />))}
+          </svg>
+          <dl className="relative grid grid-cols-1 gap-4 sm:grid-cols-3 sm:gap-0 sm:divide-x sm:divide-white/25">
+            {[
+              { label: 'Total skills', value: skills.length, icon: Layers },
+              { label: 'Verified', value: verifiedCount, icon: ShieldCheck },
+              { label: 'Pending', value: pendingCount, icon: Clock },
+            ].map((stat, i) => (
+              <div key={stat.label} className={`flex items-center gap-5 ${i > 0 ? 'sm:pl-12' : 'sm:pl-4'}`}>
+                <stat.icon size={40} strokeWidth={1.4} className="shrink-0" />
+                <div>
+                  <dt className="text-sm text-white/95 font-inter">{stat.label}</dt>
+                  <dd className="font-sora text-3xl font-bold leading-tight">{stat.value}</dd>
+                </div>
               </div>
-              <div>
-                <p className="text-xs text-gray-500 font-inter">Total Skills</p>
-                <p className="text-xl font-sora font-bold text-brand-dark">{skills.length}</p>
-              </div>
-            </div>
-          </Card>
-
-          <Card className="p-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-green-100">
-                <CheckCircle size={18} className="text-green-600" />
-              </div>
-              <div>
-                <p className="text-xs text-gray-500 font-inter">Verified</p>
-                <p className="text-xl font-sora font-bold text-brand-dark">{verifiedCount}</p>
-              </div>
-            </div>
-          </Card>
-
-          <Card className="p-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-orange-100">
-                <Clock size={18} className="text-orange-500" />
-              </div>
-              <div>
-                <p className="text-xs text-gray-500 font-inter">Pending</p>
-                <p className="text-xl font-sora font-bold text-brand-dark">{pendingCount}</p>
-              </div>
-            </div>
-          </Card>
+            ))}
+          </dl>
         </div>
 
-        <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
-          {sections.map((section, sectionIndex) => {
-            const items = grouped[section.key] || [];
-            const Icon = section.icon;
+        <div className="mb-4 grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,0.42fr)_minmax(0,1fr)]">
+          {/* Categories */}
+          <section aria-label="Your categories" className="rounded-xl border border-gray-100 bg-white p-4">
+            <h2 className="px-1 font-sora text-lg font-semibold text-brand-dark">Your categories</h2>
+            <div role="tablist" aria-label="Skill categories" aria-orientation="vertical" className="mt-3 divide-y divide-gray-100">
+              {sections.map((section) => {
+                const on = section.key === current.key;
+                const count = (grouped[section.key] || []).length;
+                const SectionIcon = section.icon;
+                return (
+                  <button
+                    key={section.key}
+                    type="button"
+                    role="tab"
+                    aria-selected={on}
+                    onClick={() => setActiveKey(section.key)}
+                    className={`relative flex w-full items-center gap-4 px-4 py-3.5 text-left transition-colors ${on ? 'rounded-lg bg-[#eaf1fe]' : 'hover:bg-gray-50'}`}
+                  >
+                    {on && <span aria-hidden="true" className="absolute inset-y-0 left-0 w-1 rounded-l-lg bg-brand-blue" />}
+                    <SectionIcon size={26} strokeWidth={1.4} className="shrink-0 text-brand-blue" />
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-[15px] font-semibold text-brand-dark font-inter">{section.label}</span>
+                      <span className="block text-[13px] text-gray-600 font-inter">{count} {count === 1 ? 'entry' : 'entries'}</span>
+                    </span>
+                    <ChevronRight size={18} className="shrink-0 text-gray-500" />
+                  </button>
+                );
+              })}
+            </div>
+            <div className="mt-4 border-t border-gray-100 px-1 pt-4">
+              <p className="text-[15px] font-semibold text-brand-dark font-inter">Build your digital resume</p>
+              <p className="mt-0.5 text-[13px] text-gray-600 font-inter">Add entries to each category.</p>
+            </div>
+          </section>
 
-            return (
-              <motion.div
-                key={section.key}
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: sectionIndex * 0.08 }}
+          {/* Selected category */}
+          <section aria-label={current.label} className="min-w-0 rounded-xl border border-gray-100 bg-white p-5">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="flex items-center gap-3.5">
+                <span aria-hidden="true" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[#e8f0fe] text-brand-blue"><current.icon size={22} strokeWidth={1.6} /></span>
+                <div>
+                  <h2 className="flex items-center gap-2.5 font-sora text-lg font-semibold text-brand-dark">
+                    {current.label}
+                    <span className="rounded-full bg-[#e3ebf8] px-2.5 py-0.5 text-xs font-medium text-brand-blue font-inter">{currentItems.length} {currentItems.length === 1 ? 'entry' : 'entries'}</span>
+                  </h2>
+                  <p className="mt-0.5 text-[13px] text-gray-500 font-inter">Manage your skills and supporting documents.</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => navigate(`/individual/skill-tree/build?section=${current.key}`)}
+                className="inline-flex h-10 items-center gap-2 rounded-lg bg-brand-blue px-5 text-sm font-semibold text-white transition-colors hover:bg-brand-blue-hover font-inter"
               >
-                <Card className="p-5 sm:p-6">
-                  <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                    <div className="flex items-center gap-3">
-                      <div className={`p-2.5 rounded-xl ${section.bg}`}>
-                        <Icon size={18} className={section.color} />
-                      </div>
-                      <div>
-                        <h3 className="font-sora font-semibold text-brand-dark">{section.label}</h3>
-                        <p className="text-xs text-gray-500 font-inter">{items.length} entries</p>
-                      </div>
-                    </div>
+                <Plus size={17} /> {current.addLabel}
+              </button>
+            </div>
 
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      icon={Plus}
-                      onClick={() => navigate(`/individual/skill-tree/build?section=${section.key}`)}
+            {currentItems.length === 0 ? (
+              <div className="mt-5 rounded-xl border border-dashed border-gray-200 py-10 text-center">
+                <p className="text-sm text-gray-500 font-inter">No {current.label.toLowerCase()} added yet.</p>
+                <button
+                  type="button"
+                  onClick={() => navigate(`/individual/skill-tree/build?section=${current.key}`)}
+                  className="mt-2 text-sm font-semibold text-brand-blue hover:underline font-inter"
+                >
+                  Add your first
+                </button>
+              </div>
+            ) : (
+              <div className="mt-4 space-y-3">
+                {currentItems.map((item, itemIndex) => {
+                  const pill = statusPill(item.status);
+                  const rejectedReason = item.status_reason || item.reason;
+                  return (
+                    <motion.article
+                      key={item.id}
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: itemIndex * 0.04 }}
+                      className="rounded-xl border border-gray-200 bg-white p-4"
                     >
-                      Add
-                    </Button>
-                  </div>
+                      <div className="flex items-start gap-4">
+                        <span aria-hidden="true" className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-[#e8f0fe] text-brand-blue"><current.icon size={22} strokeWidth={1.6} /></span>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-base font-semibold leading-tight text-brand-dark font-inter">{item.skill_name}</p>
+                          <p className="mt-0.5 text-[13px] text-gray-600 font-inter">{current.itemLabel}</p>
+                          <p className="mt-1.5 text-[13px] text-gray-700 font-inter">
+                            {[item.institution_name && (item.degree ? `${item.institution_name} - ${item.degree}` : item.institution_name), item.skill_info].filter(Boolean).join(' · ') || 'No details specified'}
+                          </p>
+                        </div>
+                        <span className={`inline-flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium font-inter ${pill.tone}`}>
+                          <pill.icon size={17} />{pill.label}
+                        </span>
+                      </div>
 
-                  {items.length === 0 ? (
-                    <div className="py-6 text-center">
-                      <p className="text-sm text-gray-400 font-inter">No {section.label.toLowerCase()} added yet</p>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        icon={Plus}
-                        className="mt-2"
-                        onClick={() => navigate(`/individual/skill-tree/build?section=${section.key}`)}
-                      >
-                        Add your first
-                      </Button>
-                    </div>
-                  ) : (
-                    <div className="space-y-3">
-                      {items.map((item, itemIndex) => {
-                        const badge = statusBadge(item.status);
-                        const rejectedReason = item.status_reason || item.reason;
+                      {item.status === 'rejected' && rejectedReason && (
+                        <div className="mt-3 flex items-start gap-1.5 rounded-lg bg-red-50 p-2.5">
+                          <XCircle size={14} className="mt-0.5 shrink-0 text-red-500" />
+                          <p className="text-xs text-red-600 font-inter">{rejectedReason}</p>
+                        </div>
+                      )}
 
-                        return (
-                          <motion.div
-                            key={item.id}
-                            initial={{ opacity: 0, x: -10 }}
-                            animate={{ opacity: 1, x: 0 }}
-                            transition={{ delay: itemIndex * 0.04 }}
-                            className="flex items-start justify-between gap-3 rounded-xl bg-gray-50 p-4 transition-colors hover:bg-gray-100"
+                      <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border-t border-gray-100 pt-3">
+                        <div className="flex flex-wrap items-center gap-3">
+                          <button
+                            type="button"
+                            onClick={() => setUploadModal(item)}
+                            className="inline-flex h-10 items-center gap-2 rounded-lg border border-brand-blue/70 bg-white px-4 text-sm font-medium text-brand-blue transition-colors hover:bg-blue-50 font-inter"
                           >
-                            <div className="min-w-0 flex-1">
-                              <p className="text-base font-medium leading-tight text-brand-dark font-inter">
-                                {item.skill_name}
-                              </p>
+                            <Upload size={16} /> Upload document
+                          </button>
+                          {item.documents && item.documents.length > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => setDocsModalId(item.id)}
+                              className="inline-flex items-center gap-1.5 text-[13px] text-gray-600 hover:text-brand-blue hover:underline font-inter"
+                            >
+                              <FileText size={14} />
+                              {item.documents.length} doc{item.documents.length !== 1 ? 's' : ''}
+                            </button>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2.5">
+                          <button
+                            type="button"
+                            onClick={() => navigate(`/individual/skill-tree/build?section=${item.skill_type}&id=${item.id}`)}
+                            className="inline-flex h-10 items-center gap-2 rounded-lg border border-[#c7d8f5] bg-[#f3f7fe] px-5 text-sm font-medium text-brand-dark transition-colors hover:bg-blue-50 font-inter"
+                          >
+                            <Pencil size={16} className="text-brand-blue" /> Edit
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setDeleteModal(item)}
+                            aria-label={`Delete ${item.skill_name}`}
+                            title="Delete"
+                            className="flex h-10 w-10 items-center justify-center rounded-lg border border-red-300 bg-red-50 text-red-600 transition-colors hover:bg-red-100"
+                          >
+                            <Trash2 size={17} />
+                          </button>
+                        </div>
+                      </div>
+                    </motion.article>
+                  );
+                })}
+              </div>
+            )}
+          </section>
+        </div>
 
-                              {item.skill_info && (
-                                <p className="mt-1 text-sm text-gray-500 font-inter">{item.skill_info}</p>
-                              )}
-
-                              {item.institution_name && (
-                                <p className="mt-1 text-sm text-gray-500 font-inter">
-                                  {item.institution_name}
-                                  {item.degree ? ` - ${item.degree}` : ''}
-                                </p>
-                              )}
-
-                              <div className="mt-2 flex flex-wrap items-center gap-3">
-                                {item.documents && item.documents.length > 0 && (
-                                  <button
-                                    type="button"
-                                    onClick={() => setDocsModalId(item.id)}
-                                    className="flex items-center gap-1 text-xs text-gray-500 hover:text-brand-blue hover:underline font-inter"
-                                  >
-                                    <FileText size={11} />
-                                    {item.documents.length} doc{item.documents.length !== 1 ? 's' : ''}
-                                  </button>
-                                )}
-                                <button
-                                  type="button"
-                                  onClick={() => setUploadModal(item)}
-                                  className="flex items-center gap-1 text-xs text-brand-blue hover:underline font-inter"
-                                >
-                                  <Upload size={11} />
-                                  Upload Doc
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => navigate(`/individual/skill-tree/build?section=${item.skill_type}&id=${item.id}`)}
-                                  className="flex items-center gap-1 text-xs text-brand-blue hover:underline font-inter"
-                                >
-                                  <Pencil size={11} />
-                                  Edit
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => setDeleteModal(item)}
-                                  className="flex items-center gap-1 text-xs text-red-500 hover:underline font-inter"
-                                >
-                                  <Trash2 size={11} />
-                                  Delete
-                                </button>
-                              </div>
-
-                              {item.status === 'rejected' && rejectedReason && (
-                                <div className="mt-2 flex items-start gap-1.5 rounded-lg bg-red-50 p-2">
-                                  <XCircle size={12} className="mt-0.5 shrink-0 text-red-500" />
-                                  <p className="text-xs text-red-600 font-inter">{rejectedReason}</p>
-                                </div>
-                              )}
-                            </div>
-
-                            <Badge status={badge.status} className="mt-0.5 shrink-0">
-                              {badge.label}
-                            </Badge>
-                          </motion.div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </Card>
-              </motion.div>
-            );
-          })}
+        {/* Quick add */}
+        <div className="flex flex-col gap-3 rounded-xl bg-[#e9f0fb] px-6 py-4 font-inter lg:flex-row lg:items-center lg:gap-0 lg:divide-x lg:divide-[#b9c9e6]">
+          <p className="text-lg font-semibold text-brand-dark lg:pr-8">Add to your profile</p>
+          {[
+            { key: 'education', label: 'Add education', icon: GraduationCap },
+            { key: 'soft', label: 'Add soft skill', icon: Heart },
+            { key: 'project', label: 'Add project', icon: FolderKanban },
+          ].map((link) => (
+            <button
+              key={link.key}
+              type="button"
+              onClick={() => navigate(`/individual/skill-tree/build?section=${link.key}`)}
+              className="flex flex-1 items-center justify-center gap-3 py-1 text-[15px] font-medium text-brand-blue transition-colors hover:text-blue-800 lg:px-6"
+            >
+              <link.icon size={24} strokeWidth={1.4} />{link.label}<ArrowRight size={17} />
+            </button>
+          ))}
         </div>
       </div>
 

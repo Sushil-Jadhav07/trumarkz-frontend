@@ -62,7 +62,7 @@ export const humanIndustries = [
 ];
 
 export const productIndustries = [
-  { id: 'electronics',       name: 'Electronics',         icon: '🔌' },
+  { id: 'electronics_appliances', name: 'Electronics & Appliances', icon: '🔌' },
   { id: 'beauty_cosmetics',  name: 'Beauty & Cosmetics',  icon: '✨' },
 ];
 

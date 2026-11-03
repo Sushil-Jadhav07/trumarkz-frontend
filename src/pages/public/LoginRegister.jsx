@@ -1,14 +1,15 @@
 import { Modal } from '@/components/ui/Modal';
 import React, { useEffect, useState } from 'react';
-import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import { Logo } from '@/components/ui/Logo';
 import { Button } from '@/components/ui/Button';
+import { HeroPanel, AuthField } from '@/components/auth/AuthShell';
 import { Input } from '@/components/ui/Input';
 import {
-  Mail, Lock, Building2, User, ArrowRight, CheckCircle,
-  Shield, X, AlertCircle, Fingerprint, Globe2, Zap
+  Mail, Lock, Building2, User, ArrowRight, CheckCircle, Check,
+  AlertCircle, Eye, EyeOff, Layers, ArrowLeft,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -84,43 +85,15 @@ const ForgotPasswordModal = ({ onClose, forgotPassword }) => {
   );
 };
 
-// ── Left panel data ───────────────────────────────────────────────────────────
-const trustStats = [
-  { value: '10M+',   label: 'Verifications Done', icon: Fingerprint },
-  { value: '99.99%', label: 'Uptime SLA',          icon: Zap },
-  { value: '50+',    label: 'Countries Served',    icon: Globe2 },
-];
-
-const featureList = [
-  { icon: Shield,      text: 'Blockchain-secured credential records' },
-  { icon: CheckCircle, text: 'Instant identity verification' },
-  { icon: Fingerprint, text: 'Tamper-proof digital credentials' },
-];
 
 // Only Organization and Individual are self-registerable — Super Admin
 // accounts are provisioned separately and never appear as a register option.
 const roles = [
-  { id: 'organization', label: 'Organization', icon: Building2, description: 'Verify workers & issue credentials' },
-  { id: 'individual',   label: 'Individual',   icon: User,      description: 'Build your verified Skill Tree' },
+  { id: 'organization', label: 'Organization', icon: Building2, description: 'Verify workers and issue credentials' },
+  { id: 'individual',   label: 'Individual',   icon: User,      description: 'Build your verified profile' },
 ];
 
 const registerRoutes = { organization: '/org-registration', individual: '/register/individual' };
-
-// Container variant for stagger
-const containerVariants = {
-  hidden: {},
-  visible: { transition: { staggerChildren: 0.07, delayChildren: 0.05 } },
-};
-
-const itemVariants = {
-  hidden: { opacity: 0, x: -14 },
-  visible: { opacity: 1, x: 0, transition: spring.soft },
-};
-
-const statVariants = {
-  hidden: { opacity: 0, scale: 0.88, y: 8 },
-  visible: { opacity: 1, scale: 1, y: 0, transition: spring.smooth },
-};
 
 // ── Main Component ────────────────────────────────────────────────────────────
 export const LoginRegister = () => {
@@ -128,7 +101,6 @@ export const LoginRegister = () => {
   const location = useLocation();
   const [searchParams] = useSearchParams();
   const { login, forgotPassword, getGoogleAuthUrl } = useAuth();
-  const shouldReduceMotion = useReducedMotion();
 
   const typeFromUrl = searchParams.get('role') || searchParams.get('type');
   const validTypes  = ['organization', 'individual', 'super-admin'];
@@ -147,11 +119,13 @@ export const LoginRegister = () => {
   const [submitting,   setSubmitting]   = useState(false);
   const [googleLoading,setGoogleLoading]= useState(false);
   const [showForgot,   setShowForgot]   = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   useEffect(() => {
     const t = searchParams.get('role') || searchParams.get('type');
     if (validTypes.includes(t) && t !== userType) setUserType(t);
     if (searchParams.get('error') === 'auth_failed') setErrors({ form: 'Authentication failed. Please sign in again.' });
+    if (searchParams.get('error') === 'cancelled') setErrors({ form: 'Google sign-in was cancelled. You can try again or sign in with your email.' });
   }, [searchParams]);
 
   useEffect(() => {
@@ -231,478 +205,230 @@ export const LoginRegister = () => {
         {showForgot && <ForgotPasswordModal onClose={() => setShowForgot(false)} forgotPassword={forgotPassword} />}
       </AnimatePresence>
 
-      <div className="min-h-screen flex bg-brand-bg">
+      <div className={`flex h-[100dvh] gap-5 overflow-hidden p-3 sm:p-5 ${tab === 'login' ? 'bg-gradient-to-br from-[#eef4fc] to-[#e7eefa]' : 'bg-white'}`}>
+        <HeroPanel />
 
-        {/* ── Left Panel ───────────────────────────────────────────────────── */}
-        <div className="hidden lg:flex lg:w-[52%] bg-brand-dark flex-col relative overflow-hidden">
-          {/* Background layers */}
-          <div className="absolute inset-0">
-            <div className="absolute inset-0 bg-gradient-to-br from-brand-blue/20 via-brand-dark to-brand-dark" />
-            <div className="absolute top-0 right-0 w-[600px] h-[600px] rounded-full bg-brand-blue/5 blur-3xl -translate-y-1/3 translate-x-1/3" />
-            <div className="absolute bottom-0 left-0 w-[400px] h-[400px] rounded-full bg-brand-blue/8 blur-3xl translate-y-1/3 -translate-x-1/3" />
-            <div className="absolute inset-0 opacity-[0.04]"
-              style={{ backgroundImage: 'radial-gradient(circle, #ffffff 1px, transparent 1px)', backgroundSize: '28px 28px' }} />
-            <div
-              className="absolute inset-0"
-              aria-hidden="true"
-              style={{
-                backgroundImage: 'url(/assets/6613575_17930.jpg)',
-                backgroundSize: '140% auto',
-                backgroundPosition: 'right top',
-                backgroundRepeat: 'no-repeat',
-                transform: 'scaleX(-1)',
-                filter: 'invert(1) brightness(1.3) contrast(1.1)',
-                mixBlendMode: 'screen',
-                opacity: 0.35,
-                WebkitMaskImage: 'radial-gradient(ellipse 68% 62% at 80% 30%, #000 25%, transparent 75%)',
-                maskImage: 'radial-gradient(ellipse 68% 62% at 80% 30%, #000 25%, transparent 75%)',
-              }}
-            />
-            <div
-              className="absolute inset-0"
-              aria-hidden="true"
-              style={{
-                backgroundImage: 'url(/assets/bottom-dots.png)',
-                backgroundSize: '100% auto',
-                backgroundPosition: 'bottom center',
-                backgroundRepeat: 'no-repeat',
-                mixBlendMode: 'screen',
-                opacity: 0.22,
-                WebkitMaskImage: 'linear-gradient(to top, #000 0%, #000 35%, transparent 85%)',
-                maskImage: 'linear-gradient(to top, #000 0%, #000 35%, transparent 85%)',
-              }}
-            />
-          </div>
-
-          <div className="relative z-10 flex flex-col h-full p-10 xl:p-12">
-            {/* Logo */}
+        {/* ── Right panel ─────────────────────────────────────────────────── */}
+        {tab === 'login' ? (
+        <div className="relative flex h-full min-h-0 flex-1 flex-col items-center overflow-y-auto px-4 py-2 sm:px-8">
+          <div className="my-auto flex w-full flex-col items-center">
+            <div className="mb-3"><Logo size="md" showTagline /></div>
             <motion.div
-              initial={{ opacity: 0, y: -14 }}
+              initial={{ opacity: 0, y: 16 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ ...spring.smooth, delay: 0.05 }}
+              className="w-full max-w-[460px] rounded-2xl border border-[#e6ecf5] bg-white px-6 pb-5 pt-5 shadow-[0_18px_50px_-26px_rgba(20,60,140,0.28)] sm:px-8"
             >
-              <Logo size="md" dark showTagline />
+              <div className="mb-4 text-center">
+                <span className="mx-auto mb-2 flex h-[52px] w-[52px] items-center justify-center rounded-2xl bg-[#e9f1fe]">
+                  <Lock size={24} strokeWidth={1.6} className="text-brand-blue" />
+                </span>
+                <h2 className="font-inter text-[22px] font-semibold leading-tight tracking-[-0.01em] text-brand-dark">
+                  {tab === 'login' ? 'Sign in to TruMarkZ' : 'Create your account'}
+                </h2>
+                <p className="mt-1 text-[13px] text-[#5b6a85] font-inter">
+                  {tab === 'login'
+                    ? 'Welcome back. Let’s get you signed in.'
+                    : `Create your ${userType === 'organization' ? 'organization' : 'individual'} account`}
+                </p>
+              </div>
+
+              <AnimatePresence mode="wait">
+                {tab === 'login' ? (
+                  <motion.div
+                    key="login"
+                    initial={{ opacity: 0, x: -18 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: 18 }}
+                    transition={{ type: 'spring', stiffness: 380, damping: 32 }}
+                  >
+                    <form onSubmit={handleLogin} autoComplete="on" className="space-y-3.5" noValidate>
+                      <AuthField
+                        id="login-email" label="Email address" icon={Mail} type="email" placeholder="you@company.com"
+                        name="username" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} error={errors.email}
+                      />
+                      <AuthField
+                        id="login-password" label="Password" icon={Lock} type={showPassword ? 'text' : 'password'} placeholder="Enter your password"
+                        name="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} error={errors.password}
+                        action={<button type="button" onClick={() => setShowForgot(true)} className="text-[13px] font-medium text-brand-blue font-inter hover:underline">Forgot password?</button>}
+                        trailing={(
+                          <button
+                            type="button"
+                            onClick={() => setShowPassword((v) => !v)}
+                            aria-label={showPassword ? 'Hide password' : 'Show password'}
+                            aria-pressed={showPassword}
+                            className="absolute right-3 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-md text-[#5b6a85] hover:text-brand-dark"
+                          >
+                            {showPassword ? <EyeOff size={16} strokeWidth={1.5} /> : <Eye size={16} strokeWidth={1.5} />}
+                          </button>
+                        )}
+                      />
+
+                      <AnimatePresence>
+                        {errors.form && (
+                          <motion.div
+                            role="alert"
+                            initial={{ opacity: 0, y: -8, scale: 0.97 }}
+                            animate={{ opacity: 1, y: 0, scale: 1 }}
+                            exit={{ opacity: 0, y: -4, scale: 0.97 }}
+                            transition={spring.snappy}
+                            className="flex items-start gap-2.5 rounded-lg border border-red-200 bg-red-50 px-3.5 py-2.5 text-sm text-red-600 font-inter"
+                          >
+                            <AlertCircle size={15} className="mt-0.5 shrink-0" />
+                            <span>{errors.form}</span>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+
+                      <label className="flex w-fit cursor-pointer items-center gap-2.5">
+                        <input type="checkbox" checked={rememberMe} onChange={(e) => setRememberMe(e.target.checked)} className="peer sr-only" />
+                        <span className="flex h-[18px] w-[18px] items-center justify-center rounded border border-[#cdd7e6] bg-white text-white transition-colors peer-checked:border-brand-blue peer-checked:bg-brand-blue peer-focus-visible:ring-2 peer-focus-visible:ring-brand-blue/30 [&>svg]:opacity-0 peer-checked:[&>svg]:opacity-100">
+                          <Check size={13} strokeWidth={2.5} />
+                        </span>
+                        <span className="text-[13px] text-brand-dark font-inter">Remember me</span>
+                      </label>
+
+                      <button
+                        type="submit"
+                        disabled={submitting}
+                        className="flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-brand-blue text-sm font-semibold text-white font-inter transition-colors hover:bg-brand-blue-hover disabled:opacity-70"
+                      >
+                        {submitting
+                          ? <span className="flex items-center gap-2"><svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>Signing in…</span>
+                          : <><span>Sign in</span><ArrowRight size={16} /></>}
+                      </button>
+                    </form>
+
+                    <div className="mt-3.5 space-y-3.5">
+                      <div className="flex items-center gap-4 text-[13px] text-[#5b6a85] font-inter">
+                        <span className="h-px flex-1 bg-[#e1e7f0]" />or<span className="h-px flex-1 bg-[#e1e7f0]" />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleGoogle}
+                        disabled={googleLoading}
+                        className="flex h-11 w-full items-center justify-center gap-3 rounded-lg border border-[#d9e1ee] bg-white text-sm font-medium text-brand-dark font-inter transition-colors hover:bg-gray-50 disabled:opacity-60"
+                      >
+                        <GoogleIcon />
+                        {googleLoading ? 'Redirecting…' : 'Continue with Google'}
+                      </button>
+                      <p className="text-center text-[13px] text-[#5b6a85] font-inter">
+                        Don’t have an account?{' '}
+                        <button type="button" onClick={() => setTab('register')} className="font-semibold text-brand-blue hover:underline">Create an account</button>
+                      </p>
+                    </div>
+                  </motion.div>
+                ) : null}
+              </AnimatePresence>
             </motion.div>
 
-            {/* Main content */}
-            <div className="flex-1 flex flex-col justify-center py-10">
-              <motion.div
-                initial={{ opacity: 0, y: 24 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ ...spring.entrance, delay: 0.12 }}
-                className="mb-10"
-              >
-                <motion.div
-                  initial={{ opacity: 0, scale: 0.9 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  transition={{ ...spring.snappy, delay: 0.18 }}
-                  className="inline-flex items-center gap-2 bg-brand-blue/15 border border-brand-blue/20 rounded-full px-3.5 py-1.5 mb-6"
-                >
-                  <div className="w-1.5 h-1.5 rounded-full bg-brand-blue animate-pulse" />
-                  <span className="text-xs font-inter font-medium text-brand-blue">Trusted by 500+ enterprises</span>
-                </motion.div>
-                <motion.h1
-                  initial={{ opacity: 0, y: 16 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ ...spring.entrance, delay: 0.22 }}
-                  className="font-sora font-bold text-4xl xl:text-5xl text-white leading-tight mb-4"
-                >
-                  The Global Trust<br />
-                  <span className="text-brand-blue">Infrastructure</span>
-                </motion.h1>
-                <motion.p
-                  initial={{ opacity: 0, y: 12 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ ...spring.soft, delay: 0.28 }}
-                  className="text-gray-400 font-inter text-base leading-relaxed max-w-sm"
-                >
-                  Verify identities, issue blockchain-secured credentials, and build a tamper-proof record of trust.
-                </motion.p>
-              </motion.div>
-
-              {/* Feature list */}
-              <motion.div
-                variants={containerVariants}
-                initial="hidden"
-                animate="visible"
-                className="space-y-3 mb-10"
-                style={{ transitionDelay: shouldReduceMotion ? '0ms' : '320ms' }}
-              >
-                {featureList.map((f, i) => (
-                  <motion.div
-                    key={i}
-                    variants={itemVariants}
-                    custom={i}
-                    className="flex items-center gap-3"
-                  >
-                    <motion.div
-                      whileHover={{ scale: 1.1, backgroundColor: 'rgba(37,99,235,0.22)' }}
-                      transition={spring.micro}
-                      className="w-8 h-8 rounded-lg bg-brand-blue/15 border border-brand-blue/20 flex items-center justify-center shrink-0"
-                    >
-                      <f.icon size={15} className="text-brand-blue" />
-                    </motion.div>
-                    <span className="text-sm font-inter text-gray-300">{f.text}</span>
-                  </motion.div>
-                ))}
-              </motion.div>
-
-              {/* Stats */}
-              <motion.div
-                variants={{ hidden: {}, visible: { transition: { staggerChildren: 0.09, delayChildren: 0.48 } } }}
-                initial="hidden"
-                animate="visible"
-                className="grid grid-cols-3 gap-3"
-              >
-                {trustStats.map((stat, i) => (
-                  <motion.div
-                    key={i}
-                    variants={statVariants}
-                    whileHover={{ scale: 1.04, borderColor: 'rgba(255,255,255,0.16)' }}
-                    transition={spring.snappy}
-                    className="bg-white/5 border border-white/8 rounded-xl p-3.5 text-center backdrop-blur-sm cursor-default"
-                  >
-                    <stat.icon size={16} className="text-brand-blue mx-auto mb-2 opacity-80" />
-                    <p className="font-sora font-bold text-white text-lg leading-none mb-1">{stat.value}</p>
-                    <p className="text-gray-500 text-xs font-inter leading-tight">{stat.label}</p>
-                  </motion.div>
-                ))}
-              </motion.div>
-            </div>
-
-            {/* Footer */}
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ ...spring.soft, delay: 0.75 }}
-            >
-              <p className="text-gray-600 text-xs font-inter">© {new Date().getFullYear()} TruMarkZ. All rights reserved.</p>
-            </motion.div>
+            <p className="mt-4 flex items-center gap-2 text-xs text-[#5b6a85] font-inter">
+              <Lock size={14} strokeWidth={1.5} /> Secure access to your workspace
+            </p>
+            <p className="mt-2.5 text-xs text-[#5b6a85] font-inter">
+              <Link to="/privacy-policy" className="hover:text-brand-blue hover:underline">Privacy Policy</Link>
+              <span className="mx-3">·</span>
+              <Link to="/terms-of-service" className="hover:text-brand-blue hover:underline">Terms of Service</Link>
+            </p>
           </div>
         </div>
-
-        {/* ── Right Panel ──────────────────────────────────────────────────── */}
-        <div className="flex-1 flex flex-col justify-center items-center p-5 sm:p-8 overflow-y-auto">
-          <motion.div
-            initial={{ opacity: 0, y: 20, scale: 0.98 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            transition={{ ...spring.smooth, delay: 0.08 }}
-            className="w-full max-w-[420px] bg-white rounded-2xl shadow-sm border border-gray-100 p-8"
+        ) : (
+        <div className="relative flex h-full min-h-0 flex-1 flex-col overflow-y-auto px-4 py-2 sm:px-8">
+          <button
+            type="button"
+            onClick={() => setTab('login')}
+            className="absolute right-6 top-5 inline-flex items-center gap-2 text-[13px] text-[#3d4b66] font-inter transition-colors hover:text-brand-blue"
           >
-            {/* Mobile logo */}
-            <div className="lg:hidden flex items-center justify-center mb-8">
-              <Logo size="lg" />
-            </div>
+            <ArrowLeft size={16} strokeWidth={1.75} /> Back to home
+          </button>
 
-            {/* Header */}
-            <div className="mb-8 text-center">
-              <motion.div
-                initial={{ opacity: 0, y: -8 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ ...spring.smooth, delay: 0.16 }}
-                className="flex items-center justify-center gap-2 mb-3"
-              >
-                <motion.div
-                  initial={{ scale: 0.6, opacity: 0 }}
-                  animate={{ scale: 1, opacity: 1 }}
-                  transition={{ ...spring.snappy, delay: 0.2 }}
-                  className="w-8 h-8 rounded-lg bg-brand-blue flex items-center justify-center shrink-0"
-                >
-                  <Shield size={15} className="text-white" />
-                </motion.div>
-                <span className="text-xs font-inter font-medium text-gray-400 tracking-wide uppercase">Secure Sign In</span>
-              </motion.div>
-              <motion.h2
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ ...spring.entrance, delay: 0.22 }}
-                className="font-sora font-bold text-[28px] text-brand-dark leading-tight mb-1.5"
-              >
-                {tab === 'login' ? 'Welcome back' : 'Get started'}
-              </motion.h2>
-              <motion.p
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                transition={{ ...spring.soft, delay: 0.28 }}
-                className="text-sm text-gray-400 font-inter"
-              >
-                {tab === 'login'
-                  ? 'Sign in to your TruMarkZ account'
-                  : `Create your ${userType === 'organization' ? 'organization' : 'individual'} account`}
-              </motion.p>
-            </div>
+          <motion.div
+            initial={{ opacity: 0, y: 14 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ ...spring.smooth, delay: 0.05 }}
+            className="mx-auto flex w-full max-w-[460px] flex-1 flex-col justify-center py-2"
+          >
+            <div className="flex justify-start"><Logo size="md" showTagline /></div>
+            <p className="mt-5 text-[11px] font-semibold uppercase tracking-[0.2em] text-[#5b6a85] font-inter">Get started</p>
+            <h2 className="mt-1.5 font-inter text-[26px] font-semibold leading-tight tracking-[-0.01em] text-brand-dark">Create your account</h2>
+            <p className="mt-1 text-[13px] text-[#5b6a85] font-inter">Choose how you’ll use TruMarkZ.</p>
 
-            {/* Role selector — registration only. Login no longer asks the user to
-                pick a role; the backend's user_type on the login response decides
-                where to redirect. */}
-            {tab === 'register' && (
-            <motion.div
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ ...spring.smooth, delay: 0.3 }}
-              className="mb-7"
-            >
-              <p className="text-[11px] font-semibold font-inter text-gray-400 uppercase tracking-widest mb-3 text-center">Register as</p>
-              <div className="grid grid-cols-2 gap-2">
+            <fieldset className="mt-5">
+              <legend className="mb-2 text-[13px] font-medium text-brand-dark font-inter">Register as</legend>
+              <div role="radiogroup" className="space-y-2.5">
                 {roles.map((role) => {
-                  const isActive = userType === role.id;
+                  const selected = userType === role.id;
                   return (
-                    <motion.button
+                    <label
                       key={role.id}
-                      type="button"
-                      whileHover={!isActive ? { borderColor: '#d1d5db', scale: 1.02 } : {}}
-                      whileTap={{ scale: 0.95 }}
-                      transition={spring.snappy}
-                      onClick={() => { setUserType(role.id); setErrors({}); if (role.id === 'super-admin') setTab('login'); }}
-                      className={`relative flex flex-col items-center justify-center gap-2 py-4 px-2 rounded-xl border-2 cursor-pointer overflow-hidden ${
-                        isActive
-                          ? 'border-brand-blue shadow-lg shadow-brand-blue/20'
-                          : 'border-gray-200 bg-white'
+                      className={`flex cursor-pointer items-center gap-3.5 rounded-xl border px-3.5 py-3 transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-brand-blue/30 ${
+                        selected ? 'border-2 border-brand-blue bg-[#f3f7fe]' : 'border-[#dfe6f1] bg-white hover:border-[#c5d1e4]'
                       }`}
                     >
-                      {/* Shared animated fill — slides between cards */}
-                      {isActive && (
-                        <motion.div
-                          layoutId="roleActivePill"
-                          className="absolute inset-0 bg-brand-blue"
-                          transition={{ type: 'spring', stiffness: 480, damping: 36 }}
-                        />
-                      )}
-
-                      {/* Icon */}
-                      <motion.div
-                        className="relative z-10"
-                        animate={{ scale: isActive ? 1.12 : 1 }}
-                        transition={{ type: 'spring', stiffness: 500, damping: 28 }}
-                      >
-                        <role.icon size={20} className={isActive ? 'text-white' : 'text-gray-400'} />
-                      </motion.div>
-
-                      {/* Label */}
-                      <motion.span
-                        className="relative z-10 text-xs font-semibold font-inter text-center leading-tight"
-                        animate={{ color: isActive ? '#ffffff' : '#6b7280' }}
-                        transition={{ duration: 0.15 }}
-                      >
-                        {role.label}
-                      </motion.span>
-                    </motion.button>
+                      <input
+                        type="radio"
+                        name="register-role"
+                        value={role.id}
+                        checked={selected}
+                        onChange={() => { setUserType(role.id); setErrors({}); }}
+                        className="sr-only"
+                      />
+                      <span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${selected ? 'bg-[#e6eefb]' : 'bg-[#eef3fb]'} text-brand-blue`}>
+                        <role.icon size={22} strokeWidth={1.5} />
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-sm font-semibold text-brand-dark font-inter">{role.label}</span>
+                        <span className="mt-0.5 block text-xs text-[#5b6a85] font-inter">{role.description}</span>
+                      </span>
+                      <span className={`flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full border-2 ${selected ? 'border-brand-blue' : 'border-[#c5d1e4]'}`}>
+                        {selected && <span className="h-2.5 w-2.5 rounded-full bg-brand-blue" />}
+                      </span>
+                    </label>
                   );
                 })}
               </div>
-              <AnimatePresence mode="wait">
-                <motion.p
-                  key={userType}
-                  initial={{ opacity: 0, y: 6 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -6 }}
-                  transition={{ type: 'spring', stiffness: 420, damping: 32 }}
-                  className="text-xs text-gray-400 font-inter text-center mt-2.5"
-                >
-                  {activeRole?.description}
-                </motion.p>
-              </AnimatePresence>
-            </motion.div>
-            )}
+            </fieldset>
 
-            {/* Form area */}
-            <AnimatePresence mode="wait">
-              {tab === 'login' ? (
-                <motion.div
-                  key="login"
-                  initial={{ opacity: 0, x: -18 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: 18 }}
-                  transition={{ type: 'spring', stiffness: 380, damping: 32 }}
-                >
-                  <form onSubmit={handleLogin} autoComplete="on" className="space-y-4">
-                    <motion.div
-                      initial={{ opacity: 0, y: 8 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ ...spring.smooth, delay: 0.04 }}
-                    >
-                      <Input label="Email Address" placeholder="you@company.com" name="username" autoComplete="username"
-                        value={email} onChange={e => setEmail(e.target.value)} error={errors.email} icon={Mail} />
-                    </motion.div>
+            <p className="mt-4 max-w-[380px] text-[13px] leading-relaxed text-[#5b6a85] font-inter">
+              {userType === 'organization'
+                ? 'Register your organization to verify identities and issue digital credentials.'
+                : 'Create your individual account to build a verified profile and showcase your credentials.'}
+            </p>
 
-                    <motion.div
-                      initial={{ opacity: 0, y: 8 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ ...spring.smooth, delay: 0.1 }}
-                      className="relative"
-                    >
-                      <Input label="Password" type="password" placeholder="Enter your password"
-                        name="password" autoComplete="current-password" value={password}
-                        onChange={e => setPassword(e.target.value)} error={errors.password} icon={Lock} />
-                    </motion.div>
+            <button
+              type="button"
+              onClick={() => navigate(registerRoutes[userType])}
+              className="mt-5 flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-brand-blue text-sm font-semibold text-white font-inter transition-colors hover:bg-brand-blue-hover"
+            >
+              {userType === 'organization' ? 'Register organization' : 'Register as individual'}
+              <ArrowRight size={16} />
+            </button>
 
-                    <AnimatePresence>
-                      {errors.form && (
-                        <motion.div
-                          initial={{ opacity: 0, y: -8, scale: 0.97 }}
-                          animate={{ opacity: 1, y: 0, scale: 1 }}
-                          exit={{ opacity: 0, y: -4, scale: 0.97 }}
-                          transition={spring.snappy}
-                          className="flex items-start gap-2.5 rounded-xl border border-red-200 bg-red-50 px-3.5 py-2.5 text-sm text-red-600 font-inter"
-                        >
-                          <AlertCircle size={15} className="mt-0.5 shrink-0" />
-                          <span>{errors.form}</span>
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
+            <div className="mt-4 flex items-center gap-4 text-[13px] text-[#5b6a85] font-inter">
+              <span className="h-px flex-1 bg-[#e1e7f0]" />or sign up with<span className="h-px flex-1 bg-[#e1e7f0]" />
+            </div>
+            <button
+              type="button"
+              onClick={handleGoogle}
+              disabled={googleLoading}
+              className="mt-4 flex h-11 w-full items-center justify-center gap-3 rounded-lg border border-[#d9e1ee] bg-white text-sm font-medium text-brand-dark font-inter transition-colors hover:bg-gray-50 disabled:opacity-60"
+            >
+              <GoogleIcon />
+              {googleLoading ? 'Redirecting…' : 'Continue with Google'}
+            </button>
+            <p className="mt-4 text-center text-[13px] text-[#5b6a85] font-inter">
+              Already have an account?{' '}
+              <button type="button" onClick={() => setTab('login')} className="font-semibold text-brand-blue hover:underline">Sign in</button>
+            </p>
 
-                    <motion.div
-                      initial={{ opacity: 0, y: 6 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ ...spring.soft, delay: 0.16 }}
-                      className="flex items-center justify-between"
-                    >
-                      <label className="flex items-center gap-2 cursor-pointer group">
-                        <input type="checkbox" checked={rememberMe} onChange={e => setRememberMe(e.target.checked)}
-                          className="w-4 h-4 rounded border-gray-300 text-brand-blue focus:ring-brand-blue focus:ring-offset-0" />
-                        <span className="text-sm text-gray-500 font-inter group-hover:text-gray-700 transition-colors">Remember me</span>
-                      </label>
-                      <motion.button
-                        type="button"
-                        onClick={() => setShowForgot(true)}
-                        whileHover={{ scale: 1.02 }}
-                        whileTap={{ scale: 0.97 }}
-                        transition={spring.micro}
-                        className="text-sm text-brand-blue font-inter hover:underline cursor-pointer"
-                      >
-                        Forgot password?
-                      </motion.button>
-                    </motion.div>
-
-                    <motion.div
-                      initial={{ opacity: 0, y: 8 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ ...spring.smooth, delay: 0.2 }}
-                      whileHover={{ scale: 1.015 }}
-                      whileTap={{ scale: 0.975 }}
-                    >
-                      <Button type="submit" variant="primary" size="lg" className="w-full mt-1" disabled={submitting}>
-                        {submitting
-                          ? <span className="flex items-center gap-2"><svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>Signing in…</span>
-                          : <><span>Sign In</span><ArrowRight size={17} /></>
-                        }
-                      </Button>
-                    </motion.div>
-                  </form>
-
-                  <motion.div
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ ...spring.soft, delay: 0.26 }}
-                    className="mt-5 space-y-4"
-                  >
-                    <div className="relative flex items-center">
-                      <div className="flex-1 border-t border-gray-200" />
-                      <span className="mx-3 text-xs text-gray-400 font-inter bg-white px-1">or continue with</span>
-                      <div className="flex-1 border-t border-gray-200" />
-                    </div>
-                    <motion.button
-                      type="button"
-                      onClick={handleGoogle}
-                      disabled={googleLoading}
-                      whileHover={{ scale: 1.015, y: -1, boxShadow: '0 4px 16px rgba(0,0,0,0.08)' }}
-                      whileTap={{ scale: 0.975, y: 0 }}
-                      transition={spring.snappy}
-                      className="w-full flex items-center justify-center gap-3 py-2.5 px-4 rounded-xl border border-gray-200 bg-white text-brand-dark font-inter text-sm font-medium disabled:opacity-60 cursor-pointer shadow-sm"
-                    >
-                      <GoogleIcon />
-                      {googleLoading ? 'Redirecting…' : 'Continue with Google'}
-                    </motion.button>
-                    <p className="text-center text-sm text-gray-500 font-inter">
-                      New to TruMarkZ?{' '}
-                      <motion.button
-                        type="button"
-                        onClick={() => setTab('register')}
-                        whileHover={{ scale: 1.02 }}
-                        whileTap={{ scale: 0.97 }}
-                        transition={spring.micro}
-                        className="text-brand-blue font-semibold hover:underline cursor-pointer"
-                      >
-                        Create an account
-                      </motion.button>
-                    </p>
-                  </motion.div>
-                </motion.div>
-
-              ) : (
-                <motion.div
-                  key={`register-${userType}`}
-                  initial={{ opacity: 0, x: -18 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: 18 }}
-                  transition={{ type: 'spring', stiffness: 380, damping: 32 }}
-                  className="space-y-5"
-                >
-                  <motion.div
-                    initial={{ opacity: 0, y: 8 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ ...spring.smooth, delay: 0.06 }}
-                    className="bg-gray-50 border border-gray-200 rounded-xl p-4"
-                  >
-                    <p className="text-sm text-gray-600 font-inter leading-relaxed">
-                      {userType === 'organization'
-                        ? 'Register your organization to start verifying identities and issuing blockchain-secured digital credentials.'
-                        : 'Create your individual account to build a verified Skill Tree profile and showcase your credentials.'}
-                    </p>
-                  </motion.div>
-                  <motion.div
-                    initial={{ opacity: 0, y: 8 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ ...spring.smooth, delay: 0.12 }}
-                    whileHover={{ scale: 1.015 }}
-                    whileTap={{ scale: 0.975 }}
-                  >
-                    <Button variant="primary" size="lg" className="w-full" onClick={() => navigate(registerRoutes[userType])}>
-                      {userType === 'organization' ? 'Register Organization' : 'Register as Individual'}
-                      <ArrowRight size={17} />
-                    </Button>
-                  </motion.div>
-                  <div className="relative flex items-center">
-                    <div className="flex-1 border-t border-gray-200" />
-                    <span className="mx-3 text-xs text-gray-400 font-inter bg-white px-1">or sign up with</span>
-                    <div className="flex-1 border-t border-gray-200" />
-                  </div>
-                  <motion.button
-                    type="button"
-                    onClick={handleGoogle}
-                    disabled={googleLoading}
-                    whileHover={{ scale: 1.015, y: -1, boxShadow: '0 4px 16px rgba(0,0,0,0.08)' }}
-                    whileTap={{ scale: 0.975, y: 0 }}
-                    transition={spring.snappy}
-                    className="w-full flex items-center justify-center gap-3 py-2.5 px-4 rounded-xl border border-gray-200 bg-white text-brand-dark font-inter text-sm font-medium disabled:opacity-60 cursor-pointer shadow-sm"
-                  >
-                    <GoogleIcon />
-                    {googleLoading ? 'Redirecting…' : 'Continue with Google'}
-                  </motion.button>
-                  <p className="text-center text-sm text-gray-500 font-inter">
-                    Already have an account?{' '}
-                    <motion.button
-                      type="button"
-                      onClick={() => setTab('login')}
-                      whileHover={{ scale: 1.02 }}
-                      whileTap={{ scale: 0.97 }}
-                      transition={spring.micro}
-                      className="text-brand-blue font-semibold hover:underline cursor-pointer"
-                    >
-                      Sign In
-                    </motion.button>
-                  </p>
-                </motion.div>
-              )}
-            </AnimatePresence>
+            <div className="mt-4 border-t border-[#e1e7f0] pt-4 text-center text-xs text-[#5b6a85] font-inter">
+              <Link to="/privacy-policy" className="hover:text-brand-blue hover:underline">Privacy Policy</Link>
+              <span className="mx-3">·</span>
+              <Link to="/terms-of-service" className="hover:text-brand-blue hover:underline">Terms of Service</Link>
+            </div>
           </motion.div>
-
-          <p className="mt-5 text-xs text-gray-400 font-inter">
-            <Link to="/privacy-policy" className="hover:text-brand-blue hover:underline transition-colors">Privacy Policy</Link>
-            <span className="mx-2">·</span>
-            <Link to="/terms-of-service" className="hover:text-brand-blue hover:underline transition-colors">Terms of Service</Link>
-          </p>
         </div>
+        )}
       </div>
     </>
   );

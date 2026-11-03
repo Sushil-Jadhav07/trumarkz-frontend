@@ -1,16 +1,15 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { motion } from 'framer-motion';
 import { AuthLayout } from '@/components/layout/AuthLayout';
-import { PageHeader } from '@/components/shared/PageHeader';
-import { Card } from '@/components/ui/Card';
-import { Input } from '@/components/ui/Input';
 import { Modal } from '@/components/ui/Modal';
+import {
+  PageIntro, OutlineButton, SummaryBanner, DirectoryBar, StatusText, Avatar, RowActionMenu, NumberedPager, SortLabel,
+} from '@/components/shared/AdminPageParts';
+import { pageRange } from '@/utils/pagination';
 import { useNavigate } from 'react-router-dom';
 import { adminAPI, getApiError } from '@/services/api';
 import { useAuth } from '@/context/AuthContext';
 import {
-  Search, Building2, RefreshCw, Eye, Pencil, CheckCircle,
-  ShieldOff, UserX, Trash2, AlertTriangle, ChevronLeft, ChevronRight,
+  Building2, RefreshCw, Pencil, CheckCircle, ShieldOff, UserX, Trash2, AlertTriangle,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -31,20 +30,6 @@ const formatDate = (dateStr) => {
   } catch {
     return dateStr;
   }
-};
-
-const Badge = ({ tone, children, title }) => {
-  const tones = {
-    green: 'bg-green-50 text-green-600',
-    amber: 'bg-amber-50 text-amber-600',
-    blue: 'bg-blue-50 text-brand-blue',
-    gray: 'bg-gray-100 text-gray-500',
-  };
-  return (
-    <span title={title} className={`px-2 py-0.5 rounded-full text-[11px] font-medium font-inter ${tones[tone] || tones.gray}`}>
-      {children}
-    </span>
-  );
 };
 
 // At least one Dhiway space_id/schema_id (dhiways_details) given to this
@@ -100,7 +85,8 @@ export const OrganizationList = () => {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
+  const pageSize = 10;
+  const [sort, setSort] = useState({ key: 'created', dir: 'desc' });
 
   const [deactivateTarget, setDeactivateTarget] = useState(null);
   const [unverifyGstTarget, setUnverifyGstTarget] = useState(null);
@@ -152,11 +138,19 @@ export const OrganizationList = () => {
     );
   }, [orgs, search]);
 
-  const totalPages = Math.max(1, Math.ceil(filteredOrgs.length / pageSize));
+  const toggleSort = (key) => setSort((cur) => (cur.key === key ? { key, dir: cur.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: key === 'created' ? 'desc' : 'asc' }));
+  const sortedOrgs = useMemo(() => {
+    const dir = sort.dir === 'asc' ? 1 : -1;
+    return [...filteredOrgs].sort((a, b) => dir * (sort.key === 'created'
+      ? new Date(a.created_at || 0) - new Date(b.created_at || 0)
+      : String(a.organization_name || '').localeCompare(String(b.organization_name || ''))));
+  }, [filteredOrgs, sort]);
+
+  const totalPages = Math.max(1, Math.ceil(sortedOrgs.length / pageSize));
   const safePage = Math.min(page, totalPages);
-  const paginatedOrgs = filteredOrgs.slice((safePage - 1) * pageSize, safePage * pageSize);
-  const startIdx = filteredOrgs.length === 0 ? 0 : (safePage - 1) * pageSize + 1;
-  const endIdx = Math.min(safePage * pageSize, filteredOrgs.length);
+  const paginatedOrgs = sortedOrgs.slice((safePage - 1) * pageSize, safePage * pageSize);
+  const { from: startIdx, to: endIdx } = pageRange(safePage, pageSize, sortedOrgs.length);
+  const serviceTypes = [...new Set(orgs.map((o) => o.service_type).filter(Boolean))];
 
   // Resolve Dhiway Setup status for whichever rows are actually on screen —
   // one GET /auth/organizations/{id} per not-yet-checked row, never all of
@@ -195,199 +189,128 @@ export const OrganizationList = () => {
       });
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filteredOrgs, safePage, pageSize]);
+  }, [sortedOrgs, safePage, pageSize]);
 
-  // Six action buttons need 176px (26px each plus five 4px gaps).
-  const GRID = 'grid-cols-[minmax(240px,1.6fr)_110px_130px_110px_110px_110px_110px_100px_110px_192px]';
+  const dhiwayCell = (org) => {
+    const status = typeof org.has_dhiway_space === 'boolean' ? { ok: org.has_dhiway_space, server: true } : dhiwayStatus[org.id];
+    if (status === undefined || status === 'loading') return <StatusText kind="neutral"><RefreshCw size={0} className="hidden" />Checking…</StatusText>;
+    if (status === null) return <StatusText kind="neutral" title="Could not check — try Refresh">Unknown</StatusText>;
+    const via = status.ok ? [status.legacy && 'Dhiway Spaces', status.viaSchema && 'Schema Configurations'].filter(Boolean).join(' + ') : '';
+    return (
+      <StatusText
+        kind={status.ok ? 'good' : 'warning'}
+        title={status.ok
+          ? (status.server ? 'Configured — a Dhiway Spaces row or an active Schema Configuration' : `Configured via ${via}`)
+          : 'No Dhiway space given yet (no Dhiway Spaces row and no active Schema Configuration) — SDC generation is blocked for this org'}
+      >
+        {status.ok ? 'Configured' : 'Needs setup'}
+      </StatusText>
+    );
+  };
+
+  const rowMenu = (org) => [
+    { label: 'Edit organization', icon: Pencil, onClick: () => navigate(`/admin/organizations/${encodeURIComponent(org.id)}/edit`) },
+    { label: 'Mark as approved', icon: CheckCircle, hidden: !!org.org_approved, disabled: approvingId === org.id, onClick: () => handleApprove(org) },
+    { label: 'Revoke GST verification', icon: ShieldOff, tone: 'warning', hidden: !org.gst_verified, onClick: () => setUnverifyGstTarget(org) },
+    { label: 'Deactivate organization', icon: UserX, tone: 'danger', hidden: !org.is_active || org.id === currentUser?.id, onClick: () => setDeactivateTarget(org) },
+    { label: 'Delete permanently', icon: Trash2, tone: 'danger', hidden: org.id === currentUser?.id, onClick: () => setPermanentDeleteTarget(org) },
+  ];
+
+  const muted = 'text-[#7d8aa5]';
 
   return (
-    <AuthLayout title="Organizations">
-      <PageHeader
+    <AuthLayout title="Organizations" breadcrumb={['Administration', 'Organizations']}>
+      <PageIntro
+        eyebrow="Organization management"
         title="Organizations"
-        subtitle="Manage organization accounts — view, edit, approve, and more"
-        action={
-          <button
-            type="button"
-            onClick={refresh}
-            disabled={loading}
-            className="flex items-center gap-2 px-3 py-2 rounded-xl border border-gray-200 text-sm text-gray-600 hover:bg-gray-50 transition-colors font-inter disabled:opacity-50"
-          >
-            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
-            Refresh
-          </button>
-        }
+        subtitle="Manage organization accounts, approvals and configuration."
+        actions={<OutlineButton icon={RefreshCw} onClick={refresh} disabled={loading}>Refresh</OutlineButton>}
       />
 
-      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.22 }} className="mb-5">
-        <Card className="px-5 py-4 flex items-center gap-4">
-          <div className="w-11 h-11 rounded-xl bg-blue-50 flex items-center justify-center shrink-0">
-            <Building2 size={20} className="text-brand-blue" />
-          </div>
-          <div>
-            <p className="text-xs text-gray-500 font-inter">Total Organizations</p>
-            <p className="text-2xl font-bold text-brand-dark font-sora leading-none mt-1">{loading ? '—' : orgs.length}</p>
-          </div>
-        </Card>
-      </motion.div>
+      <SummaryBanner
+        icon={Building2}
+        label="Total organizations"
+        value={loading ? '—' : orgs.length}
+        segments={[
+          'Registered organization accounts',
+          <span key="svc" className="capitalize">{serviceTypes.length ? serviceTypes.join(' · ') : 'No service types yet'}</span>,
+        ]}
+      />
 
-      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.22, delay: 0.04 }} className="mb-5">
-        <div className="max-w-sm">
-          <Input type="text" placeholder="Search by name, service, or industry…" value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} icon={Search} />
-        </div>
-      </motion.div>
+      <section aria-label="Organization directory" className="overflow-hidden rounded-xl border border-gray-100 bg-white">
+        <DirectoryBar
+          title="Organization directory"
+          count={loading ? null : orgs.length}
+          search={search}
+          onSearch={(v) => { setSearch(v); setPage(1); }}
+          placeholder="Search name, service or industry"
+        />
 
-      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.22, delay: 0.08 }}>
-        <Card className="overflow-hidden">
-          <div className="overflow-x-auto">
-            <div className="min-w-[1360px]">
-              <div className={`grid ${GRID} gap-3 px-5 py-3 bg-brand-bg border-b border-gray-100`}>
-                {['Organization', 'Service Type', 'Industry', 'GST Status', 'Approval', 'Onboarding', 'Dhiway Setup', 'Account', 'Created', 'Actions'].map((h) => (
-                  <span key={h} className={`text-[11px] font-semibold text-gray-400 uppercase tracking-wide font-inter ${h === 'Actions' ? 'text-right' : ''}`}>{h}</span>
-                ))}
-              </div>
+        <div className="overflow-x-auto scrollbar-hidden">
+          <table className="w-full min-w-[1180px] border-collapse text-left text-xs font-inter">
+            <thead>
+              <tr>
+                <th aria-sort={sort.key === 'name' ? (sort.dir === 'asc' ? 'ascending' : 'descending') : undefined} className="px-4 py-2.5"><SortLabel label="Organization" active={sort.key === 'name'} onClick={() => toggleSort('name')} /></th>
+                {['Service', 'Industry', 'GST status', 'Approval', 'Onboarding', 'Dhiway setup', 'Account'].map((h) => <th key={h} className="px-3 py-2.5">{h}</th>)}
+                <th aria-sort={sort.key === 'created' ? (sort.dir === 'asc' ? 'ascending' : 'descending') : undefined} className="px-3 py-2.5"><SortLabel label="Created" active={sort.key === 'created'} onClick={() => toggleSort('created')} /></th>
+                <th className="px-3 py-2.5 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {loading && Array.from({ length: 6 }).map((_, i) => (
+                <tr key={i} aria-hidden="true" className="motion-safe:animate-pulse">
+                  {Array.from({ length: 10 }).map((__, j) => <td key={j} className="px-4 py-3.5"><div className="h-3.5 w-3/4 rounded bg-gray-100" /></td>)}
+                </tr>
+              ))}
 
-              {loading && (
-                <div role="status" aria-busy="true" aria-label="Loading organizations" className="divide-y divide-gray-50">
-                  {Array.from({ length: 6 }).map((_, i) => (
-                    <div key={i} className={`grid ${GRID} gap-3 px-5 py-4 motion-safe:animate-pulse items-center`}>
-                      <div className="h-3.5 bg-gray-100 rounded w-32" />
-                      <div className="h-3.5 bg-gray-100 rounded w-16" />
-                      <div className="h-3.5 bg-gray-100 rounded w-20" />
-                      <div className="h-5 bg-gray-100 rounded-full w-16" />
-                      <div className="h-5 bg-gray-100 rounded-full w-16" />
-                      <div className="h-5 bg-gray-100 rounded-full w-16" />
-                      <div className="h-5 bg-gray-100 rounded-full w-14" />
-                      <div className="h-3.5 bg-gray-100 rounded w-14" />
-                      <div className="flex gap-1 justify-end">
-                        <div className="w-7 h-7 bg-gray-100 rounded-lg" />
-                        <div className="w-7 h-7 bg-gray-100 rounded-lg" />
-                      </div>
+              {!loading && sortedOrgs.length === 0 && (
+                <tr>
+                  <td colSpan={10} className="py-14 text-center">
+                    <Building2 size={22} className="mx-auto mb-2 text-gray-400" />
+                    <p className="text-sm font-medium text-brand-dark font-sora">No organizations found</p>
+                    <p className="mt-1 text-xs text-gray-500">{search ? 'Try a different search term.' : 'No organizations yet.'}</p>
+                  </td>
+                </tr>
+              )}
+
+              {!loading && paginatedOrgs.map((org) => (
+                <tr key={org.id} className={`transition-colors hover:bg-blue-50/30 ${!org.is_active ? 'opacity-60' : ''}`}>
+                  <td className="px-4 py-2.5">
+                    <div className="flex min-w-0 items-center gap-2.5">
+                      <Avatar name={org.organization_name} />
+                      <button type="button" onClick={() => navigate(`/admin/organizations/${encodeURIComponent(org.id)}`)} title="View organization details" className="truncate text-left text-[13px] text-brand-dark hover:text-brand-blue hover:underline">{org.organization_name || 'Organization'}</button>
                     </div>
-                  ))}
-                </div>
-              )}
+                  </td>
+                  <td className={`px-3 py-2.5 capitalize ${muted}`}>{org.service_type || '—'}</td>
+                  <td className={`px-3 py-2.5 ${muted}`}>{org.industry_type || '—'}</td>
+                  <td className="px-3 py-2.5"><StatusText kind={org.gst_verified ? 'good' : 'neutral'}>{org.gst_verified ? 'Verified' : 'Not verified'}</StatusText></td>
+                  <td className="px-3 py-2.5"><StatusText kind={org.org_approved ? 'approved' : 'pending'}>{org.org_approved ? 'Approved' : 'Pending'}</StatusText></td>
+                  <td className="px-3 py-2.5"><StatusText kind={org.onboarding_completed ? 'good' : 'pending'}>{org.onboarding_completed ? 'Completed' : 'Pending'}</StatusText></td>
+                  <td className="px-3 py-2.5">{dhiwayCell(org)}</td>
+                  <td className="px-3 py-2.5"><StatusText kind={org.is_active ? 'active' : 'inactive'}>{org.is_active ? 'Active' : 'Inactive'}</StatusText></td>
+                  <td className={`whitespace-nowrap px-3 py-2.5 ${muted}`}>{formatDate(org.created_at)}</td>
+                  <td className="px-3 py-2.5">
+                    <div className="flex items-center justify-end gap-2">
+                      <button type="button" onClick={() => navigate(`/admin/organizations/${encodeURIComponent(org.id)}`)} aria-label={`View ${org.organization_name || 'organization'}`} className="rounded px-1 text-xs font-semibold text-brand-blue hover:underline">View</button>
+                      <RowActionMenu label={`Actions for ${org.organization_name || 'organization'}`} items={rowMenu(org)} />
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
 
-              {!loading && filteredOrgs.length === 0 && (
-                <div className="flex flex-col items-center justify-center py-16 text-center">
-                  <div className="w-12 h-12 rounded-2xl bg-gray-100 flex items-center justify-center mb-3">
-                    <Building2 size={20} className="text-gray-400" />
-                  </div>
-                  <p className="text-sm font-medium text-brand-dark font-sora">No organizations found</p>
-                  <p className="text-xs text-gray-400 font-inter mt-1">{search ? 'Try a different search term.' : 'No organizations yet.'}</p>
-                </div>
-              )}
-
-              {!loading && filteredOrgs.length > 0 && (
-                <div className="divide-y divide-gray-50">
-                  {paginatedOrgs.map((org, i) => (
-                    <motion.div
-                      key={org.id || i}
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      transition={{ delay: i * 0.012 }}
-                      className={`grid ${GRID} gap-3 px-5 py-3.5 items-center hover:bg-gray-50/60 transition-colors ${!org.is_active ? 'opacity-60' : ''}`}
-                    >
-                      <div className="flex items-center gap-2.5 min-w-0">
-                        <div className="w-7 h-7 rounded-full bg-brand-blue/10 flex items-center justify-center shrink-0 text-[11px] font-bold text-brand-blue font-sora uppercase">
-                          {org.organization_name?.[0] || '?'}
-                        </div>
-                        <button type="button" onClick={() => navigate(`/admin/organizations/${encodeURIComponent(org.id)}`)} title="View organization details" className="truncate text-left text-sm font-medium text-brand-dark font-inter hover:text-brand-blue hover:underline focus-visible:outline-brand-blue">{org.organization_name || 'Organization'}</button>
-                      </div>
-                      <span className="text-xs text-gray-500 font-inter truncate capitalize">{org.service_type || '—'}</span>
-                      <span className="text-xs text-gray-500 font-inter truncate">{org.industry_type || '—'}</span>
-                      <div><Badge tone={org.gst_verified ? 'green' : 'gray'}>{org.gst_verified ? 'Verified' : 'Not Verified'}</Badge></div>
-                      <div><Badge tone={org.org_approved ? 'blue' : 'amber'}>{org.org_approved ? 'Approved' : 'Pending'}</Badge></div>
-                      <div><Badge tone={org.onboarding_completed ? 'green' : 'amber'}>{org.onboarding_completed ? 'Completed' : 'Pending'}</Badge></div>
-                      {/* Whether this org has been given at least one Dhiway
-                          space_id/schema_id yet (dhiways_details) — without
-                          this, the org can't generate SDC certificates at
-                          all. Flags freshly onboarded orgs still waiting on
-                          SuperAdmin to provision them (see the org-side
-                          "Setup in progress" banner, same underlying check).
-                          Resolved per-row above since the list endpoint
-                          itself doesn't carry this field. */}
-                      <div>
-                        {(() => {
-                          const status = typeof org.has_dhiway_space === 'boolean'
-                            ? { ok: org.has_dhiway_space, server: true }
-                            : dhiwayStatus[org.id];
-                          if (status === undefined || status === 'loading') {
-                            return <Badge tone="gray"><RefreshCw size={9} className="animate-spin" /></Badge>;
-                          }
-                          if (status === null) {
-                            return <Badge tone="gray" title="Could not check — try Refresh">Unknown</Badge>;
-                          }
-                          const via = status.ok
-                            ? [status.legacy && 'Dhiway Spaces', status.viaSchema && 'Schema Configurations'].filter(Boolean).join(' + ')
-                            : '';
-                          return (
-                            <Badge
-                              tone={status.ok ? 'green' : 'amber'}
-                              title={status.ok
-                                ? (status.server ? 'Configured — a Dhiway Spaces row or an active Schema Configuration' : `Configured via ${via}`)
-                                : 'No Dhiway space given yet (no Dhiway Spaces row and no active Schema Configuration) — SDC generation is blocked for this org'}
-                            >
-                              {status.ok ? 'Configured' : 'Needs Setup'}
-                            </Badge>
-                          );
-                        })()}
-                      </div>
-                      <div><Badge tone={org.is_active ? 'green' : 'gray'}>{org.is_active ? 'Active' : 'Inactive'}</Badge></div>
-                      <span className="whitespace-nowrap text-xs text-gray-400 font-inter">{formatDate(org.created_at)}</span>
-
-                      <div className="flex min-w-0 items-center justify-end gap-1 [&_button]:shrink-0">
-                        <button type="button" onClick={() => navigate(`/admin/organizations/${encodeURIComponent(org.id)}`)} title="View organization details" className="p-1.5 rounded-lg text-gray-400 hover:text-brand-blue hover:bg-blue-50 transition-colors">
-                          <Eye size={14} />
-                        </button>
-                        <button type="button" onClick={() => navigate(`/admin/organizations/${encodeURIComponent(org.id)}/edit`)} title="Edit organization" className="p-1.5 rounded-lg text-gray-400 hover:text-brand-blue hover:bg-blue-50 transition-colors">
-                          <Pencil size={14} />
-                        </button>
-                        {!org.org_approved && (
-                          <button type="button" onClick={() => handleApprove(org)} disabled={approvingId === org.id} title="Mark organization as approved" className="p-1.5 rounded-lg text-gray-400 hover:text-green-600 hover:bg-green-50 transition-colors disabled:opacity-50">
-                            {approvingId === org.id ? <RefreshCw size={14} className="animate-spin" /> : <CheckCircle size={14} />}
-                          </button>
-                        )}
-                        {org.gst_verified && (
-                          <button type="button" onClick={() => setUnverifyGstTarget(org)} title="Revoke GST verification" className="p-1.5 rounded-lg text-gray-400 hover:text-amber-600 hover:bg-amber-50 transition-colors">
-                            <ShieldOff size={14} />
-                          </button>
-                        )}
-                        {org.is_active && org.id !== currentUser?.id && (
-                          <button type="button" onClick={() => setDeactivateTarget(org)} title="Deactivate organization" className="p-1.5 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors">
-                            <UserX size={14} />
-                          </button>
-                        )}
-                        {org.id !== currentUser?.id && (
-                          <button type="button" onClick={() => setPermanentDeleteTarget(org)} title="Permanently delete organization" className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors">
-                            <Trash2 size={14} />
-                          </button>
-                        )}
-                      </div>
-                    </motion.div>
-                  ))}
-                </div>
-              )}
+        {!loading && sortedOrgs.length > 0 && (
+          <div className="flex flex-col justify-between gap-3 border-t border-gray-100 px-5 py-3 sm:flex-row sm:items-center">
+            <div>
+              <p className="text-xs text-gray-600 font-inter">Showing {startIdx}–{endIdx} of {sortedOrgs.length} organizations</p>
+              <p className="mt-0.5 text-xs text-gray-500 font-inter">Account, approval and setup statuses are tracked separately.</p>
             </div>
+            <NumberedPager page={safePage} totalPages={totalPages} onPage={setPage} />
           </div>
-
-          {!loading && filteredOrgs.length > 0 && (
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-5 py-3.5 border-t border-gray-100 bg-brand-bg">
-              <p className="text-xs text-gray-400 font-inter">
-                Showing {startIdx}–{endIdx} of {filteredOrgs.length}
-              </p>
-              <div className="flex items-center gap-2">
-                <button type="button" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={safePage <= 1} className="p-1.5 rounded-lg border border-gray-200 text-gray-500 hover:bg-white transition-colors disabled:opacity-40">
-                  <ChevronLeft size={14} />
-                </button>
-                <span className="text-xs text-gray-500 font-inter">Page {safePage} of {totalPages}</span>
-                <button type="button" onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={safePage >= totalPages} className="p-1.5 rounded-lg border border-gray-200 text-gray-500 hover:bg-white transition-colors disabled:opacity-40">
-                  <ChevronRight size={14} />
-                </button>
-              </div>
-            </div>
-          )}
-        </Card>
-      </motion.div>
+        )}
+      </section>
 
       <ConfirmModal
         isOpen={!!deactivateTarget}

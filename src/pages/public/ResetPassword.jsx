@@ -2,13 +2,11 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
-import { ArrowLeft, CheckCircle, Lock, Mail, RefreshCw, ShieldCheck } from 'lucide-react';
+import { AlertCircle, ArrowLeft, ArrowRight, Eye, EyeOff, Lock, Mail, RefreshCw, ShieldCheck } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
-import { Button } from '@/components/ui/Button';
-import { Card } from '@/components/ui/Card';
-import { Input } from '@/components/ui/Input';
+import { SuccessCheckmark } from '@/components/ui/SuccessCheckmark';
+import { HeroPanel, AuthField, AuthStepper, AuthTopBar } from '@/components/auth/AuthShell';
 import { OTPInput } from '@/components/ui/OTPInput';
-import { Logo } from '@/components/ui/Logo';
 
 const spring = { type: 'spring', stiffness: 300, damping: 28 };
 
@@ -32,6 +30,8 @@ export const ResetPassword = () => {
   const [submitting, setSubmitting] = useState(false);
   const [resending, setResending] = useState(false);
   const [success, setSuccess] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
   const [timer, setTimer] = useState(0);
   const [canResend, setCanResend] = useState(true);
   const timerRef = useRef(null);
@@ -98,7 +98,6 @@ export const ResetPassword = () => {
     sessionStorage.removeItem('trumarkz_reset_email');
     setSuccess(true);
     toast.success('Password reset successfully!');
-    setTimeout(() => navigate('/login', { replace: true }), 2500);
   };
 
   const handleResend = async () => {
@@ -122,251 +121,111 @@ export const ResetPassword = () => {
     setTimer(60);
   };
 
-  // ── Success screen ─────────────────────────────────────────────────────────
-  if (success) {
-    return (
-      <div className="min-h-screen bg-brand-bg flex items-center justify-center p-4">
-        <motion.div
-          initial={{ opacity: 0, scale: 0.9, y: 20 }}
-          animate={{ opacity: 1, scale: 1, y: 0 }}
-          transition={spring}
-          className="w-full max-w-md"
-        >
-          <Card className="p-8 text-center">
-            <motion.div
-              initial={{ scale: 0.5, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              transition={{ ...spring, delay: 0.15 }}
-              className="w-16 h-16 bg-green-50 border border-green-100 rounded-2xl flex items-center justify-center mx-auto mb-5"
-            >
-              <CheckCircle size={32} className="text-green-500" />
-            </motion.div>
-            <h2 className="font-sora font-bold text-2xl text-brand-dark mb-2">Password Reset!</h2>
-            <p className="text-sm text-gray-500 font-inter mb-6 leading-relaxed">
-              Your password has been reset successfully. Redirecting you to sign in…
-            </p>
-            <Button variant="primary" size="lg" className="w-full" onClick={() => navigate('/login', { replace: true })}>
-              Go to Sign In
-            </Button>
-          </Card>
-        </motion.div>
-      </div>
-    );
-  }
+  const stepCurrent = success ? 2 : step - 1;
+  const goSignIn = () => navigate('/login', { replace: true });
 
   return (
-    <div className="min-h-screen bg-brand-bg flex items-center justify-center p-4">
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={spring}
-        className="w-full max-w-md"
-      >
-        <Card className="p-6 sm:p-8">
-          <div className="mb-6 flex justify-center">
-            <Logo size="md" />
-          </div>
+    <div className="flex h-[100dvh] gap-5 overflow-hidden bg-white p-3 sm:p-5">
+      <HeroPanel />
 
-          {/* Step indicator */}
-          <div className="flex items-center gap-2 mb-7">
-            {[1, 2].map((s) => (
-              <React.Fragment key={s}>
-                <div className="flex items-center gap-2">
-                  <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold font-sora transition-all duration-300 ${
-                    step > s
-                      ? 'bg-green-500 text-white'
-                      : step === s
-                        ? 'bg-brand-blue text-white'
-                        : 'bg-gray-100 text-gray-400'
-                  }`}>
-                    {step > s ? <CheckCircle size={14} /> : s}
+      <div className="relative flex h-full min-h-0 flex-1 flex-col overflow-y-auto px-4 sm:px-8">
+        <AuthTopBar backLabel="Back to sign in" onBack={goSignIn} />
+
+        <motion.div
+          initial={{ opacity: 0, y: 14 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={spring}
+          className="mx-auto my-auto w-full max-w-[740px] pb-3"
+        >
+          <AuthStepper steps={['Verify OTP', 'New password']} current={stepCurrent} showProgress={false} />
+
+          <div className="mx-auto mt-6 w-full max-w-[440px]">
+            <AnimatePresence mode="wait">
+              {success ? (
+                <motion.div key="done" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="text-center">
+                  <SuccessCheckmark size="md" />
+                  <h1 className="mt-3 font-inter text-[26px] font-semibold leading-tight tracking-[-0.01em] text-brand-dark">Password reset</h1>
+                  <p className="mt-1.5 text-[13px] leading-relaxed text-[#5b6a85] font-inter">Your password has been changed. Sign in with your new password.</p>
+                  <button type="button" onClick={goSignIn} className="mt-6 flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-brand-blue text-sm font-semibold text-white font-inter transition-colors hover:bg-brand-blue-hover disabled:cursor-not-allowed disabled:opacity-60">Go to sign in <ArrowRight size={16} /></button>
+                </motion.div>
+              ) : step === 1 ? (
+                <motion.div key="step1" initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} transition={spring}>
+                  <div className="text-center">
+                    <span className="mx-auto mb-3 flex h-[52px] w-[52px] items-center justify-center rounded-2xl bg-[#e9f1fe] text-brand-blue"><ShieldCheck size={24} strokeWidth={1.6} /></span>
+                    <h1 className="font-inter text-[26px] font-semibold leading-tight tracking-[-0.01em] text-brand-dark">Enter your OTP</h1>
+                    <p className="mt-1.5 text-[13px] leading-relaxed text-[#5b6a85] font-inter">Check your email for the 6-digit code and enter it below.</p>
                   </div>
-                  <span className={`text-xs font-inter font-medium ${step === s ? 'text-brand-dark' : 'text-gray-400'}`}>
-                    {s === 1 ? 'Verify OTP' : 'New Password'}
-                  </span>
-                </div>
-                {s < 2 && <div className={`flex-1 h-px transition-all duration-300 ${step > 1 ? 'bg-green-400' : 'bg-gray-200'}`} />}
-              </React.Fragment>
-            ))}
-          </div>
 
-          <AnimatePresence mode="wait">
-            {/* ── Step 1: Enter OTP ── */}
-            {step === 1 && (
-              <motion.div
-                key="step1"
-                initial={{ opacity: 0, x: -20 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: -20 }}
-                transition={spring}
-              >
-                <div className="text-center mb-6">
-                  <div className="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-xl bg-brand-blue/10">
-                    <ShieldCheck size={22} className="text-brand-blue" />
-                  </div>
-                  <h1 className="font-sora font-bold text-xl text-brand-dark mb-1">Enter Your OTP</h1>
-                  <p className="text-sm text-gray-500 font-inter leading-relaxed">
-                    Check your email for the 6-digit OTP and enter it below.
-                  </p>
-                </div>
-
-                <form onSubmit={handleVerifyOtp} className="space-y-5">
-                  <Input
-                    label="Email Address"
-                    name="email"
-                    autoComplete="email"
-                    placeholder="Enter your email"
-                    value={email}
-                    onChange={(e) => { setEmail(e.target.value); setEmailError(''); }}
-                    error={emailError}
-                    icon={Mail}
-                  />
-
-                  <div>
-                    <p className="text-sm font-medium font-inter text-brand-dark mb-3">6-Digit OTP</p>
-                    <OTPInput
-                      value={otp}
-                      onChange={(val) => { setOtp(val); setOtpError(''); }}
-                      error={!!otpError}
+                  <form onSubmit={handleVerifyOtp} noValidate className="mt-5 space-y-4">
+                    <AuthField
+                      id="reset-email" label="Email address" icon={Mail} type="email" name="email" autoComplete="email" placeholder="you@company.com"
+                      value={email} onChange={(e) => { setEmail(e.target.value); setEmailError(''); }} error={emailError}
                     />
-                    <AnimatePresence>
+
+                    <div>
+                      <p className="mb-2 text-[13px] font-medium text-brand-dark font-inter">6-digit OTP</p>
+                      <OTPInput value={otp} onChange={(val) => { setOtp(val); setOtpError(''); }} error={!!otpError} />
                       {otpError && (
-                        <motion.p
-                          initial={{ opacity: 0, y: -4 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          exit={{ opacity: 0, y: -4 }}
-                          className="text-center text-xs text-red-500 font-inter mt-2"
-                        >
-                          {otpError}
-                        </motion.p>
+                        <p role="alert" className="mt-2 flex items-center justify-center gap-1 text-xs text-red-500 font-inter"><AlertCircle size={12} /> {otpError}</p>
                       )}
-                    </AnimatePresence>
-
-                    {/* Resend OTP */}
-                    <div className="text-center mt-3">
-                      {canResend ? (
-                        <button
-                          type="button"
-                          onClick={handleResend}
-                          disabled={resending}
-                          className="inline-flex items-center gap-1.5 text-sm text-brand-blue font-inter hover:underline disabled:opacity-60 cursor-pointer"
-                        >
-                          <RefreshCw size={13} className={resending ? 'animate-spin' : ''} />
-                          {resending ? 'Sending…' : 'Resend OTP'}
-                        </button>
-                      ) : (
-                        <p className="text-sm text-gray-500 font-inter">
-                          Resend OTP in{' '}
-                          <span className="font-semibold text-brand-dark">
-                            00:{timer.toString().padStart(2, '0')}
-                          </span>
-                        </p>
-                      )}
+                      <div className="mt-3 text-center text-[13px] font-inter">
+                        {canResend ? (
+                          <button type="button" onClick={handleResend} disabled={resending} className="inline-flex items-center gap-1.5 font-medium text-brand-blue hover:underline disabled:opacity-60">
+                            <RefreshCw size={13} className={resending ? 'animate-spin' : ''} />
+                            {resending ? 'Sending…' : 'Resend OTP'}
+                          </button>
+                        ) : (
+                          <p className="text-[#5b6a85]">Resend OTP in <span className="font-semibold text-brand-dark">00:{timer.toString().padStart(2, '0')}</span></p>
+                        )}
+                      </div>
                     </div>
+
+                    <button type="submit" disabled={otp.length < 6} className="flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-brand-blue text-sm font-semibold text-white font-inter transition-colors hover:bg-brand-blue-hover disabled:cursor-not-allowed disabled:opacity-60">Continue to reset password <ArrowRight size={16} /></button>
+                  </form>
+                </motion.div>
+              ) : (
+                <motion.div key="step2" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }} transition={spring}>
+                  <div className="text-center">
+                    <span className="mx-auto mb-3 flex h-[52px] w-[52px] items-center justify-center rounded-2xl bg-[#e9f1fe] text-brand-blue"><Lock size={24} strokeWidth={1.6} /></span>
+                    <h1 className="font-inter text-[26px] font-semibold leading-tight tracking-[-0.01em] text-brand-dark">Set new password</h1>
+                    <p className="mt-1.5 text-[13px] leading-relaxed text-[#5b6a85] font-inter">Choose a strong password for your account.</p>
                   </div>
 
-                  <motion.div whileHover={{ scale: 1.015 }} whileTap={{ scale: 0.975 }} transition={spring}>
-                    <Button type="submit" variant="primary" size="lg" className="w-full" disabled={otp.length < 6}>
-                      Continue to Reset Password
-                    </Button>
-                  </motion.div>
-                </form>
-              </motion.div>
-            )}
+                  <form onSubmit={handleResetPassword} noValidate className="mt-5 space-y-3.5">
+                    <AuthField
+                      id="reset-password" label="New password" icon={Lock} type={showPassword ? 'text' : 'password'} autoComplete="new-password"
+                      placeholder="Create a new password" hint="Minimum 8 characters"
+                      value={password} onChange={(e) => { setPassword(e.target.value); setPasswordErrors(p => ({ ...p, password: '' })); setFormError(''); }}
+                      error={passwordErrors.password}
+                      trailing={<button type="button" onClick={() => setShowPassword((v) => !v)} aria-label={showPassword ? 'Hide password' : 'Show password'} aria-pressed={showPassword} className="absolute right-3 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-md text-[#5b6a85] hover:text-brand-dark">{showPassword ? <EyeOff size={16} strokeWidth={1.5} /> : <Eye size={16} strokeWidth={1.5} />}</button>}
+                    />
+                    <AuthField
+                      id="reset-confirm" label="Confirm password" icon={Lock} type={showConfirm ? 'text' : 'password'} autoComplete="new-password"
+                      placeholder="Re-enter your new password"
+                      value={confirmPassword} onChange={(e) => { setConfirmPassword(e.target.value); setPasswordErrors(p => ({ ...p, confirmPassword: '' })); setFormError(''); }}
+                      error={passwordErrors.confirmPassword}
+                      trailing={<button type="button" onClick={() => setShowConfirm((v) => !v)} aria-label={showConfirm ? 'Hide confirm password' : 'Show confirm password'} aria-pressed={showConfirm} className="absolute right-3 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-md text-[#5b6a85] hover:text-brand-dark">{showConfirm ? <EyeOff size={16} strokeWidth={1.5} /> : <Eye size={16} strokeWidth={1.5} />}</button>}
+                    />
 
-            {/* ── Step 2: Set new password ── */}
-            {step === 2 && (
-              <motion.div
-                key="step2"
-                initial={{ opacity: 0, x: 20 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: 20 }}
-                transition={spring}
-              >
-                <div className="text-center mb-6">
-                  <div className="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-xl bg-brand-blue/10">
-                    <Lock size={22} className="text-brand-blue" />
-                  </div>
-                  <h1 className="font-sora font-bold text-xl text-brand-dark mb-1">Set New Password</h1>
-                  <p className="text-sm text-gray-500 font-inter leading-relaxed">
-                    Choose a strong password for your account.
-                  </p>
-                </div>
-
-                <form onSubmit={handleResetPassword} className="space-y-4">
-                  <Input
-                    label="New Password"
-                    type="password"
-                    autoComplete="new-password"
-                    placeholder="Create a new password (min. 8 chars)"
-                    value={password}
-                    onChange={(e) => { setPassword(e.target.value); setPasswordErrors(p => ({ ...p, password: '' })); setFormError(''); }}
-                    error={passwordErrors.password}
-                    icon={Lock}
-                  />
-
-                  <Input
-                    label="Confirm Password"
-                    type="password"
-                    autoComplete="new-password"
-                    placeholder="Re-enter your new password"
-                    value={confirmPassword}
-                    onChange={(e) => { setConfirmPassword(e.target.value); setPasswordErrors(p => ({ ...p, confirmPassword: '' })); setFormError(''); }}
-                    error={passwordErrors.confirmPassword}
-                    icon={Lock}
-                  />
-
-                  <AnimatePresence>
                     {formError && (
-                      <motion.div
-                        initial={{ opacity: 0, y: -6, scale: 0.97 }}
-                        animate={{ opacity: 1, y: 0, scale: 1 }}
-                        exit={{ opacity: 0, y: -4, scale: 0.97 }}
-                        className="rounded-xl border border-red-200 bg-red-50 px-3.5 py-2.5 text-sm text-red-600 font-inter"
-                      >
-                        {formError}
-                      </motion.div>
+                      <div role="alert" className="flex items-start gap-2.5 rounded-lg border border-red-200 bg-red-50 px-3.5 py-2.5 text-sm text-red-600 font-inter">
+                        <AlertCircle size={15} className="mt-0.5 shrink-0" /><span>{formError}</span>
+                      </div>
                     )}
-                  </AnimatePresence>
 
-                  <motion.div whileHover={{ scale: 1.015 }} whileTap={{ scale: 0.975 }} transition={spring}>
-                    <Button type="submit" variant="primary" size="lg" className="w-full" disabled={submitting}>
-                      {submitting
-                        ? <span className="flex items-center gap-2">
-                            <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">
-                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
-                            </svg>
-                            Resetting Password…
-                          </span>
-                        : 'Reset Password'
-                      }
-                    </Button>
-                  </motion.div>
-
-                  <button
-                    type="button"
-                    onClick={() => { setStep(1); setFormError(''); }}
-                    className="w-full text-center text-sm text-gray-500 font-inter hover:text-brand-dark transition-colors inline-flex items-center justify-center gap-1 cursor-pointer"
-                  >
-                    <ArrowLeft size={13} /> Back to OTP entry
-                  </button>
-                </form>
-              </motion.div>
-            )}
-          </AnimatePresence>
-
-          <div className="mt-5 text-center">
-            <button
-              type="button"
-              onClick={() => navigate('/login')}
-              className="inline-flex items-center gap-1 text-sm text-brand-blue font-inter hover:underline cursor-pointer"
-            >
-              <ArrowLeft size={14} /> Back to Sign In
-            </button>
+                    <button type="submit" disabled={submitting} className="flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-brand-blue text-sm font-semibold text-white font-inter transition-colors hover:bg-brand-blue-hover disabled:cursor-not-allowed disabled:opacity-60">
+                      {submitting ? 'Resetting password…' : <>Reset password <ArrowRight size={16} /></>}
+                    </button>
+                    <button type="button" onClick={() => { setStep(1); setFormError(''); }} className="flex w-full items-center justify-center gap-1.5 text-[13px] text-[#5b6a85] font-inter transition-colors hover:text-brand-dark">
+                      <ArrowLeft size={14} /> Back to OTP entry
+                    </button>
+                  </form>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
-        </Card>
-      </motion.div>
+        </motion.div>
+      </div>
     </div>
   );
 };

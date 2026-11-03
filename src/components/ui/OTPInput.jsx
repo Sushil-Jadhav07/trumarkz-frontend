@@ -63,8 +63,8 @@ export const OTPInput = ({ length = 6, value = '', onChange, error }) => {
             onKeyDown={e => handleKeyDown(index, e)}
             onPaste={handlePaste}
             className={clsx(
-              'w-full min-w-0 h-12 sm:h-14 text-center text-xl font-bold font-sora rounded-xl border-2 outline-none transition-all duration-200',
-              digit ? 'border-brand-blue bg-brand-blue/5 text-brand-dark' : 'border-brand-gray text-brand-dark',
+              'w-full min-w-0 h-12 text-center text-lg font-semibold font-inter rounded-xl border outline-none transition-all duration-200',
+              digit ? 'border-brand-blue bg-white text-brand-dark' : 'border-[#d5deec] bg-[#f3f6fb] text-brand-dark',
               error && 'border-red-500',
               'focus:border-brand-blue focus:ring-4 focus:ring-brand-blue/10'
             )}
