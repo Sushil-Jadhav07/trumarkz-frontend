@@ -1,15 +1,18 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Plus, Trash2, Star, RefreshCw, Lock, Pencil, EyeOff, ChevronDown, ChevronUp, Braces, Layers, Package, ShieldCheck, User } from 'lucide-react';
+import { Plus, Trash2, Star, RefreshCw, Lock, Pencil, EyeOff, ChevronDown, ChevronUp, Braces, Layers, Package, ShieldCheck, User, Upload, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { Modal } from '@/components/ui/Modal';
 import { Input } from '@/components/ui/Input';
 import { Badge } from '@/components/ui/Badge';
 import { CustomSelect } from '@/components/ui/CustomSelect';
 import { adminAPI, getApiError } from '@/services/api';
+import { SchemaConfigImagePicker, SchemaConfigThumb } from '@/components/shared/SchemaConfigImage';
+import { SchemaDerivedInfo, SchemaWarningsList } from '@/components/shared/SchemaConfigInsights';
+import { dhiwaySchemaForPayload, outputMapSource, parseDhiwaySchemaText } from '@/utils/partialSdc';
 import {
   SCHEMA_SPACE_TYPE_OPTIONS, SCHEMA_SEMANTIC_FIELDS,
   emptySchemaConfigForm, configToForm,
-  rowsToMap, HUMAN_SCHEMA_VARIANT, schemaConfigJsonToForm,
+  rowsToMap, schemaConfigJsonToForm,
   duplicateLabelError,
   classifyJsonBox, exampleRecordJson, buildSchemaConfigPayload, setInputMapping,
   autoMatchedFields, formatServerPath, sampleToSend, mappingRowKeys, mappingSources,
@@ -43,6 +46,8 @@ export const OrgSchemaConfigsPanel = ({ orgId, isSuperAdminViewer = false, onCon
   const [form, setForm] = useState(emptySchemaConfigForm());
   const [submitting, setSubmitting] = useState(false);
   const [formErrors, setFormErrors] = useState([]);
+  // Notes from the last save (warning_details / warnings): shown inline, never as pop-ups.
+  const [saveNotice, setSaveNotice] = useState(null);
 
   const [labelServerError, setLabelServerError] = useState('');
   const [jsonText, setJsonText] = useState('');
@@ -176,18 +181,34 @@ export const OrgSchemaConfigsPanel = ({ orgId, isSuperAdminViewer = false, onCon
     return options;
   };
 
-  const showWarnings = (warnings) => {
-    if (!warnings?.length) return;
-    toast(
-      <div className="space-y-1">
-        <p className="text-xs font-semibold text-brand-dark">Saved. Optional suggestions from the server:</p>
-        <ul className="list-disc space-y-0.5 pl-4 text-[11px] text-gray-600">
-          {warnings.map((w, i) => <li key={i}>{w}</li>)}
-        </ul>
-      </div>,
-      { icon: 'ℹ️', duration: 8000 },
-    );
+  const schemaBox = parseDhiwaySchemaText(form.dhiway_schema_text);
+  const schemaView = schemaBox.kind === 'ok'
+    ? (() => {
+      const root = schemaBox.schema.properties ? schemaBox.schema : ['schema', 'schemaJson', 'schema_json', 'cordSchema', 'data'].map((k) => schemaBox.schema[k]).find((v) => v && v.properties) || {};
+      return { properties: Object.keys(root.properties || {}), required: Array.isArray(root.required) ? root.required : [] };
+    })()
+    : null;
+
+  const loadSchemaFile = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    if (file.size > 1024 * 1024) { setFormErrors(['That file is too large to be a Dhiway schema (1 MB limit).']); return; }
+    try {
+      const text = await file.text();
+      const parsed = parseDhiwaySchemaText(text);
+      if (parsed.kind === 'invalid') { setFormErrors([`${file.name}: ${parsed.error}`]); return; }
+      setFormErrors([]);
+      updateForm({ dhiway_schema_text: text });
+    } catch {
+      setFormErrors(['That file could not be read.']);
+    }
   };
+
+  const setOutputRow = (index, patch) => setForm((f) => ({ ...f, output_map: f.output_map.map((row, i) => (i === index ? { ...row, ...patch } : row)) }));
+  const addOutputRow = () => setForm((f) => ({ ...f, output_map: [...f.output_map, { key: '', value: '' }] }));
+  const removeOutputRow = (index) => setForm((f) => ({ ...f, output_map: f.output_map.filter((_, i) => i !== index) }));
+  const setAliases = (index, aliasesText) => setForm((f) => ({ ...f, local_fields: f.local_fields.map((row, i) => (i === index ? { ...row, aliasesText } : row)) }));
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -213,6 +234,13 @@ export const OrgSchemaConfigsPanel = ({ orgId, isSuperAdminViewer = false, onCon
       resetJson(result.sampleText);
     }
 
+    // The Dhiway schema box: not valid JSON / not a schema is a blocking error here, before anything is sent.
+    const dhiwayCheck = dhiwaySchemaForPayload(current.dhiway_schema_text, current.dhiway_schema_original);
+    if (dhiwayCheck.error) {
+      setFormErrors([`Dhiway schema JSON: ${dhiwayCheck.error}`]);
+      return;
+    }
+
     // Required by the API contract itself (SchemaConfigUpsertRequest.required).
     if (!current.schema_id.trim() || !current.space_id.trim() || !current.label.trim()) {
       setFormErrors(['Schema ID, Space ID, and Label are all required']);
@@ -236,11 +264,9 @@ export const OrgSchemaConfigsPanel = ({ orgId, isSuperAdminViewer = false, onCon
         : await adminAPI.createSchemaConfig(orgId, payload, options);
       // The server's own field list is what counts — report that, not the local preview.
       const serverFields = data?.config?.local_fields?.length ?? 0;
-      showWarnings(data?.warnings);
-      // Present only when the server could read the Dhiway schema itself (null otherwise, today always).
-      if (Array.isArray(data?.dhiway_schema_properties) && data.dhiway_schema_properties.length) {
-        toast(`Dhiway schema properties: ${data.dhiway_schema_properties.join(', ')}`, { icon: 'ℹ️', duration: 8000 });
-      }
+      // Notes (warning_details, or the older plain `warnings`) stay on the page, inline.
+      const detailsFromServer = data?.warning_details || data?.config?.warning_details;
+      setSaveNotice({ label: payload.label, details: detailsFromServer, plain: data?.warnings });
       toast.success(
         `${editingConfig ? `New version saved for "${payload.label}"` : `"${payload.label}" registered`}`
         + (sendSample ? ` — server discovered ${plural(serverFields, 'field')}` : ''),
@@ -259,7 +285,10 @@ export const OrgSchemaConfigsPanel = ({ orgId, isSuperAdminViewer = false, onCon
         return;
       }
       if (status === 400) {
-        const errors = err?.response?.data?.errors || [getApiError(err, 'Invalid schema configuration')];
+        const body = err?.response?.data;
+        const errors = (Array.isArray(body?.detail?.errors) && body.detail.errors.length ? body.detail.errors : null)
+          || (Array.isArray(body?.errors) && body.errors.length ? body.errors : null)
+          || [getApiError(err, 'Invalid schema configuration')];
         // Duplicate-label rejections belong on the Label field, verbatim; everything else stays in the list.
         const labelErrors = errors.filter((m) => /schema named/i.test(m));
         setLabelServerError(labelErrors[0] || '');
@@ -313,6 +342,16 @@ export const OrgSchemaConfigsPanel = ({ orgId, isSuperAdminViewer = false, onCon
         </button>
       </div>}
 
+      {saveNotice && (
+        <SchemaWarningsList
+          className="mb-3"
+          details={saveNotice.details}
+          plain={saveNotice.plain}
+          title={`Saved “${saveNotice.label}”. Notes about this configuration (nothing was blocked):`}
+          onDismiss={() => setSaveNotice(null)}
+        />
+      )}
+
       {loading ? (
         <div className="flex items-center justify-center py-8"><RefreshCw size={18} className="animate-spin text-brand-blue" /></div>
       ) : (
@@ -355,6 +394,7 @@ export const OrgSchemaConfigsPanel = ({ orgId, isSuperAdminViewer = false, onCon
                       const locked = !canManage(config);
                       return (
                         <div key={config.id} className="flex flex-wrap items-center gap-2 px-3.5 py-2.5">
+                          <SchemaConfigThumb orgId={orgId} config={config} />
                           <div className="min-w-0 flex-1">
                             <div className="flex flex-wrap items-center gap-1.5">
                               <span className="truncate text-sm font-semibold text-brand-dark font-inter">{config.label}</span>
@@ -369,11 +409,10 @@ export const OrgSchemaConfigsPanel = ({ orgId, isSuperAdminViewer = false, onCon
                             </div>
                             <p className="mt-0.5 truncate text-[11px] text-gray-400 font-inter">
                               schema_id: {config.schema_id} · space_id: {config.space_id}
-                              {config.schema_variant ? ` · ${config.schema_variant}` : ''}
                             </p>
                             <p className="mt-0.5 text-[11px] text-gray-500 font-inter">
                               {plural((config.local_fields || []).length, 'field')} · {Object.keys(config.input_map || {}).length} input · {plural(Object.keys(config.output_map || {}).length, 'output mapping')}
-                              {((config.local_fields || []).length > 0 || Object.keys(config.input_map || {}).length > 0 || Object.keys(config.output_map || {}).length > 0) && (
+                              {(
                                 <>
                                   {' · '}
                                   <button
@@ -417,6 +456,17 @@ export const OrgSchemaConfigsPanel = ({ orgId, isSuperAdminViewer = false, onCon
                               </button>
                             )}
                           </div>
+                          {expandedFields[config.id] && (
+                            <div className="w-full space-y-2">
+                              <SchemaDerivedInfo config={config} />
+                              {isSuperAdminViewer && config.is_active !== false && (
+                                <div className="rounded-lg border border-gray-100 p-2.5">
+                                  <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-gray-500">Schema image</p>
+                                  <SchemaConfigImagePicker orgId={orgId} config={config} onUploaded={(updated) => { const next = updated?.config || updated; if (next?.id) setConfigs((list) => list.map((c) => (c.id === next.id ? { ...c, ...next } : c))); }} />
+                                </div>
+                              )}
+                            </div>
+                          )}
                           {expandedFields[config.id] && (
                             // Exactly what the server stored — names, paths, types and mappings as returned.
                             <div className="grid w-full gap-2 md:grid-cols-3">
@@ -505,24 +555,13 @@ export const OrgSchemaConfigsPanel = ({ orgId, isSuperAdminViewer = false, onCon
                 value={form.space_type}
                 onChange={(v) => updateForm({
                   // Fields and mappings belong to one entity type; never carry them across a switch.
-                  space_type: v, schema_variant: v === 'human' ? HUMAN_SCHEMA_VARIANT : '', local_fields: [], input_map: [], output_map: [],
+                  space_type: v, local_fields: [], input_map: [], output_map: [],
                 })}
                 options={SCHEMA_SPACE_TYPE_OPTIONS}
                 disabled={!!editingConfig}
                 ariaLabel="Entity type"
               />
             </div>
-            {form.space_type === 'human' && (
-              <div>
-                <label className="block text-xs font-medium text-brand-dark font-inter mb-1.5">Schema Variant</label>
-                <CustomSelect
-                  value={HUMAN_SCHEMA_VARIANT}
-                  onChange={() => {}}
-                  options={[{ value: HUMAN_SCHEMA_VARIANT, label: 'Human 5-QR' }]}
-                  ariaLabel="Human schema variant"
-                />
-              </div>
-            )}
           </div>
 
           <Input
@@ -541,8 +580,44 @@ export const OrgSchemaConfigsPanel = ({ orgId, isSuperAdminViewer = false, onCon
           <div>
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
+                <label htmlFor="dhiway-schema-json" className="flex items-center gap-1.5 text-xs font-medium text-brand-dark font-inter">
+                  <Braces size={13} className="text-brand-blue" /> Dhiway schema JSON
+                </label>
+                <p className="mt-0.5 text-[11px] text-gray-500 font-inter">
+                  The actual JSON of the Dhiway schema behind the Schema ID above: an object with “properties” (and optionally “required”).
+                  Only the properties it declares are sent to Dhiway; everything else stays in TruMarkZ.
+                  {editingConfig ? ' Leave it as it is to keep the stored schema, or empty the box to remove it.' : ''}
+                </p>
+              </div>
+              <label className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-brand-blue font-inter hover:bg-blue-50">
+                <Upload size={12} /> Upload .json
+                <input type="file" accept=".json,application/json" onChange={loadSchemaFile} className="sr-only" />
+              </label>
+            </div>
+            <textarea
+              id="dhiway-schema-json"
+              value={form.dhiway_schema_text}
+              onChange={(e) => { updateForm({ dhiway_schema_text: e.target.value }); if (formErrors.length) setFormErrors([]); }}
+              placeholder='{"properties": {"name": {"type": "string"}}, "required": ["name"]}'
+              rows={6}
+              spellCheck={false}
+              className="mt-2 w-full resize-y rounded-xl border border-gray-200 bg-gray-50/60 p-3 font-mono text-[11px] leading-relaxed text-brand-dark outline-none placeholder:font-inter placeholder:text-gray-400 focus:border-brand-blue focus:bg-white"
+            />
+            {schemaBox.kind === 'invalid' && <p role="alert" className="mt-1.5 text-[11px] text-red-600 font-inter">{schemaBox.error}</p>}
+            {schemaView && (
+              <p className="mt-1.5 text-[11px] text-gray-600 font-inter">
+                <span className="font-semibold text-green-700">Valid schema.</span>{' '}
+                {schemaView.properties.length} field{schemaView.properties.length === 1 ? '' : 's'} on the certificate
+                {schemaView.required.length ? ` (${schemaView.required.length} required)` : ''}: <span className="font-mono">{schemaView.properties.slice(0, 12).join(', ')}{schemaView.properties.length > 12 ? '…' : ''}</span>
+              </p>
+            )}
+          </div>
+
+          <div>
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
                 <label htmlFor="schema-config-json" className="flex items-center gap-1.5 text-xs font-medium text-brand-dark font-inter">
-                  <Braces size={13} className="text-brand-blue" /> Sample record JSON
+                  <Braces size={13} className="text-brand-blue" /> Example of your source data
                 </label>
                 <p className="mt-0.5 text-[11px] text-gray-400 font-inter">
                   Paste one record exactly as your organization sends it — any field names, nesting, arrays or types. It is
@@ -624,6 +699,12 @@ export const OrgSchemaConfigsPanel = ({ orgId, isSuperAdminViewer = false, onCon
             )}
           </div>
 
+          <details className="group rounded-xl border border-gray-200 bg-white" open={false}>
+            <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3.5 py-2.5 text-xs font-semibold text-brand-dark font-inter">
+              <span>Advanced settings <span className="font-normal text-gray-500">— input mapping, field aliases and manual output mapping</span></span>
+              <ChevronDown size={14} className="shrink-0 text-gray-400 transition-transform group-open:rotate-180" />
+            </summary>
+            <div className="space-y-5 border-t border-gray-100 px-3.5 py-3.5">
           <div>
             <p className="text-xs font-medium text-brand-dark font-inter">Input mapping</p>
             <p className="mt-0.5 mb-2 text-[11px] text-gray-400 font-inter">
@@ -664,6 +745,56 @@ export const OrgSchemaConfigsPanel = ({ orgId, isSuperAdminViewer = false, onCon
               {' '}Dhiway output names are never guessed; set them by pasting a configuration JSON.
             </p>
           </div>
+
+
+              {form.local_fields.some((f) => f.name?.trim()) && !willSendSample && (
+                <div>
+                  <p className="text-xs font-medium text-brand-dark font-inter">Field aliases</p>
+                  <p className="mt-0.5 mb-2 text-[11px] text-gray-500 font-inter">Other column names an upload may use for a field, separated by commas.</p>
+                  <ul className="space-y-1.5">
+                    {form.local_fields.map((field, index) => (field.name?.trim() ? (
+                      <li key={`${field.name}-${index}`} className="flex items-center gap-2">
+                        <span className="w-[140px] shrink-0 truncate font-mono text-[11px] text-brand-dark" title={field.name}>{field.name}</span>
+                        <input
+                          aria-label={`Aliases for ${field.name}`}
+                          value={field.aliasesText}
+                          onChange={(e) => setAliases(index, e.target.value)}
+                          placeholder="e.g. Emp Name, Employee"
+                          className="h-8 min-w-0 flex-1 rounded-lg border border-gray-200 px-2.5 text-xs font-inter outline-none focus:border-brand-blue"
+                        />
+                      </li>
+                    ) : null))}
+                  </ul>
+                </div>
+              )}
+
+              <div>
+                <p className="text-xs font-medium text-brand-dark font-inter">Output mapping (manual)</p>
+                <p className="mt-0.5 mb-2 text-[11px] text-gray-500 font-inter">
+                  Which Dhiway property receives each TruMarkZ field. Entries here override the automatic ones the server derives from the Dhiway schema.
+                </p>
+                <datalist id="dhiway-output-columns">
+                  {(schemaView?.properties || []).map((name) => <option key={name} value={name} />)}
+                </datalist>
+                <ul className="space-y-1.5">
+                  {form.output_map.map((row, index) => {
+                    const auto = editingConfig && row.key && outputMapSource(editingConfig, row.key) === 'automatic';
+                    return (
+                      <li key={index} className="flex items-center gap-2">
+                        <input aria-label="TruMarkZ field" list="schema-semantic-fields" value={row.key} onChange={(e) => setOutputRow(index, { key: e.target.value })} placeholder="TruMarkZ field" className="h-8 w-[150px] shrink-0 rounded-lg border border-gray-200 px-2.5 text-xs font-inter outline-none focus:border-brand-blue" />
+                        <span className="text-gray-400">→</span>
+                        <input aria-label="Dhiway property" list="dhiway-output-columns" value={row.value} onChange={(e) => setOutputRow(index, { value: e.target.value })} placeholder="Dhiway property" className="h-8 min-w-0 flex-1 rounded-lg border border-gray-200 px-2.5 font-mono text-xs outline-none focus:border-brand-blue" />
+                        {auto && <span className="shrink-0 rounded-full bg-green-50 px-2 py-0.5 text-[10px] font-semibold text-green-700">Automatic</span>}
+                        <button type="button" onClick={() => removeOutputRow(index)} aria-label="Remove this output mapping" className="shrink-0 text-gray-400 hover:text-red-500"><X size={14} /></button>
+                      </li>
+                    );
+                  })}
+                </ul>
+                <datalist id="schema-semantic-fields">{knownFields.map((name) => <option key={name} value={name} />)}</datalist>
+                <button type="button" onClick={addOutputRow} className="mt-2 inline-flex items-center gap-1.5 text-xs font-semibold text-brand-blue hover:underline font-inter"><Plus size={13} /> Add an output mapping</button>
+              </div>
+            </div>
+          </details>
 
           <label className="flex items-center gap-2 text-xs font-medium text-brand-dark font-inter">
             <input type="checkbox" checked={form.is_default} onChange={(e) => updateForm({ is_default: e.target.checked })} className="h-4 w-4 accent-blue-600" />

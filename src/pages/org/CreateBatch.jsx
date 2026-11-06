@@ -17,6 +17,7 @@ import { StepWizard } from '@/components/ui/StepWizard';
 import { verificationAPI, authAPI, getApiError, triggerBlobDownload } from '@/services/api';
 import { matchProfileIndustry } from '@/utils/industry';
 import { verificationTypes } from '@/data/mockData';
+import { DOB_REQUIRED_MESSAGE } from '@/utils/partialSdc';
 import { loadIndustryTypes } from '@/hooks/useIndustryTypes';
 import { getBatchIndustry } from '@/utils/batchIndustry';
 import {
@@ -170,6 +171,7 @@ const SingleHumanModal = ({ isOpen, onClose, onSuccess, selectedIndustry, select
   const [loading, setLoading] = useState(false);
   const [schemaName, setSchemaName] = useState('');
   const [phoneTouched, setPhoneTouched] = useState(false);
+  const [dobTouched, setDobTouched] = useState(false);
   const [backendPhoneError, setBackendPhoneError] = useState('');
   const [form, setForm] = useState({
     full_name: '', phone_number: '', email: '',
@@ -183,6 +185,9 @@ const SingleHumanModal = ({ isOpen, onClose, onSuccess, selectedIndustry, select
     setForm((f) => ({ ...f, [k]: e.target.value }));
   };
   const phoneError = (phoneTouched ? humanPhoneError(form.phone_number, selectedPermission) : '') || backendPhoneError;
+  // Permission Required: the holder's date of birth is how they later prove who they are.
+  const dobRequired = humanPhoneRequired(selectedPermission);
+  const dobError = dobRequired && dobTouched && !form.dob ? DOB_REQUIRED_MESSAGE : '';
   useEffect(() => { setBackendPhoneError(''); }, [selectedPermission]);
 
   const handleSubmit = async () => {
@@ -191,6 +196,8 @@ const SingleHumanModal = ({ isOpen, onClose, onSuccess, selectedIndustry, select
     const invalidPhone = humanPhoneError(form.phone_number, selectedPermission);
     if (invalidPhone) { toast.error(invalidPhone); return; }
     if (!form.email.trim()) { toast.error('Email is required'); return; }
+    setDobTouched(true);
+    if (dobRequired && !form.dob) { toast.error(DOB_REQUIRED_MESSAGE); return; }
 
     setLoading(true);
     try {
@@ -222,7 +229,7 @@ const SingleHumanModal = ({ isOpen, onClose, onSuccess, selectedIndustry, select
       pincode: '', state: '', country: '',
     });
     setSchemaName('');
-    setPhoneTouched(false); setBackendPhoneError('');
+    setPhoneTouched(false); setBackendPhoneError(''); setDobTouched(false);
     onClose();
   };
 
@@ -230,7 +237,8 @@ const SingleHumanModal = ({ isOpen, onClose, onSuccess, selectedIndustry, select
     <Modal isOpen={isOpen} onClose={handleClose} title="Add Single Human for Verification" size="lg">
       <div className="space-y-4 max-h-[65vh] overflow-y-auto pr-1">
         <div className="p-3 bg-blue-50 rounded-xl border border-blue-100">
-          <p className="text-xs text-blue-700 font-inter font-semibold">Required fields: Full Name, Email{humanPhoneRequired(selectedPermission) ? ', Phone Number' : ''}</p>
+          <p className="text-xs text-blue-700 font-inter font-semibold">Required fields: Full Name, Email{humanPhoneRequired(selectedPermission) ? ', Phone Number, Date of Birth' : ''}</p>
+          <p className="mt-1 text-[11px] text-blue-700/80 font-inter">Email, phone and date of birth are used by TruMarkZ to identify the holder and protect their reports. They appear on the certificate only if your Dhiway schema declares them.</p>
         </div>
 
         <SchemaConfigSelect orgId={user?.id} spaceType="human" value={schemaName} onChange={setSchemaName} disabled={loading} />
@@ -247,13 +255,18 @@ const SingleHumanModal = ({ isOpen, onClose, onSuccess, selectedIndustry, select
         <p className="text-xs font-semibold text-gray-400 font-inter uppercase tracking-wider pt-2">Optional Details</p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
-            <label className="block text-sm font-medium text-gray-700 font-inter mb-1">Date of Birth</label>
+            <label htmlFor="single-human-dob" className="block text-sm font-medium text-gray-700 font-inter mb-1">Date of Birth{dobRequired && <span className="text-red-500"> *</span>}</label>
             <input
+              id="single-human-dob"
               type="date"
-              className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm font-inter focus:outline-none focus:ring-2 focus:ring-brand-blue/30"
+              required={dobRequired}
+              aria-required={dobRequired}
+              aria-invalid={!!dobError}
+              className={`w-full border rounded-xl px-4 py-2.5 text-sm font-inter focus:outline-none focus:ring-2 focus:ring-brand-blue/30 ${dobError ? 'border-red-400' : 'border-gray-200'}`}
               value={form.dob}
-              onChange={set('dob')}
+              onChange={(e) => { setDobTouched(true); set('dob')(e); }}
             />
+            {dobError && <p role="alert" className="mt-1 text-xs text-red-600 font-inter">{dobError}</p>}
           </div>
           <Input label="Aadhar Number" placeholder="XXXX XXXX XXXX" value={form.aadhar_number} onChange={set('aadhar_number')} />
         </div>

@@ -76,6 +76,7 @@ export const Sidebar = ({ collapsed, onToggle, mobileOpen = false, onMobileClose
         { section: 'Operations' },
         { path: '/admin/verifiers', label: 'Verifiers', icon: Building2 },
         { path: '/admin/industries', label: 'Industries', icon: Tags },
+        { path: '/admin/partial-authorizations', label: 'SDC Authorizations', icon: ShieldCheck },
         { path: '/admin/product-warranty', label: 'Warranty Review', icon: Package },
         { path: '/admin/skills-management', label: 'Skills Review', icon: Star },
         { path: '/admin/email-drafts', label: 'Email Drafts', icon: Mail },

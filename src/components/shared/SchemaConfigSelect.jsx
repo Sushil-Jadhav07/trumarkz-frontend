@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Layers } from 'lucide-react';
 import { CustomSelect } from '@/components/ui/CustomSelect';
 import { adminAPI } from '@/services/api';
+import { SchemaConfigThumb } from '@/components/shared/SchemaConfigImage';
 
 // Optional "which configured schema should this batch use" picker — see
 // "Dynamic Schema change.md" §J. Renders nothing at all when the
@@ -50,11 +51,39 @@ export const SchemaConfigSelect = ({ orgId, spaceType, value, onChange, onConfig
 
   if (!loaded || configs.length === 0) return null;
 
+  // With at least one schema image the choices are shown as cards (image + label); otherwise the dropdown.
+  const withImages = configs.some((c) => c.image_url || c.image_updated_at);
+
   return (
     <div>
       <label className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-brand-dark font-inter">
         <Layers size={12} className="text-gray-400" /> Schema
       </label>
+      {withImages ? (
+        <div role="radiogroup" aria-label="Schema configuration for this batch" className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          {configs.map((c) => {
+            const on = c.label === value;
+            return (
+              <button
+                key={c.id || c.label}
+                type="button"
+                role="radio"
+                aria-checked={on}
+                disabled={disabled}
+                onClick={() => onChange(c.label)}
+                className={`flex items-center gap-3 rounded-xl border p-2.5 text-left transition-colors disabled:opacity-60 ${on ? 'border-brand-blue bg-[#f1f6fe] ring-1 ring-brand-blue/30' : 'border-gray-200 bg-white hover:border-gray-300'}`}
+              >
+                <SchemaConfigThumb orgId={orgId} config={c} className="h-14 w-20" />
+                {!(c.image_url || c.image_updated_at) && <span className="flex h-14 w-20 shrink-0 items-center justify-center rounded-lg bg-gray-50 text-gray-300"><Layers size={18} /></span>}
+                <span className="min-w-0">
+                  <span className="block truncate text-sm font-semibold text-brand-dark font-inter">{c.label}</span>
+                  {c.is_default && <span className="text-[11px] font-medium text-brand-blue font-inter">Default</span>}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      ) : (
       <CustomSelect
         value={value || ''}
         onChange={onChange}
@@ -65,6 +94,7 @@ export const SchemaConfigSelect = ({ orgId, spaceType, value, onChange, onConfig
         // the batch then uses the standard layout, not "the organization default".
         placeholder="None — standard layout"
       />
+      )}
     </div>
   );
 };

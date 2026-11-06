@@ -202,6 +202,13 @@ export const OrgDashboard = () => {
     return () => { mounted = false; };
   }, [user?.industryType, user?.organizationId]);
 
+  // Verification results are never pushed to the browser: re-read the dashboard every 45 s while it is open
+  // and visible. The loading states are left alone, so the cards update in place.
+  useEffect(() => {
+    const timer = setInterval(() => { if (document.visibilityState === 'visible') setReloadKey((key) => key + 1); }, 45000);
+    return () => clearInterval(timer);
+  }, []);
+
   const refresh = () => {
     setDataLoading(true);
     setBatchesLoading(true);

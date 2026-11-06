@@ -106,3 +106,36 @@ test('Open batches never offer the switch; unknown visibility leaves it to the s
   assert.equal(canRequireHolderApproval('permission_required'), true);
   assert.equal(canRequireHolderApproval(''), true);
 });
+
+import { holderApprovalReports, applyReportDecisions, undecidedReports, approvedReportsFrom, canAskForMoreReports } from './certificateAccess.js';
+
+test('holder approval reports are normalised and undecided ones found', () => {
+  const reports = holderApprovalReports({ reports: [{ report_id: 'a', label: 'PAN', status: 'requested' }, { report_id: 'b', status: 'APPROVED' }, null, {}] });
+  assert.equal(reports.length, 2);
+  assert.equal(reports[1].label, 'Verification report');
+  assert.deepEqual(undecidedReports(reports).map((r) => r.report_id), ['a']);
+});
+
+test('decisions update the list from the server, or locally when it sends none', () => {
+  const reports = holderApprovalReports({ reports: [{ report_id: 'a', status: 'requested' }, { report_id: 'b', status: 'requested' }] });
+  const local = applyReportDecisions(reports, {}, [{ report_id: 'a', decision: 'approve' }]);
+  assert.deepEqual(local.map((r) => r.status), ['approved', 'requested']);
+  const server = applyReportDecisions(reports, { reports: [{ report_id: 'a', status: 'rejected' }, { report_id: 'b', status: 'approved' }] }, []);
+  assert.deepEqual(server.map((r) => r.status), ['rejected', 'approved']);
+});
+
+test('approved reports become absolute, openable entries', () => {
+  const list = approvedReportsFrom({ approved_reports: [{ report_ref: 'r1', view_path: '/verification/documents/1/view', label: 'PAN' }, { view_path: 'https://x/y' }, { label: 'no path' }] }, 'https://api.example.com/');
+  assert.equal(list.length, 2);
+  assert.equal(list[0].url, 'https://api.example.com/verification/documents/1/view');
+  assert.equal(list[1].url, 'https://x/y');
+  assert.deepEqual(approvedReportsFrom({}, ''), []);
+});
+
+test('asking for more reports is only offered to third-party, report-specific access', () => {
+  assert.equal(canAskForMoreReports('holder_approval', 'reports', 'approved'), true);
+  assert.equal(canAskForMoreReports('holder_approval', 'reports', 'pending_approval'), true);
+  assert.equal(canAskForMoreReports('holder_approval', 'holder', 'approved'), false);
+  assert.equal(canAskForMoreReports('organization_password', 'report', 'approved'), false);
+  assert.equal(canAskForMoreReports('holder_approval', 'reports', 'rejected'), false);
+});

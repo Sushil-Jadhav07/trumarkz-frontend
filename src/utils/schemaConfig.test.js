@@ -8,7 +8,7 @@ import {
 } from './schemaConfig.js';
 
 // SchemaConfigUpsertRequest, as published by the live API's /openapi.json.
-const UPSERT_FIELDS = ['space_type', 'schema_variant', 'schema_id', 'space_id', 'label', 'local_fields', 'input_map', 'output_map', 'is_default', 'sample_record'];
+const UPSERT_FIELDS = ['space_type', 'dhiway_schema', 'schema_id', 'space_id', 'label', 'local_fields', 'input_map', 'output_map', 'is_default', 'sample_record'];
 const UPSERT_REQUIRED = ['space_type', 'schema_id', 'space_id', 'label'];
 const LOCAL_FIELD_KEYS = ['name', 'type', 'required', 'description', 'aliases', 'path', 'nullable'];
 
@@ -122,7 +122,8 @@ test('editing round-trips the API response: a new version keeps every mapping it
   assert.deepEqual(unchanged.output_map, response.output_map);
   assert.deepEqual(unchanged.local_fields, response.local_fields);
   assert.equal(unchanged.is_default, true);
-  assert.equal(unchanged.schema_variant, HUMAN_SCHEMA_VARIANT);
+  assert.equal('schema_variant' in unchanged, false);
+  assert.equal('dhiway_schema' in unchanged, false);
 
   // Mapping dob from a pasted sample changes only input_map.dob.
   const box = classifyJsonBox('{"Birth Date": "1990-01-01"}');
@@ -132,8 +133,8 @@ test('editing round-trips the API response: a new version keeps every mapping it
   assert.deepEqual(edited.local_fields, response.local_fields);
 });
 
-test('product and warranty payloads carry no schema_variant', () => {
-  for (const type of ['product', 'warranty']) {
+test('no payload carries schema_variant any more', () => {
+  for (const type of ['human', 'product', 'warranty']) {
     const payload = buildSchemaConfigPayload({ ...emptySchemaConfigForm(type), label: 'L', schema_id: 's', space_id: 'p' });
     assert.equal('schema_variant' in payload, false);
     assertMatchesUpsertContract(payload);
@@ -218,9 +219,18 @@ test('server-discovered path and nullable survive an edit; null path segments re
   assert.equal(formatServerPath(null), '');
 });
 
-test('a new human form defaults to the 5-QR variant', () => {
-  assert.equal(emptySchemaConfigForm('human').schema_variant, HUMAN_SCHEMA_VARIANT);
-  assert.equal(emptySchemaConfigForm('product').schema_variant, '');
+test('forms carry no variant; the Dhiway schema box starts empty', () => {
+  assert.equal('schema_variant' in emptySchemaConfigForm('human'), false);
+  assert.equal(emptySchemaConfigForm('human').dhiway_schema_text, '');
+});
+
+test('dhiway_schema is omitted when untouched, null when cleared, an object when replaced', () => {
+  const stored = { properties: { name: { type: 'string' } } };
+  const form = configToForm({ space_type: 'human', schema_id: 's', space_id: 'p', label: 'L', dhiway_schema: stored });
+  assert.equal('dhiway_schema' in buildSchemaConfigPayload(form), false);
+  assert.equal(buildSchemaConfigPayload({ ...form, dhiway_schema_text: '' }).dhiway_schema, null);
+  assert.deepEqual(buildSchemaConfigPayload({ ...form, dhiway_schema_text: '{"properties":{"a":{}}}' }).dhiway_schema, { properties: { a: {} } });
+  assertMatchesUpsertContract(buildSchemaConfigPayload({ ...form, dhiway_schema_text: '' }));
 });
 
 test('pasted API-shaped JSON fills every field, maps become rows', () => {
@@ -238,7 +248,7 @@ test('pasted API-shaped JSON fills every field, maps become rows', () => {
   const { form, errors } = schemaConfigJsonToForm(json, emptySchemaConfigForm('human'));
   assert.equal(errors, undefined);
   assert.equal(form.label, 'Acme');
-  assert.equal(form.schema_variant, HUMAN_SCHEMA_VARIANT);
+  assert.equal('schema_variant' in form, false);
   assert.deepEqual(form.local_fields.map((f) => [f.name, f.aliasesText]), [['employee_name', 'Emp Name, Name'], ['dept', '']]);
   assert.deepEqual(form.input_map, [{ key: 'full_name', value: 'employee_name' }]);
   assert.deepEqual(form.output_map, [{ key: 'full_name', value: 'Name' }]);

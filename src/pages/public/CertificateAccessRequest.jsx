@@ -9,7 +9,7 @@ import {
 } from '@/components/shared/PublicAccessShell';
 import { certificateAccessAPI, fetchReportBlob, getApiError, reportApiBaseUrl } from '@/services/api';
 import { parseReportReference, referenceFromParams, reportUrlFromReference, retryAfterText } from '@/utils/reportAccess';
-import { isValidEmail, visitorStatusView, validateAccessRequestCreated, validateAccessRequestStatus, accessNextStep, validateDirectAccess, normalisePhoneInput } from '@/utils/certificateAccess';
+import { additionalReportsError, approvedReportsFrom, canAskForMoreReports, isValidEmail, visitorStatusView, validateAccessRequestCreated, validateAccessRequestStatus, accessNextStep, validateDirectAccess, normalisePhoneInput } from '@/utils/certificateAccess';
 
 // Visitor flow for a protected (holder_approval) report — web change report §4d.
 // Email + OTP, then the server-selected identity check or holder approval.
@@ -42,7 +42,7 @@ const ReportViewer = ({ report, onClose }) => {
   return (
     <div className="mt-6 overflow-hidden rounded-xl border border-gray-200">
       <div className="flex items-center justify-between gap-3 border-b border-gray-100 bg-gray-50 px-4 py-2.5">
-        <p className="flex items-center gap-2 text-xs font-medium text-gray-700"><FileText size={14} /> Verification report</p>
+        <p className="flex items-center gap-2 text-xs font-medium text-gray-700"><FileText size={14} /> {report.label || 'Verification report'}</p>
         <div className="flex items-center gap-3">
           <a href={report.url} download="verification-report" className="inline-flex items-center gap-1 text-xs font-semibold text-brand-blue hover:underline"><Download size={13} /> Download</a>
           <button type="button" onClick={onClose} className="text-xs font-medium text-gray-500 hover:text-gray-700">Close</button>
@@ -89,6 +89,10 @@ const CertificateAccessRequestContent = ({ params }) => {
   const generationRef = useRef(0);
   const statusReadsRef = useRef(0);
   const [pollPaused, setPollPaused] = useState(false);
+  // Reports the holder approved (only those are ever returned), the grant's scope, and the "other reports" request.
+  const [approvedReports, setApprovedReports] = useState([]);
+  const [accessScope, setAccessScope] = useState(null);
+  const [more, setMore] = useState({ busy: false, message: '', error: '', requested: false });
 
   useEffect(() => {
     activeRef.current = true;
@@ -119,6 +123,7 @@ const CertificateAccessRequestContent = ({ params }) => {
     setRequestId(null); setAccessToken(null); setStatus(null); setOtp(''); setSentMessage('');
     setNextStep('holder_approval'); setPassword(''); setHolderDob(''); setHolderPhone('');
     setReport(null); setError(null);
+    setApprovedReports([]); setAccessScope(null); setMore({ busy: false, message: '', error: '', requested: false });
     if (!keepEmail) setEmail('');
     setStep('email');
   };
@@ -183,6 +188,8 @@ const CertificateAccessRequestContent = ({ params }) => {
         if (!current()) return;
         validateAccessRequestStatus(data, requestId);
         setStatus(data.status);
+        setAccessScope(data.access_scope || null);
+        setApprovedReports(data.status === 'approved' ? approvedReportsFrom(data, reportApiBaseUrl) : []);
         if (data.status !== 'approved') setReport(null);
         setPollPaused(statusReadsRef.current >= 30);
       } catch (err) {
@@ -229,21 +236,24 @@ const CertificateAccessRequestContent = ({ params }) => {
   useEffect(() => {
     if (step !== 'status') return undefined;
     if (status == null) { checkStatus(); return undefined; }
-    if (nextStep !== 'holder_approval' || !['pending_email', 'pending_approval'].includes(status)) return undefined;
+    const waitingForHolder = ['pending_email', 'pending_approval'].includes(status) || (status === 'approved' && more.requested);
+    if (nextStep !== 'holder_approval' || !waitingForHolder) return undefined;
     const timer = setInterval(() => {
       if (statusReadsRef.current >= 30) { clearInterval(timer); setPollPaused(true); return; }
       if (document.visibilityState === 'visible') checkStatus({ quiet: true });
     }, 60_000);
     return () => clearInterval(timer);
-  }, [step, status, nextStep, checkStatus]);
+  }, [step, status, nextStep, checkStatus, more.requested]);
 
-  const viewReport = () => {
-    if (status !== 'approved' || !accessToken || !reportUrl) return;
+  const viewReport = (target) => {
+    const url = typeof target?.url === 'string' ? target.url : reportUrl;
+    const label = typeof target?.label === 'string' ? target.label : '';
+    if (status !== 'approved' || !accessToken || !url) return;
     run(async (current) => {
     try {
-      const blob = await fetchReportBlob(reportUrl, { accessToken });
+      const blob = await fetchReportBlob(url, { accessToken });
       if (!current()) return;
-      setReport((previous) => { if (previous?.url) URL.revokeObjectURL(previous.url); return { blob, url: URL.createObjectURL(blob) }; });
+      setReport((previous) => { if (previous?.url) URL.revokeObjectURL(previous.url); return { blob, label, url: URL.createObjectURL(blob) }; });
     } catch (err) {
       if (!current()) return;
       if (err?.status === 403) {
@@ -255,6 +265,33 @@ const CertificateAccessRequestContent = ({ params }) => {
     }
     });
   };
+
+  // Third-party visitors can ask the holder to approve the holder's other reports too. The answer never says
+  // whether any exist, so only the server's own message is shown.
+  const askForMoreReports = async () => {
+    if (more.busy || !requestId || !accessToken) return;
+    setMore((m) => ({ ...m, busy: true, error: '' }));
+    try {
+      const { data } = await certificateAccessAPI.requestAdditionalReports(requestId, accessToken);
+      setMore({ busy: false, requested: true, error: '', message: data?.message || 'If the holder has other reports, they have been asked to approve access. Approved reports will appear here.' });
+    } catch (err) {
+      const code = err?.response?.status;
+      if (code === 404) { writeStored(null); setStatus('not_found'); }
+      setMore((m) => ({ ...m, busy: false, error: additionalReportsError(code) || getApiError(err, 'We couldn’t send that request. Please try again.') }));
+    }
+  };
+
+  const moreReportsBlock = canAskForMoreReports(nextStep, accessScope, status) ? (
+    <div className="mt-5 rounded-xl border border-gray-100 bg-gray-50 px-4 py-3 text-left">
+      <p className="text-sm font-medium text-gray-800">Need this holder’s other reports?</p>
+      <p className="mt-1 text-xs leading-5 text-gray-600">We’ll ask the holder to approve them too. Only reports they approve will appear here.</p>
+      {more.message && <p role="status" className="mt-2 text-xs text-green-700">{more.message}</p>}
+      {more.error && <p role="alert" className="mt-2 text-xs text-red-600">{more.error}</p>}
+      <SecondaryButton onClick={askForMoreReports} disabled={more.busy || busy} className="mt-3">
+        {more.busy ? <RefreshCw size={15} className="animate-spin motion-reduce:animate-none" /> : <FileText size={15} />} {more.requested ? 'Ask again' : 'Also ask for this holder’s other reports'}
+      </SecondaryButton>
+    </div>
+  ) : null;
 
   let view = step;
   if (step === 'status') {
@@ -359,14 +396,30 @@ const CertificateAccessRequestContent = ({ params }) => {
                   : 'The certificate holder approved your request. You can view the report while your access remains active.'}
             </AccessState>
             {error && <p role="alert" className="mt-4 text-center text-xs text-red-600">{error.message}</p>}
-            {!report && (
+            {approvedReports.length > 0 ? (
+              <div className="mt-6">
+                <p className="text-xs font-medium text-gray-700">Approved reports ({approvedReports.length})</p>
+                <ul className="mt-2 divide-y divide-gray-100 rounded-xl border border-gray-100">
+                  {approvedReports.map((item) => (
+                    <li key={item.key} className="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5">
+                      <span className="flex min-w-0 items-center gap-2 text-sm font-medium text-gray-800"><FileText size={14} className="shrink-0 text-gray-500" />{item.label}</span>
+                      <SecondaryButton onClick={() => viewReport(item)} disabled={busy}>View</SecondaryButton>
+                    </li>
+                  ))}
+                </ul>
+                <div className="mt-3 text-center">
+                  <button type="button" onClick={() => checkStatus()} disabled={busy} className="text-xs font-semibold text-brand-blue hover:underline disabled:opacity-60">Refresh list</button>
+                </div>
+              </div>
+            ) : !report && (
               <div className="mt-6 flex justify-center">
-                <PrimaryButton type="button" onClick={viewReport} loading={busy}>
+                <PrimaryButton type="button" onClick={() => viewReport()} loading={busy}>
                   {busy ? <RefreshCw size={16} className="animate-spin motion-reduce:animate-none" /> : <FileText size={16} />} View report
                 </PrimaryButton>
               </div>
             )}
             {report && <ReportViewer report={report} onClose={() => setReport(null)} />}
+            {moreReportsBlock}
           </div>
         ) : view === 'waiting' ? (
           <AccessState
@@ -382,6 +435,7 @@ const CertificateAccessRequestContent = ({ params }) => {
             <p>Your email is confirmed. We’ve asked the certificate holder to approve your request.</p>
             <p className="mt-2 text-xs text-gray-500">{pollPaused ? 'Automatic checks paused. Use Check again for the latest decision.' : 'Keep this tab open, or come back to it later in this browser. It checks for a decision every minute.'}</p>
             {error && <p role="alert" className="mt-3 text-xs text-red-600">{error.message}</p>}
+            {moreReportsBlock}
           </AccessState>
         ) : view === 'failed' ? (
           <AccessState icon={AlertTriangle} tone="bg-red-50 text-red-600" title="Couldn’t confirm access" action={(

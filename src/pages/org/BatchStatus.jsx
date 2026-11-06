@@ -21,6 +21,9 @@ import { WarrantyDocumentCell } from '@/components/shared/WarrantyDocumentCell';
 import { TablePagination } from '@/components/shared/TablePagination';
 import { loadWarrantyCertificates } from '@/utils/warrantyCertificates';
 import { useAutomaticBatchRefresh } from '@/hooks/useAutomaticBatchRefresh';
+import { useBatchPolling } from '@/hooks/useBatchPolling';
+import { PartialAuthorizationPanel } from '@/components/shared/PartialAuthorizationPanel';
+import { SdcHistoryCard } from '@/components/shared/SdcHistoryCard';
 import {
   ChevronLeft, ChevronRight, CheckCircle, Clock, Download,
   Eye, FileText, Info, Layers, Package, RefreshCw, Upload,
@@ -387,64 +390,6 @@ const BatchDetailModal = ({ batchId, batchName, onClose, asPage = false, onLoade
       setRejectedListAction(null);
     }
   };
-  // SDC partial-approval requests for this batch — GET /sdc/batches/{batch_id}/approvals.
-  // Full history (pending/approved/rejected), newest first, straight from the
-  // backend — this org is the only one that can decide its own requests here.
-  const [sdcApprovals, setSdcApprovals] = useState([]);
-  const [sdcApprovalsLoading, setSdcApprovalsLoading] = useState(false);
-  const [reviewApproval, setReviewApproval] = useState(null); // the approval currently open in the review modal
-  const [showApprovalHistory, setShowApprovalHistory] = useState(false);
-
-  const loadSdcApprovals = useCallback(() => {
-    if (!batchId) return;
-    setSdcApprovalsLoading(true);
-    sdcAPI.getSDCApprovals(batchId)
-      .then(({ data }) => setSdcApprovals(Array.isArray(data) ? data : []))
-      .catch(() => setSdcApprovals([]))
-      .finally(() => setSdcApprovalsLoading(false));
-  }, [batchId]);
-
-  useEffect(() => { loadSdcApprovals(); }, [loadSdcApprovals]);
-
-  // Org-only decision on its own SDC partial-approval request. 409 means the
-  // request was already decided elsewhere (e.g. another tab/admin) — never
-  // retried blindly; just re-sync the list and show the current state.
-  const [decidingApproval, setDecidingApproval] = useState(false);
-  const [approvalConfirmAction, setApprovalConfirmAction] = useState(null); // null | 'approved' | 'rejected'
-  const [approvalDecisionReason, setApprovalDecisionReason] = useState('');
-  const recordsById = useMemo(() => {
-    const map = {};
-    (detail?.records || []).forEach((r) => {
-      const key = getRecordKey(r);
-      if (key) map[key] = r;
-    });
-    return map;
-  }, [detail?.records]);
-  const closeReviewApproval = () => {
-    setReviewApproval(null);
-    setApprovalConfirmAction(null);
-    setApprovalDecisionReason('');
-  };
-  const decideApproval = async (requestId, decision, reason) => {
-    setDecidingApproval(true);
-    try {
-      const { data } = await sdcAPI.decideSDCApproval(requestId, { decision, reason });
-      setSdcApprovals((prev) => prev.map((a) => (a.id === requestId ? data : a)));
-      closeReviewApproval();
-      toast.success(decision === 'approved' ? 'Approval granted' : 'Request rejected');
-    } catch (err) {
-      if (err?.response?.status === 409) {
-        toast.error('This request has already been decided');
-        loadSdcApprovals();
-        closeReviewApproval();
-      } else {
-        toast.error(getApiError(err, 'Failed to submit decision'));
-      }
-    } finally {
-      setDecidingApproval(false);
-    }
-  };
-
   const [verificationDetailsRecord, setVerificationDetailsRecord] = useState(null); // record shown in the per-user Verification Details modal
   // Exact clicked pair — { record, typeName } — for the single-check modal,
   // same click-through as the admin Batch Control Center's Verification
@@ -453,6 +398,8 @@ const BatchDetailModal = ({ batchId, batchName, onClose, asPage = false, onLoade
   // fabricated) and shows "Automatic" only when the check's own label says so.
   const [selectedVerification, setSelectedVerification] = useState(null);
   useAutomaticBatchRefresh({ batchId, batchType: detail?.batchType, records: detail?.records, onUpdate: (data) => setDetail(normaliseBatch(data)) });
+  // Verification results are never pushed to the browser: re-read the batch while it is still moving.
+  useBatchPolling({ batchId, status: detail?.status, enabled: !!detail, onUpdate: (data) => setDetail(normaliseBatch(data)) });
   // The real, authoritative SDC/sharing state — from GET /sdc/batches/
   // {batch_id}/status itself (sdc_status, shared_with_org, ready/total),
   // never from GET /verification/batches/{batch_id}'s verification_progress.sdc,
@@ -1010,49 +957,12 @@ const BatchDetailModal = ({ batchId, batchName, onClose, asPage = false, onLoade
             </div>
           )}
 
-          {/* ── SDC Approval Requests — compact card, hidden entirely when
-              there's no history at all for this batch. Shows the newest
-              request's status; "Review" opens the decision modal (pending)
-              or a read-only view of the decision (approved/rejected). ── */}
-          {sdcApprovals.length > 0 && (() => {
-            const pendingCount = sdcApprovals.filter((a) => a.status === 'pending').length;
-            const latest = sdcApprovals[0];
-            const latestMeta = latest.status === 'approved'
-              ? { badge: 'success', label: 'Approved' }
-              : latest.status === 'rejected'
-                ? { badge: 'error', label: 'Rejected' }
-                : { badge: 'pending', label: 'Pending' };
-            return (
-              <div className="overflow-hidden rounded-2xl border border-amber-100 bg-white">
-                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-amber-100 bg-amber-50/60 px-4 py-3">
-                  <p className="font-sora text-sm font-semibold text-brand-dark">SDC Approval Requests</p>
-                  {pendingCount > 0 && <Badge status="pending">{pendingCount} Pending</Badge>}
-                </div>
-                <div className="p-4">
-                  <div className="flex flex-wrap items-center justify-between gap-4">
-                    <div className="min-w-0">
-                      <p className="text-sm font-semibold text-brand-dark font-inter">Partial SDC Generation</p>
-                      <p className="mt-1 text-xs text-gray-500 font-inter">
-                        {latest.selected_user_ids?.length || 0} record{(latest.selected_user_ids?.length || 0) === 1 ? '' : 's'} selected
-                      </p>
-                      <p className="mt-1 text-xs text-gray-400 font-inter">Requested {formatDate(latest.created_at)}</p>
-                    </div>
-                    <div className="flex shrink-0 items-center gap-2">
-                      <Badge status={latestMeta.badge}>{latestMeta.label}</Badge>
-                      <Button size="sm" variant="primary" onClick={() => setReviewApproval(latest)}>Review</Button>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setShowApprovalHistory(true)}
-                    className="mt-3 text-xs font-semibold text-brand-blue font-inter hover:underline"
-                  >
-                    View Approval History ({sdcApprovals.length})
-                  </button>
-                </div>
-              </div>
-            );
-          })()}
+          {/* ── Partial SDC authorization (organization) + SDC status/history. The organization only
+              authorizes; SDC generation is SuperAdmin-only. ── */}
+          {detail && detail.batchType !== 'warranty' && (
+            <PartialAuthorizationPanel batchId={batchId} records={detail.records} />
+          )}
+          {detail && <SdcHistoryCard progress={detail.verificationProgress} records={detail.records} status={sdcStatus} />}
 
           {/* ── Rejected List — generated by SuperAdmin, made available here
               directly (never emailed, never a raw GCS URL — always the two
@@ -1365,176 +1275,6 @@ const BatchDetailModal = ({ batchId, batchName, onClose, asPage = false, onLoade
       />
     )}
 
-    {/* ── SDC Approval review — org-only decision. A pending request shows
-        Approve/Reject behind its own confirmation step; an already-decided
-        one is read-only (reused for the "Review" action from both the
-        compact card and the history list). ── */}
-    {reviewApproval && (() => {
-      const approval = reviewApproval;
-      const isPending = approval.status === 'pending';
-      const selectedRecords = (approval.selected_user_ids || []).map((id) => recordsById[id]).filter(Boolean);
-      const notFullyVerifiedCount = selectedRecords.filter((r) => getApprovalRecordVerification(r) !== 'Verified').length;
-
-      return (
-        <Modal isOpen onClose={closeReviewApproval} title="SDC Generation Approval" size="lg">
-          <div className="space-y-4">
-            <p className="text-xs text-gray-500 font-inter">
-              The SuperAdmin wants to generate SDCs for the following records.
-            </p>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div className="rounded-xl border border-gray-100 bg-brand-bg px-3 py-2.5">
-                <p className="text-[10px] uppercase tracking-wide text-gray-400 font-inter">Selected Records</p>
-                <p className="text-lg font-semibold text-brand-dark font-sora">{approval.selected_user_ids?.length || 0}</p>
-              </div>
-              <div className="rounded-xl border border-amber-100 bg-amber-50 px-3 py-2.5">
-                <p className="text-[10px] uppercase tracking-wide text-amber-600 font-inter">Not Fully Verified</p>
-                <p className="text-lg font-semibold text-amber-700 font-sora">{notFullyVerifiedCount}</p>
-              </div>
-            </div>
-
-            <div className="overflow-hidden rounded-xl border border-gray-100">
-              <div className="grid grid-cols-[1fr_140px] gap-x-2 bg-gray-50 px-3 py-2 text-[10px] font-semibold uppercase tracking-wide text-gray-400 font-inter">
-                <span>Record</span><span>Verification</span>
-              </div>
-              <div className="max-h-56 divide-y divide-gray-50 overflow-y-auto thin-scrollbar">
-                {selectedRecords.length === 0 ? (
-                  <p className="py-6 text-center text-xs text-gray-400 font-inter">Record details unavailable.</p>
-                ) : (
-                  selectedRecords.map((r) => {
-                    const v = getApprovalRecordVerification(r);
-                    const badgeStatus = v === 'Verified' ? 'success' : v === 'Rejected' ? 'error' : v === 'Partially Verified' ? 'partial' : 'pending';
-                    return (
-                      <div key={getRecordKey(r)} className="grid grid-cols-[1fr_140px] items-center gap-x-2 px-3 py-2">
-                        <span className="truncate text-xs font-medium text-brand-dark font-inter">{getRecordTitle(r)}</span>
-                        <Badge status={badgeStatus}>{v}</Badge>
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-            </div>
-
-            {isPending ? (
-              <>
-                <div className="flex items-start gap-2 rounded-xl border border-amber-100 bg-amber-50 px-3 py-2.5">
-                  <AlertTriangle size={13} className="mt-0.5 shrink-0 text-amber-500" />
-                  <p className="text-xs text-amber-700 font-inter leading-relaxed">
-                    Approving this request allows SDC generation for this exact selection, including records that aren't fully verified.
-                  </p>
-                </div>
-
-                {!approvalConfirmAction && (
-                  <div>
-                    <label className="mb-1 block text-xs font-medium text-gray-500 font-inter">Optional Note</label>
-                    <input
-                      value={approvalDecisionReason}
-                      onChange={(e) => setApprovalDecisionReason(e.target.value)}
-                      placeholder="Add a note for this decision (optional)"
-                      className="w-full rounded-lg border border-gray-200 px-3 py-2 text-xs font-inter outline-none focus:border-brand-blue"
-                    />
-                  </div>
-                )}
-
-                {approvalConfirmAction ? (
-                  <div className="space-y-3 rounded-xl border border-gray-100 p-3.5">
-                    <p className="text-sm font-semibold text-brand-dark font-inter">
-                      {approvalConfirmAction === 'approved' ? 'Approve SDC Generation?' : 'Reject SDC Generation?'}
-                    </p>
-                    <p className="text-xs text-gray-500 font-inter">
-                      {approvalConfirmAction === 'approved'
-                        ? `This request includes ${notFullyVerifiedCount} record${notFullyVerifiedCount === 1 ? '' : 's'} not fully verified. Approving allows the SuperAdmin to generate SDCs for this exact selection.`
-                        : 'This decision cannot be undone once submitted.'}
-                    </p>
-                    <Modal.Footer className="flex gap-2">
-                      <Button size="sm" variant="ghost" onClick={() => setApprovalConfirmAction(null)}>Cancel</Button>
-                      <Button
-                        size="sm"
-                        variant={approvalConfirmAction === 'approved' ? 'primary' : 'danger'}
-                        loading={decidingApproval}
-                        onClick={() => decideApproval(approval.id, approvalConfirmAction, approvalDecisionReason)}
-                      >
-                        {approvalConfirmAction === 'approved' ? 'Approve Request' : 'Reject Request'}
-                      </Button>
-                    </Modal.Footer>
-                  </div>
-                ) : (
-                  <Modal.Footer className="flex gap-3">
-                    <Button variant="danger" onClick={() => setApprovalConfirmAction('rejected')}>Reject</Button>
-                    <Button variant="primary" onClick={() => setApprovalConfirmAction('approved')}>Approve</Button>
-                  </Modal.Footer>
-                )}
-              </>
-            ) : (
-              <>
-                <div className={`rounded-xl border px-3.5 py-3 ${approval.status === 'approved' ? 'border-emerald-100 bg-emerald-50' : 'border-red-100 bg-red-50'}`}>
-                  <p className={`text-sm font-semibold font-inter ${approval.status === 'approved' ? 'text-emerald-700' : 'text-red-700'}`}>
-                    {approval.status === 'approved' ? 'Approved' : 'Rejected'}
-                  </p>
-                  {approval.status === 'approved' && (
-                    <p className="mt-1 text-xs text-emerald-700/90 font-inter">
-                      Approval granted. The SuperAdmin must generate the SDC using the same selection.
-                    </p>
-                  )}
-                  {approval.decision_reason && (
-                    <p className="mt-1 text-xs text-gray-600 font-inter">Reason: {approval.decision_reason}</p>
-                  )}
-                  {approval.decided_at && (
-                    <p className="mt-1 text-xs text-gray-400 font-inter">Decided {formatDate(approval.decided_at)}</p>
-                  )}
-                </div>
-                <Modal.Footer className="flex justify-end">
-                  <Button variant="ghost" onClick={closeReviewApproval}>Close</Button>
-                </Modal.Footer>
-              </>
-            )}
-          </div>
-        </Modal>
-      );
-    })()}
-
-    {/* ── Approval History — full timeline, newest first ── */}
-    {showApprovalHistory && (
-      <Modal isOpen onClose={() => setShowApprovalHistory(false)} title="Approval History" size="md">
-        <div className="max-h-96 space-y-2 overflow-y-auto thin-scrollbar">
-          {sdcApprovalsLoading ? (
-            <LoadingSkeleton variant="list" rows={2} label="Loading approval history" className="px-3" />
-          ) : sdcApprovals.length === 0 ? (
-            <p className="py-6 text-center text-xs text-gray-400 font-inter">No approval requests yet.</p>
-          ) : (
-            sdcApprovals.map((a) => {
-              const meta = a.status === 'approved'
-                ? { badge: 'success', label: 'Approved' }
-                : a.status === 'rejected'
-                  ? { badge: 'error', label: 'Rejected' }
-                  : { badge: 'pending', label: 'Pending' };
-              return (
-                <div key={a.id} className="rounded-xl border border-gray-100 px-3.5 py-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <Badge status={meta.badge}>{meta.label}</Badge>
-                    <span className="text-[11px] text-gray-400 font-inter">
-                      {a.selected_user_ids?.length || 0} record{(a.selected_user_ids?.length || 0) === 1 ? '' : 's'}
-                    </span>
-                  </div>
-                  <p className="mt-1.5 text-xs text-gray-500 font-inter">Requested {formatDate(a.created_at)}</p>
-                  {a.decided_at && <p className="text-xs text-gray-400 font-inter">Decided {formatDate(a.decided_at)}</p>}
-                  {a.decision_reason && <p className="mt-1 text-xs text-gray-600 font-inter">Reason: {a.decision_reason}</p>}
-                  {a.status === 'pending' && (
-                    <button
-                      type="button"
-                      onClick={() => { setShowApprovalHistory(false); setReviewApproval(a); }}
-                      className="mt-2 text-xs font-semibold text-brand-blue font-inter hover:underline"
-                    >
-                      Review
-                    </button>
-                  )}
-                </div>
-              );
-            })
-          )}
-        </div>
-      </Modal>
-    )}
     </>
   );
 };

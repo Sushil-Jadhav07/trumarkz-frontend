@@ -12,8 +12,12 @@ import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
 import { CustomSelect } from '@/components/ui/CustomSelect';
+import { ShareResultNote } from '@/components/shared/ShareResultNote';
+import { shareResultMessage } from '@/utils/partialSdc';
 import { verificationAPI, verifiersAPI, sdcAPI, adminAPI, getApiError, triggerBlobDownload } from '@/services/api';
 import { GenerateSDCModal } from '@/pages/admin/SDCVerification';
+import { BulkDeleteBatchesModal } from '@/components/shared/BulkDeleteBatchesModal';
+import { BULK_DELETE_LIMIT } from '@/utils/partialSdc';
 import { TablePagination } from '@/components/shared/TablePagination';
 import { normalizeDhiwayDetails, resolveDhiwaySpaceId, batchSdcSpaceId } from '@/utils/dhiway';
 import { pendingManualUsers } from '@/utils/pendingManualVerifications';
@@ -1655,12 +1659,16 @@ const WarrantyDetailModal = ({ batchId, batchName, orgId, spaceId, onClose, asPa
   // agrees with what the org side sees.
   const sharedWithOrganization = !!data?.shared_with_org;
   const [sendingToOrg, setSendingToOrg] = useState(false);
+  const [shareResult, setShareResult] = useState(null);
 
   const handleSendToOrganization = async () => {
     setSendingToOrg(true);
     try {
-      await verificationAPI.shareWithOrganization(batchId);
-      toast.success(`${batchName} shared with the organization`);
+      const { data: shareData } = await verificationAPI.shareWithOrganization(batchId);
+      setShareResult(shareData);
+      const msg = shareResultMessage(shareData);
+      if (msg.tone === 'warning') toast(`${batchName}: ${msg.text}`, { icon: '⚠️', duration: 7000 });
+      else toast.success(`${batchName}: ${msg.text}`);
       // Reflect the backend's own change immediately rather than a full
       // refetch — the rest of `data` (products, certs) is unaffected by this
       // action, so there's nothing else that needs to reload.
@@ -2041,7 +2049,7 @@ const WarrantyDetailModal = ({ batchId, batchName, orgId, spaceId, onClose, asPa
 
                 {/* Send to org — once SDC is generated and not yet shared, same
                     gating as the generic Control Center modal. */}
-                {data?.status === 'sdc_generated' && !sharedWithOrganization && (
+                {data?.status === 'sdc_generated' && !sharedWithOrganization && !shareResult && (
                   <Button
                     variant="success"
                     size="sm"
@@ -2053,6 +2061,7 @@ const WarrantyDetailModal = ({ batchId, batchName, orgId, spaceId, onClose, asPa
                     {sendingToOrg ? 'Sending…' : 'Send to Organization'}
                   </Button>
                 )}
+                <ShareResultNote result={shareResult} retrying={sendingToOrg} onRetry={handleSendToOrganization} />
               </div>
 
               <div className="mt-4 pt-4 border-t border-gray-200/70">
@@ -2542,6 +2551,9 @@ export const BatchMonitor = () => {
   // Sub-modal states — row-level actions, reachable straight from the list
   // without opening the batch's own Control Center page.
   const [deleteBatchTarget,   setDeleteBatchTarget]   = useState(null); // batch pending the delete-confirm modal
+  // Multi-select across pages for bulk delete (at most BULK_DELETE_LIMIT batches per request).
+  const [selectedBatchIds,  setSelectedBatchIds]  = useState(() => new Set());
+  const [bulkDeleteOpen,    setBulkDeleteOpen]    = useState(false);
   const [rejectedListTarget,  setRejectedListTarget]  = useState(null); // batch pending the Send Rejected List modal
   const [smartSendOpen,       setSmartSendOpen]       = useState(false);
   const [smartSendBatch,      setSmartSendBatch]      = useState(null);
@@ -2683,8 +2695,26 @@ export const BatchMonitor = () => {
   // refreshes the list so the row disappears.
   const handleBatchDeleted = useCallback((batchId) => {
     setDeleteBatchTarget(null);
+    setSelectedBatchIds((prev) => { const next = new Set(prev); next.delete(batchId); return next; });
     fetchData();
   }, [fetchData]);
+
+  // Bulk delete finished: drop what is gone from the selection, keep skipped / failed ones selected so
+  // they can be retried, then refresh the list.
+  const handleBulkDeleted = useCallback((results) => {
+    const gone = new Set((results || []).filter((r) => r.status === 'deleted' || r.status === 'not_found').map((r) => r.batch_id));
+    setSelectedBatchIds((prev) => new Set([...prev].filter((id) => !gone.has(id))));
+    setBulkDeleteOpen(false);
+    fetchData();
+  }, [fetchData]);
+
+  const toggleBatchSelected = (id) => setSelectedBatchIds((prev) => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id);
+    else if (next.size >= BULK_DELETE_LIMIT) toast.error(`You can delete at most ${BULK_DELETE_LIMIT} batches at once.`);
+    else next.add(id);
+    return next;
+  });
 
   // Smart Send needs actual per-user records to assign — the list endpoint
   // (GET /verification/batches) never returns a `users` array, only the
@@ -2962,10 +2992,33 @@ export const BatchMonitor = () => {
               </div>
               <span className="self-start rounded-full bg-[#e3ebf8] px-3 py-1 text-xs font-semibold text-brand-dark font-inter sm:self-auto">{visibleBatches.length} batches</span>
             </div>
+            {selectedBatchIds.size > 0 && (
+              <div role="status" className="mx-5 mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-red-100 bg-red-50 px-3.5 py-2">
+                <p className="text-xs font-medium text-red-700 font-inter">{selectedBatchIds.size} batch{selectedBatchIds.size === 1 ? '' : 'es'} selected (up to {BULK_DELETE_LIMIT})</p>
+                <div className="flex items-center gap-3">
+                  <button type="button" onClick={() => setSelectedBatchIds(new Set())} className="text-xs font-medium text-gray-600 hover:text-brand-dark font-inter">Clear selection</button>
+                  <button type="button" onClick={() => setBulkDeleteOpen(true)} className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-red-600 px-3 text-xs font-semibold text-white hover:bg-red-700 font-inter"><Trash2 size={13} /> Delete selected</button>
+                </div>
+              </div>
+            )}
             <div className="overflow-x-auto scrollbar-hidden">
               <table className="w-full min-w-[980px] border-collapse">
                 <thead>
                   <tr className="text-xs font-medium font-inter">
+                    <th className="w-10 px-3 py-2.5">
+                      <input
+                        type="checkbox"
+                        aria-label="Select all batches on this page"
+                        className="h-4 w-4 accent-blue-600"
+                        checked={paginatedBatches.length > 0 && paginatedBatches.every((b) => selectedBatchIds.has(b.id))}
+                        onChange={(e) => setSelectedBatchIds((prev) => {
+                          const next = new Set(prev);
+                          if (!e.target.checked) paginatedBatches.forEach((b) => next.delete(b.id));
+                          else paginatedBatches.forEach((b) => { if (next.size < BULK_DELETE_LIMIT) next.add(b.id); });
+                          return next;
+                        })}
+                      />
+                    </th>
                     {[
                       { label: 'Batch name', sortKey: 'name', align: 'text-left' },
                       { label: 'Organization', align: 'text-left' },
@@ -3008,6 +3061,15 @@ export const BatchMonitor = () => {
                         }}
                         className="cursor-pointer text-xs font-inter transition-colors hover:bg-blue-50/30 focus-visible:bg-blue-50/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-blue"
                       >
+                        <td className="w-10 px-3 py-1.5" onClick={(e) => e.stopPropagation()}>
+                          <input
+                            type="checkbox"
+                            aria-label={`Select ${batch.name}`}
+                            className="h-4 w-4 accent-blue-600"
+                            checked={selectedBatchIds.has(batch.id)}
+                            onChange={() => toggleBatchSelected(batch.id)}
+                          />
+                        </td>
                         <td className="px-3 py-1.5">
                           <p title={batch.id} className="max-w-[240px] truncate text-[13px] text-brand-dark">{batch.name}</p>
                         </td>
@@ -3204,6 +3266,13 @@ export const BatchMonitor = () => {
         batch={deleteBatchTarget}
         onClose={() => setDeleteBatchTarget(null)}
         onDeleted={handleBatchDeleted}
+      />
+
+      {/* ── Bulk delete ─────────────────────────────────────────────────────── */}
+      <BulkDeleteBatchesModal
+        batches={bulkDeleteOpen ? batches.filter((b) => selectedBatchIds.has(b.id)).map((b) => ({ id: b.id, name: b.name, orgName: b.orgName })) : null}
+        onClose={() => setBulkDeleteOpen(false)}
+        onDone={handleBulkDeleted}
       />
 
       {/* ── Send Rejected List Modal ─────────────────────────────────────────── */}

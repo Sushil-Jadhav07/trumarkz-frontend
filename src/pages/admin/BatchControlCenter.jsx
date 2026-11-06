@@ -13,6 +13,8 @@ import { VerificationDetailsModal, VerificationCheckDetailsModal } from '@/compo
 import { TablePagination } from '@/components/shared/TablePagination';
 import { useAutomaticBatchRefresh } from '@/hooks/useAutomaticBatchRefresh';
 import { batchSdcSpaceId } from '@/utils/dhiway';
+import { ShareResultNote } from '@/components/shared/ShareResultNote';
+import { shareResultMessage } from '@/utils/partialSdc';
 import { CertificateAccessPanel, ReportsProtectedBadge } from '@/components/shared/CertificateAccessPanel';
 import { isHumanBatch, canRequireHolderApproval } from '@/utils/certificateAccess';
 import {
@@ -104,6 +106,8 @@ export const BatchControlCenter = () => {
 
   const [resending, setResending] = useState(null); // request token being resent
   const [sendingToOrg, setSendingToOrg] = useState(false);
+  const [shareResults, setShareResults] = useState({}); // batch id -> last share response (email status)
+  const [activeAuthCount, setActiveAuthCount] = useState(0); // active partial SDC authorizations of the open batch
 
   const [submittedReports, setSubmittedReports] = useState(null);
   const [loadingReports, setLoadingReports] = useState(false);
@@ -610,8 +614,11 @@ export const BatchControlCenter = () => {
   const handleSendToOrganization = async (batch) => {
     setSendingToOrg(true);
     try {
-      await verificationAPI.shareWithOrganization(batch.id);
-      toast.success(`${batch.name} shared with the organization`);
+      const { data: shareData } = await verificationAPI.shareWithOrganization(batch.id);
+      setShareResults((prev) => ({ ...prev, [batch.id]: shareData }));
+      const msg = shareResultMessage(shareData);
+      if (msg.tone === 'warning') toast(`${batch.name}: ${msg.text}`, { icon: '⚠️', duration: 7000 });
+      else toast.success(`${batch.name}: ${msg.text}`);
       // The POST above just confirmed the share succeeded, so patch this
       // batch's own flag immediately rather than waiting on the list
       // refetch below — GET /verification/batches (the list endpoint) can
@@ -631,6 +638,18 @@ export const BatchControlCenter = () => {
       setSendingToOrg(false);
     }
   };
+
+  // Active partial authorizations of the open batch: they make "Generate SDC" available for holders that are
+  // not fully verified (the organization authorizes, only the SuperAdmin generates).
+  const openBatchId = selectedBatch?.id;
+  useEffect(() => {
+    if (!openBatchId) { setActiveAuthCount(0); return undefined; }
+    let active = true;
+    sdcAPI.getBatchPartialAuthorizations(openBatchId, { status: 'active' })
+      .then(({ data }) => { if (active) setActiveAuthCount(Array.isArray(data?.authorizations) ? data.authorizations.length : 0); })
+      .catch(() => { if (active) setActiveAuthCount(0); });
+    return () => { active = false; };
+  }, [openBatchId]);
 
   if (!listLoading && !selectedBatch) {
     return (
@@ -1033,8 +1052,8 @@ export const BatchControlCenter = () => {
                   </Button>
                 )}
                 <Button variant="outline" size="sm" icon={Sparkles} className="!px-2 text-xs text-center leading-tight"
-                  disabled={!batchDetail?.can_generate_sdc}
-                  title={!batchDetail?.can_generate_sdc ? 'This batch is not ready for SDC generation yet' : undefined}
+                  disabled={!batchDetail?.can_generate_sdc && activeAuthCount === 0}
+                  title={!batchDetail?.can_generate_sdc && activeAuthCount === 0 ? 'Not ready: wait for verification to finish, or for the organization to authorize a partial SDC' : undefined}
                   onClick={() => setSdcGenerateBatch(selectedBatch)}>
                   {sdcInfo?.status ? 'Regenerate SDC' : 'Generate SDC'}
                 </Button>
@@ -1046,7 +1065,7 @@ export const BatchControlCenter = () => {
                   onClick={() => { setResendRejectedPrefill(null); setResendRejectedTarget(selectedBatch); }}>
                   Resend Rejected
                 </Button>
-                {!!sdcInfo?.status && !selectedBatch.sharedWithOrganization && (
+                {!!sdcInfo?.status && !selectedBatch.sharedWithOrganization && !shareResults[selectedBatch.id] && (
                   <Button variant="success" size="sm" icon={sendingToOrg ? RefreshCw : Send}
                     className="!px-2 text-xs text-center leading-tight" disabled={sendingToOrg}
                     onClick={() => handleSendToOrganization(selectedBatch)}>
@@ -1061,6 +1080,7 @@ export const BatchControlCenter = () => {
                   </Button>
                 )}
               </div>
+              <ShareResultNote className="mt-3" result={shareResults[selectedBatch.id]} retrying={sendingToOrg} onRetry={() => handleSendToOrganization(selectedBatch)} />
               <div className="mt-3 flex items-start gap-2 rounded-xl border border-blue-100 bg-blue-50/60 px-3 py-2.5">
                 <Info size={12} className="mt-0.5 shrink-0 text-brand-blue" />
                 <p className="text-[11px] text-blue-700 font-inter leading-relaxed">

@@ -79,6 +79,7 @@ import BatchMonitor, { WarrantyControlCenter } from '@/pages/admin/BatchMonitor'
 import BatchControlCenter from '@/pages/admin/BatchControlCenter';
 import Verifiers from '@/pages/admin/Verifiers';
 import IndustryManagement from '@/pages/admin/IndustryManagement';
+import PartialAuthorizations from '@/pages/admin/PartialAuthorizations';
 import SDCVerification from '@/pages/admin/SDCVerification';
 import PromoteSuperAdmin from '@/pages/admin/PromoteSuperAdmin';
 import CreateSuperAdmin from '@/pages/admin/CreateSuperAdmin';
@@ -235,6 +236,7 @@ const AnimatedRoutes = () => {
           <Route path="/admin/batch-monitor/:batchId" element={<ProtectedRoute><AdminRoute><BatchControlCenter /></AdminRoute></ProtectedRoute>} />
           <Route path="/admin/batch-monitor/warranty/:batchId" element={<ProtectedRoute><AdminRoute><WarrantyControlCenter /></AdminRoute></ProtectedRoute>} />
           <Route path="/admin/verifiers" element={<ProtectedRoute><AdminRoute><Verifiers /></AdminRoute></ProtectedRoute>} />
+          <Route path="/admin/partial-authorizations" element={<ProtectedRoute><AdminRoute><PartialAuthorizations /></AdminRoute></ProtectedRoute>} />
           <Route path="/admin/industries" element={<ProtectedRoute><AdminRoute><IndustryManagement /></AdminRoute></ProtectedRoute>} />
           <Route path="/admin/sdc-verification" element={<ProtectedRoute><AdminRoute><SDCVerification /></AdminRoute></ProtectedRoute>} />
           <Route path="/admin/promote-super-admin" element={<ProtectedRoute><AdminRoute><PromoteSuperAdmin /></AdminRoute></ProtectedRoute>} />

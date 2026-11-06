@@ -11,6 +11,7 @@ import { Modal } from '@/components/ui/Modal';
 import { Input } from '@/components/ui/Input';
 import { ProgressBar } from '@/components/ui/ProgressBar';
 import { authAPI, verificationAPI, sdcAPI, adminAPI, getApiError } from '@/services/api';
+import { authorizationIsStale, describeGenerateError, groupSchemaWarnings } from '@/utils/partialSdc';
 import { normalizeDhiwayDetails, resolveDhiwaySpaceId, batchSdcSpaceId } from '@/utils/dhiway';
 import {
   Search, ShieldCheck, Users, ChevronRight, CheckCircle, Clock, XCircle,
@@ -233,16 +234,45 @@ export const GenerateSDCModal = ({ batch, onClose, onGenerated, liveStatus, poll
   const [recordFilter, setRecordFilter] = useState('all'); // all | verified | partial | pending | ineligible
   const initializedForBatchId = useRef(null);
 
-  // Defaults to "every eligible record" selected — keeps the original
-  // whole-batch behavior a single click away, while still letting the admin
-  // deselect specific records before generating. Re-runs only when a
-  // different batch's modal opens, never on every records re-render.
+  // Partial holders need an active, valid organization authorization; fetched once per batch so the
+  // selection can start with only the holders that can actually be generated.
+  const [authsByHolder, setAuthsByHolder] = useState({});
+  const [authsLoaded, setAuthsLoaded] = useState(false);
   useEffect(() => {
-    if (initializedForBatchId.current === batch?.id) return;
-    initializedForBatchId.current = batch?.id;
-    const eligible = records.filter((r) => getRecordEligibility(r) !== 'ineligible');
-    setSelectedIds(new Set(eligible.map(recordSDCId).filter(Boolean)));
-  }, [batch?.id, records]);
+    let active = true;
+    setAuthsLoaded(false);
+    sdcAPI.getBatchPartialAuthorizations(batch.id, { status: 'active' })
+      .then(({ data }) => {
+        if (!active) return;
+        const map = {};
+        (Array.isArray(data?.authorizations) ? data.authorizations : []).forEach((a) => { map[a.batch_user_id] = a; });
+        setAuthsByHolder(map);
+      })
+      .catch(() => { if (active) setAuthsByHolder({}); })
+      .finally(() => { if (active) setAuthsLoaded(true); });
+    return () => { active = false; };
+  }, [batch.id]);
+
+  const authState = (r) => {
+    const a = authsByHolder[recordSDCId(r)];
+    if (!a) return 'none';
+    return authorizationIsStale(a) ? 'stale' : 'valid';
+  };
+  const canGenerate = (r) => {
+    const e = getRecordEligibility(r);
+    return e === 'verified' || (e === 'partial' && authState(r) === 'valid');
+  };
+
+  // Defaults to every holder that can be generated now: fully verified ones, and partially verified ones
+  // with a valid authorization. Re-runs only when a different batch opens or the authorizations arrive.
+  useEffect(() => {
+    if (!authsLoaded) return;
+    const key = `${batch?.id}:${authsLoaded}`;
+    if (initializedForBatchId.current === key) return;
+    initializedForBatchId.current = key;
+    setSelectedIds(new Set(records.filter(canGenerate).map(recordSDCId).filter(Boolean)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [batch?.id, records, authsLoaded]);
 
   const filteredRecords = useMemo(() => {
     const q = recordSearch.trim().toLowerCase();
@@ -262,50 +292,12 @@ export const GenerateSDCModal = ({ batch, onClose, onGenerated, liveStatus, poll
     });
   };
   const selectAllEligible = () => {
-    const eligible = records.filter((r) => getRecordEligibility(r) !== 'ineligible');
-    setSelectedIds(new Set(eligible.map(recordSDCId).filter(Boolean)));
+    setSelectedIds(new Set(records.filter(canGenerate).map(recordSDCId).filter(Boolean)));
   };
   const clearSelection = () => setSelectedIds(new Set());
 
-  // ── Partial-SDC approval state ──────────────────────────────────────────
-  // Only ever set from a /generate 403 whose body actually matches the
-  // documented structured shape — a generic 403 (auth, etc.) is never
-  // reinterpreted as this, so it falls through to the normal error toast.
-  const [approvalState, setApprovalState] = useState(null);
-  const [approvalRefreshing, setApprovalRefreshing] = useState(false);
-  const pollRef = useRef(null);
-
-  const isStructuredApprovalDetail = (detail) =>
-    !!detail && typeof detail === 'object' &&
-    typeof detail.approval_status === 'string' && !!detail.approval_request_id;
-
-  const refreshApprovalStatus = useCallback(async () => {
-    if (!approvalState?.approval_request_id) return;
-    setApprovalRefreshing(true);
-    try {
-      const { data } = await sdcAPI.getSDCApprovals(batch.id);
-      const list = Array.isArray(data) ? data : [];
-      const match = list.find((a) => a.id === approvalState.approval_request_id);
-      if (match) {
-        setApprovalState((prev) => (prev ? { ...prev, status: match.status, decision_reason: match.decision_reason } : prev));
-      }
-    } catch {
-      // Silent — this is a background status check; the next poll tick or
-      // another manual Refresh click will try again.
-    } finally {
-      setApprovalRefreshing(false);
-    }
-  }, [approvalState?.approval_request_id, batch?.id]);
-
-  // Poll only while a request is genuinely pending and this modal is open —
-  // stops the moment it leaves 'pending' (approved/rejected) or the modal
-  // unmounts, never leaves a stray timer running.
-  useEffect(() => {
-    if (approvalState?.status !== 'pending') return undefined;
-    pollRef.current = setInterval(refreshApprovalStatus, 12000);
-    return () => clearInterval(pollRef.current);
-  }, [approvalState?.status, refreshApprovalStatus]);
-  useEffect(() => () => clearInterval(pollRef.current), []);
+  // The last generate failure, described (see describeGenerateError). Shown inline in the form.
+  const [genError, setGenError] = useState(null);
 
   // Matches this batch's records against the org's Dhiway record list by
   // email/title for human records and serial/title for product/warranty
@@ -504,12 +496,11 @@ export const GenerateSDCModal = ({ batch, onClose, onGenerated, liveStatus, poll
   // issue_pending: true, the result panel below surfaces an "Issue Now" button
   // so the admin triggers /issue explicitly instead of it firing silently.
   //
-  // A 403 with the documented structured body means "organization approval
-  // required," not a failure — it's switched into approvalState instead of
-  // a generic error toast. Any other 403 (or any other error) falls through
-  // to the normal toast, unchanged from before.
+  // A failure is described by describeGenerateError and shown inline (partial holders without an
+  // authorization, results changed since authorization, legacy layout, Dhiway errors, ...).
   const runGenerate = async (userIds) => {
     setSubmitting(true);
+    setGenError(null);
     try {
       const payload = { publish: false, active, user_ids: userIds };
       const { data } = await sdcAPI.generateBatchSDC(batch.id, payload);
@@ -518,45 +509,18 @@ export const GenerateSDCModal = ({ batch, onClose, onGenerated, liveStatus, poll
       if (!data.issue_pending) {
         toast.success(nothingNew ? 'Nothing to generate — selected records already have SDCs' : 'SDC created');
       }
-      // Advisory notes from the batch's dynamic schema mapping — shown as written, never parsed.
-      const mappingWarnings = Array.isArray(data.schema_mapping_warnings) ? data.schema_mapping_warnings.filter(Boolean) : [];
-      if (mappingWarnings.length) {
-        toast(`Schema mapping notes:\n${mappingWarnings.map((w) => `• ${w}`).join('\n')}`, { icon: 'ℹ️', duration: 9000 });
-      }
-      // "already_generated" only means a DRAFT was created earlier for this
-      // id — confirmed from the backend source — never that it was actually
-      // issued (anchored into a real, retrievable certificate). That draft/
-      // issue split is invisible to this response: `already_generated_user_ids`
-      // carries no issued/active signal at all, so a user whose draft was
-      // never issued stays permanently "already generated" on every future
-      // attempt, with no real certificate ever appearing — confirmed live
-      // (selected generation for a user with no certificate returned
-      // sdc_status: "already_generated", yet the real Dhiway record search
-      // found nothing for them). A single best-effort /issue attempt here
-      // closes that gap for anyone still sitting as an un-issued draft,
-      // without blocking the UI on Dhiway's full retry/backoff window (that
-      // long-form retry stays reserved for the genuine issue_pending path
-      // below, which already surfaces its own "Issue Certificates Now" UI).
+      // "already_generated" only means a DRAFT was created earlier — a single best-effort /issue closes
+      // that gap without blocking the UI on Dhiway's full retry window.
       if (nothingNew) {
         try { await sdcAPI.issueBatchSDC(batch.id); } catch { /* best-effort only */ }
       }
-      setApprovalState(null);
       onGenerated(payload, data);
       setSentPayload(payload);
       setResult(data);
     } catch (err) {
-      const detail = err?.response?.data?.detail;
-      if (err?.response?.status === 403 && isStructuredApprovalDetail(detail)) {
-        setApprovalState({
-          status: detail.approval_status,
-          approval_request_id: detail.approval_request_id,
-          selected_user_ids: Array.isArray(detail.selected_user_ids) ? detail.selected_user_ids : userIds,
-          incomplete_user_ids: Array.isArray(detail.incomplete_user_ids) ? detail.incomplete_user_ids : [],
-          decision_reason: null,
-        });
-      } else {
-        toast.error(getApiError(err, 'Failed to start SDC generation'));
-      }
+      const described = describeGenerateError(err);
+      if (described.kind === 'other') toast.error(getApiError(err, 'Failed to start SDC generation'));
+      else setGenError(described);
     } finally {
       setSubmitting(false);
     }
@@ -566,20 +530,6 @@ export const GenerateSDCModal = ({ batch, onClose, onGenerated, liveStatus, poll
     e.preventDefault();
     if (selectedIds.size === 0) return;
     runGenerate(Array.from(selectedIds));
-  };
-
-  // After the org approves, "Generate Now" must resend the EXACT selection
-  // the approval was granted for — never the modal's current selectedIds,
-  // which the admin could have changed in the meantime (that would be a
-  // different approval scope entirely, per the backend's exact-selection rule).
-  const handleGenerateApproved = () => {
-    if (!approvalState?.selected_user_ids?.length) return;
-    runGenerate(approvalState.selected_user_ids);
-  };
-
-  const handleAdjustSelection = () => {
-    setApprovalState(null);
-    toast('Back to selection — changing it will require a new approval request', { icon: 'ℹ️' });
   };
 
   // Manual trigger for the /issue fallback — only ever called by the admin
@@ -597,108 +547,6 @@ export const GenerateSDCModal = ({ batch, onClose, onGenerated, liveStatus, poll
       setRetrying(false);
     }
   };
-
-  // ── Partial-SDC approval state — takes over the modal until it's resolved
-  // or the admin backs out of it. Superadmin can only VIEW this status and
-  // refresh it; only the organization decides (see the org-side review UI).
-  if (approvalState) {
-    const selectedCount = approvalState.selected_user_ids?.length || 0;
-    const incompleteCount = approvalState.incomplete_user_ids?.length || 0;
-
-    if (approvalState.status === 'approved') {
-      return (
-        <Modal isOpen onClose={onClose} title="Approval Received" size="sm">
-          <div className="space-y-4">
-            <div className="flex items-center gap-3 rounded-2xl border border-emerald-100 bg-emerald-50 px-4 py-3.5">
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-emerald-500/15 text-emerald-600">
-                <CheckCircle size={20} />
-              </div>
-              <div className="min-w-0">
-                <p className="text-sm font-semibold text-brand-dark font-inter">The organization approved this request</p>
-                <p className="text-xs text-emerald-700 font-inter mt-0.5">Selection: {selectedCount} record{selectedCount === 1 ? '' : 's'}</p>
-              </div>
-            </div>
-            <p className="text-xs text-gray-500 font-inter">
-              Approval alone doesn't generate anything — click below to generate using the exact same selection the organization approved.
-            </p>
-            <Modal.Footer className="flex gap-3">
-              <Button loading={submitting} onClick={handleGenerateApproved}>
-                <Sparkles size={14} /> Generate Now
-              </Button>
-              <Button variant="ghost" onClick={onClose}>Close</Button>
-            </Modal.Footer>
-          </div>
-        </Modal>
-      );
-    }
-
-    if (approvalState.status === 'rejected') {
-      return (
-        <Modal isOpen onClose={onClose} title="Request Rejected" size="sm">
-          <div className="space-y-4">
-            <div className="flex items-start gap-3 rounded-2xl border border-red-100 bg-red-50 px-4 py-3.5">
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-red-500/15 text-red-600">
-                <XCircle size={20} />
-              </div>
-              <div className="min-w-0">
-                <p className="text-sm font-semibold text-brand-dark font-inter">The organization rejected SDC generation for this selection</p>
-                {approvalState.decision_reason && (
-                  <p className="text-xs text-red-700 font-inter mt-1">Reason: {approvalState.decision_reason}</p>
-                )}
-              </div>
-            </div>
-            <Modal.Footer className="flex gap-3">
-              <Button variant="secondary" onClick={handleAdjustSelection}>Adjust Selection</Button>
-              <Button variant="ghost" onClick={onClose}>Close</Button>
-            </Modal.Footer>
-          </div>
-        </Modal>
-      );
-    }
-
-    // pending — "Generate Selected" never appears here; only the owning
-    // organization can move this forward (Approve/Reject never shown to
-    // SuperAdmin either). Only Adjust Selection (back to the selection
-    // table) and Refresh Status (re-check this exact request) are offered.
-    return (
-      <Modal isOpen onClose={onClose} title="Organization Approval Required" size="sm">
-        <div className="space-y-4">
-          <p className="text-xs text-gray-500 font-inter">
-            This selection contains records that are not fully verified.
-          </p>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="rounded-xl border border-gray-100 bg-brand-bg px-3 py-2.5">
-              <p className="text-[10px] uppercase tracking-wide text-gray-400 font-inter">Selected Records</p>
-              <p className="text-lg font-semibold text-brand-dark font-sora">{selectedCount}</p>
-            </div>
-            <div className="rounded-xl border border-amber-100 bg-amber-50 px-3 py-2.5">
-              <p className="text-[10px] uppercase tracking-wide text-amber-600 font-inter">Partially Verified</p>
-              <p className="text-lg font-semibold text-amber-700 font-sora">{incompleteCount}</p>
-            </div>
-          </div>
-          <div className="flex items-center justify-between rounded-xl border border-gray-100 px-3 py-2.5">
-            <div>
-              <p className="text-xs text-gray-400 font-inter mb-1">Status</p>
-              <Badge status="pending">Pending Approval</Badge>
-            </div>
-            <div className="text-right">
-              <p className="text-xs text-gray-400 font-inter">Approval Request</p>
-              <p className="text-xs font-mono text-brand-dark font-inter">#{String(approvalState.approval_request_id).slice(0, 8)}</p>
-            </div>
-          </div>
-          <p className="text-xs text-gray-400 font-inter">
-            The organization must approve this exact selection before SDC generation can continue.
-          </p>
-          <Modal.Footer className="flex gap-3">
-            <Button variant="secondary" onClick={handleAdjustSelection}>Adjust Selection</Button>
-            <Button variant="outline" loading={approvalRefreshing} onClick={refreshApprovalStatus}>
-              <RefreshCw size={14} /> Refresh Status
-            </Button>
-          </Modal.Footer>
-        </div>
-      </Modal>
-    );
-  }
 
   // ── Post-submit ──────────────────────────────────────────────────────────
   if (result) {
@@ -857,6 +705,32 @@ export const GenerateSDCModal = ({ batch, onClose, onGenerated, liveStatus, poll
             </div>
           )}
 
+          {(() => {
+            const grouped = groupSchemaWarnings(result.warning_details, result.schema_mapping_warnings);
+            const dropped = Array.isArray(result.dropped_fields) ? result.dropped_fields : [];
+            const used = Array.isArray(result.partial_authorization_ids_used) ? result.partial_authorization_ids_used : [];
+            if (!grouped.warning.length && !grouped.info.length && !dropped.length && !used.length) return null;
+            return (
+              <div className="space-y-2">
+                {used.length > 0 && (
+                  <p className="rounded-xl border border-green-100 bg-green-50 px-3 py-2 text-xs text-green-700 font-inter">
+                    {used.length} partial authorization{used.length === 1 ? '' : 's'} used. Each is now marked as used.
+                  </p>
+                )}
+                {[...grouped.warning, ...grouped.info].map((w, i) => (
+                  <p key={i} className={`rounded-xl border px-3 py-2 text-xs font-inter ${w.severity === 'warning' ? 'border-amber-100 bg-amber-50 text-amber-800' : 'border-gray-100 bg-gray-50 text-gray-600'}`}>
+                    <span className="font-semibold">{w.title}</span>{w.message ? ` — ${w.message}` : ''}{w.fields.length ? `: ${w.fields.join(', ')}` : ''}
+                  </p>
+                ))}
+                {dropped.length > 0 && (
+                  <p className="rounded-xl border border-gray-100 bg-gray-50 px-3 py-2 text-xs text-gray-600 font-inter">
+                    Not sent to Dhiway (not in the schema): {dropped.join(', ')}
+                  </p>
+                )}
+              </div>
+            );
+          })()}
+
           <div>
             <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-gray-400 font-inter">Certificates</p>
             {certLoading ? (
@@ -901,6 +775,50 @@ export const GenerateSDCModal = ({ batch, onClose, onGenerated, liveStatus, poll
           Dhiway Studio — the org, space, and schema all resolve automatically.
         </p>
 
+        {genError && (
+          <div role="alert" className="space-y-2 rounded-xl border border-red-100 bg-red-50 px-3.5 py-3">
+            <p className="text-sm font-semibold text-red-700 font-inter">{genError.message}</p>
+            {genError.kind === 'unauthorized' && (
+              <>
+                <p className="text-xs text-red-700/90 font-inter">The organization must authorize these holders first (Batches, then this batch, then Partial SDC authorization), or deselect them.</p>
+                <ul className="flex flex-wrap gap-1.5">
+                  {genError.unauthorizedIds.map((id) => {
+                    const r = records.find((rec) => recordSDCId(rec) === id);
+                    return <li key={id} className="rounded-full bg-white px-2.5 py-0.5 text-xs font-medium text-red-700">{r ? recordTitle(r) : id}</li>;
+                  })}
+                </ul>
+                <button
+                  type="button"
+                  onClick={() => { setSelectedIds((prev) => new Set([...prev].filter((id) => !genError.unauthorizedIds.includes(id)))); setGenError(null); }}
+                  className="text-xs font-semibold text-red-700 underline font-inter"
+                >
+                  Deselect these holders
+                </button>
+              </>
+            )}
+            {genError.kind === 'stale' && (
+              <>
+                <p className="text-xs text-red-700/90 font-inter">Verification results changed after authorization. The organization must authorize these holders again.</p>
+                <ul className="space-y-0.5 text-xs text-red-700 font-inter">
+                  {genError.stale.map((item) => {
+                    const r = records.find((rec) => recordSDCId(rec) === item.batch_user_id);
+                    return <li key={item.authorization_id || item.batch_user_id}>{r ? recordTitle(r) : item.batch_user_id}{(item.stale_verification_types || []).length ? ` — changed: ${item.stale_verification_types.join(', ')}` : ''}</li>;
+                  })}
+                </ul>
+              </>
+            )}
+            {genError.kind === 'legacy' && (
+              <p className="text-xs text-red-700/90 font-inter">These holders already have an SDC in the old Human layout and cannot get another one: {genError.userIds.map((id) => { const r = records.find((rec) => recordSDCId(rec) === id); return r ? recordTitle(r) : id; }).join(', ')}. Deselect them.</p>
+            )}
+            {genError.kind === 'ids' && (
+              <p className="text-xs text-red-700/90 font-inter">Some authorizations are no longer active for these holders. Reopen this window and try again.</p>
+            )}
+            {genError.kind === 'busy' && <p className="text-xs text-red-700/90 font-inter">Wait a moment, then press Generate again.</p>}
+            {genError.kind === 'dhiway' && <p className="text-xs text-red-700/90 font-inter">The authorization was released. You can generate again.</p>}
+            {genError.kind === 'validation' && <p className="text-xs text-red-700/90 font-inter">Nothing was sent to Dhiway. Check the organization's schema configuration.</p>}
+          </div>
+        )}
+
         {/* Search + filters */}
         <div className="flex flex-wrap items-center gap-2">
           <div className="flex min-w-[180px] flex-1 items-center gap-1.5 rounded-lg border border-gray-200 px-2.5 py-1.5">
@@ -930,7 +848,7 @@ export const GenerateSDCModal = ({ batch, onClose, onGenerated, liveStatus, poll
         <div className="rounded-xl border border-gray-100 overflow-hidden">
           <div className="flex items-center justify-between border-b border-gray-100 bg-gray-50 px-3 py-2">
             <button type="button" onClick={selectAllEligible} className="text-[11px] font-semibold text-brand-blue font-inter hover:underline">
-              Select All Eligible
+              Select all ready
             </button>
             <button type="button" onClick={clearSelection} className="text-[11px] font-medium text-gray-400 font-inter hover:text-gray-600">
               Clear
@@ -955,6 +873,11 @@ export const GenerateSDCModal = ({ batch, onClose, onGenerated, liveStatus, poll
                     />
                     <span className="min-w-0 flex-1 truncate text-xs font-medium text-brand-dark font-inter">{recordTitle(r)}</span>
                     <Badge status={meta.badge}>{meta.label}</Badge>
+                    {eligibility === 'partial' && (
+                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${authState(r) === 'valid' ? 'bg-green-100 text-green-700' : authState(r) === 'stale' ? 'bg-amber-100 text-amber-800' : 'bg-gray-100 text-gray-600'}`}>
+                        {authState(r) === 'valid' ? 'Authorized' : authState(r) === 'stale' ? 'Results changed' : 'Needs authorization'}
+                      </span>
+                    )}
                   </label>
                 );
               })
@@ -993,7 +916,7 @@ export const GenerateSDCModal = ({ batch, onClose, onGenerated, liveStatus, poll
         <div className="flex items-start gap-2 bg-blue-50 border border-blue-100 rounded-xl px-3 py-2.5">
           <AlertCircle size={14} className="text-brand-blue mt-0.5 shrink-0" />
           <p className="text-xs text-brand-blue/90 font-inter">
-            Generation runs in the background on Dhiway's side. If any selected record isn't fully verified, this may require organization approval before it can proceed.
+            Generation runs in the background on Dhiway's side. A holder who isn't fully verified can only be generated after the organization authorizes their approved verifications; the credential then carries only those.
           </p>
         </div>
 

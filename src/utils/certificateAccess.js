@@ -110,3 +110,59 @@ export const isCertificateAccessPage = (pathname = '') => /^\/certificate-access
 // When the visibility isn't known, the button stays and the server decides.
 export const canRequireHolderApproval = (credentialVisibility) =>
   !['public', 'open_search'].includes(String(credentialVisibility || '').toLowerCase());
+
+// ── Per-report access (handoff H, I) ────────────────────────────────────────────────────────
+
+// Holder page: reports the visitor asked for, as [{ report_id, label, status, requested_at, decided_at }].
+export const holderApprovalReports = (info) =>
+  (Array.isArray(info?.reports) ? info.reports : [])
+    .filter((r) => r && r.report_id)
+    .map((r) => ({ ...r, label: r.label || 'Verification report', status: String(r.status || 'requested').toLowerCase() }));
+
+export const REPORT_DECISION_META = {
+  requested: { label: 'Waiting for your decision', tone: 'bg-amber-100 text-amber-800' },
+  approved: { label: 'Approved', tone: 'bg-green-100 text-green-700' },
+  rejected: { label: 'Declined', tone: 'bg-gray-100 text-gray-600' },
+};
+
+export const undecidedReports = (reports) => (reports || []).filter((r) => r.status === 'requested');
+
+// Applies the server's answer to the list (POST .../approvals/{token}/reports returns {status, reports});
+// when it carries no list, the decided ids are updated locally so the page never shows stale buttons.
+export const applyReportDecisions = (reports, response, decisions) => {
+  const fromServer = holderApprovalReports({ reports: response?.reports });
+  if (fromServer.length) return fromServer;
+  const byId = Object.fromEntries((decisions || []).map((d) => [d.report_id, d.decision]));
+  return (reports || []).map((r) => (byId[r.report_id]
+    ? { ...r, status: byId[r.report_id] === 'approve' ? 'approved' : 'rejected', decided_at: new Date().toISOString() }
+    : r));
+};
+
+// Visitor page: reports the holder approved, [{ report_ref, view_path, label }] -> openable entries.
+// Only approved reports are ever listed (the API never returns the others).
+export const approvedReportsFrom = (data, apiBaseUrl = '') => {
+  const base = String(apiBaseUrl || '').replace(/\/$/, '');
+  return (Array.isArray(data?.approved_reports) ? data.approved_reports : [])
+    .filter((r) => r && typeof r.view_path === 'string' && r.view_path)
+    .map((r, i) => ({
+      key: r.report_ref || r.view_path,
+      label: r.label || `Report ${i + 1}`,
+      url: /^https?:\/\//i.test(r.view_path) ? r.view_path : `${base}${r.view_path.startsWith('/') ? '' : '/'}${r.view_path}`,
+    }));
+};
+
+// "Also ask for this holder's other reports" only makes sense for a third-party visitor (holder-approval
+// flow) whose grant is report-specific; organization and holder identities and grants approved before
+// per-report access (access_scope "holder") already cover everything, so it is not offered there.
+export const canAskForMoreReports = (nextStep, accessScope, status) =>
+  nextStep === 'holder_approval'
+  && accessScope !== 'holder' && accessScope !== 'report'
+  && ['pending_approval', 'approved'].includes(status);
+
+export const additionalReportsError = (status) => {
+  if (status === 404) return 'This request is no longer available. Start a new request.';
+  if (status === 409) return 'Additional reports are only requested through the holder approval flow.';
+  if (status === 429) return 'Too many attempts. Please wait a moment and try again.';
+  if (status === 503) return 'This service is temporarily unavailable. Please try again in a few minutes.';
+  return '';
+};

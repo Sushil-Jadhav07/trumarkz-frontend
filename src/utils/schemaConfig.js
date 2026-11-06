@@ -1,4 +1,5 @@
 import { discoverRecordFields } from './jsonRecord.js';
+import { dhiwaySchemaForPayload } from './partialSdc.js';
 
 // Constants for the dynamic organization-specific schema system
 // (org_schema_configs) — see "Dynamic Schema change.md" §G. Kept in sync
@@ -25,7 +26,8 @@ export const SCHEMA_SEMANTIC_FIELDS = {
 // calls .map()/spreads these as arrays on every render regardless of
 // whether the modal is open (they're JSX children, evaluated eagerly), so
 // starting them as `{}` here crashed the whole page on first mount.
-// Human configs are always the 5-QR layout; the legacy variant is no longer offered.
+// Every new Human batch is generated with the Human 5-QR layout; the backend ignores any schema_variant
+// for new batches, so it is no longer chosen or sent.
 export const HUMAN_SCHEMA_VARIANT = 'human_5qr';
 
 // The backend keeps the full nested schema record under this reserved custom_fields key.
@@ -40,7 +42,6 @@ export const visibleCustomFields = (customFields) => (
 
 export const emptySchemaConfigForm = (spaceType = 'human') => ({
   space_type: spaceType,
-  schema_variant: spaceType === 'human' ? HUMAN_SCHEMA_VARIANT : '',
   schema_id: '',
   space_id: '',
   label: '',
@@ -48,6 +49,10 @@ export const emptySchemaConfigForm = (spaceType = 'human') => ({
   input_map: [],
   output_map: [],
   is_default: false,
+  // The actual JSON of the Dhiway schema behind schema_id. `original` is what is stored, so an untouched
+  // box is omitted from the request (keeps it) and an emptied box clears it.
+  dhiway_schema_text: '',
+  dhiway_schema_original: '',
 });
 
 // local_fields as an array of rows (UI-friendly) <-> the LocalFieldDefinition objects the API expects.
@@ -162,7 +167,9 @@ export const schemaConfigJsonToForm = (text, currentForm, { lockSpaceType = fals
     }
   }
 
-  form.schema_variant = form.space_type === 'human' ? HUMAN_SCHEMA_VARIANT : '';
+  if (has('dhiway_schema')) {
+    form.dhiway_schema_text = source.dhiway_schema == null ? '' : (typeof source.dhiway_schema === 'string' ? source.dhiway_schema : JSON.stringify(source.dhiway_schema, null, 2));
+  }
   return errors.length ? { errors } : { form, sampleText };
 };
 
@@ -181,7 +188,8 @@ export const autoMatchedFields = (spaceType, discovery) => {
 // Pasting a configuration (or an API response) still works: an object made only of configuration
 // keys, carrying at least one mapping key, is read as configuration. Anything else is a sample record.
 const CONFIG_KEYS = new Set([
-  'config', 'space_type', 'schema_variant', 'schema_id', 'space_id', 'label', 'local_fields', 'input_map', 'output_map',
+  'config', 'space_type', 'schema_variant', 'schema_id', 'space_id', 'label', 'local_fields', 'input_map', 'output_map', 'dhiway_schema',
+  'dhiway_schema_properties', 'dhiway_schema_required', 'output_map_sources', 'warning_details', 'image_url', 'image_content_type', 'image_updated_at',
   'is_default', 'sample_record', 'id', 'org_id', 'version', 'is_active', 'previous_version_id', 'created_by',
   'created_by_role', 'created_at', 'updated_at', 'warnings',
 ]);
@@ -252,7 +260,9 @@ export const buildSchemaConfigPayload = (form, { withSampleRecord = false } = {}
     output_map: rowsToMap(form.output_map),
     is_default: !!form.is_default,
   };
-  if (form.space_type === 'human') payload.schema_variant = HUMAN_SCHEMA_VARIANT;
+  // dhiway_schema: omitted when untouched (keeps what is stored), null when emptied, the object when replaced.
+  const dhiway = dhiwaySchemaForPayload(form.dhiway_schema_text, form.dhiway_schema_original);
+  if (dhiway.send) payload.dhiway_schema = dhiway.value;
   // The server treats an absent local_fields as "keep the previous version's" and an explicit []
   // as "clear them". With a sample the fields come from it, so the key is left out entirely.
   if (withSampleRecord) delete payload.local_fields;
@@ -268,11 +278,16 @@ export const withSampleRecord = (bodyJson, sampleText) => {
   return bodyJson === '{}' ? `{"sample_record":${raw}}` : `${bodyJson.slice(0, -1)},"sample_record":${raw}}`;
 };
 
+const dhiwaySchemaText = (value) => {
+  if (value == null || value === '') return '';
+  if (typeof value === 'string') return value;
+  try { return JSON.stringify(value, null, 2); } catch { return ''; }
+};
+
 // A SchemaConfigResponse loaded into the form for "Save New Version". Everything the API returned
 // is carried over, so a new version never drops mappings the user didn't touch.
 export const configToForm = (config) => ({
   space_type: config.space_type,
-  schema_variant: config.space_type === 'human' ? HUMAN_SCHEMA_VARIANT : '',
   schema_id: config.schema_id || '',
   space_id: config.space_id || '',
   label: config.label || '',
@@ -280,6 +295,8 @@ export const configToForm = (config) => ({
   input_map: mapToRows(config.input_map),
   output_map: mapToRows(config.output_map),
   is_default: !!config.is_default,
+  dhiway_schema_text: dhiwaySchemaText(config.dhiway_schema),
+  dhiway_schema_original: dhiwaySchemaText(config.dhiway_schema),
 });
 
 // A record with no fields at all ({}) has nothing for the server to discover. Sending it would still

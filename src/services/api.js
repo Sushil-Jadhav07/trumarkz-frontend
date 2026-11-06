@@ -70,6 +70,8 @@ const getStoredToken = () =>
 const schemaConfigBody = (payload, sampleRecordText) => {
   const cleaned = cleanObject(payload);
   if (Array.isArray(payload.local_fields)) cleaned.local_fields = payload.local_fields;
+  // dhiway_schema: absent keeps the stored schema, null clears it, an object replaces it.
+  if ('dhiway_schema' in payload) cleaned.dhiway_schema = payload.dhiway_schema;
   return sampleRecordText
     ? [withSampleRecord(JSON.stringify(cleaned), sampleRecordText), { headers: { 'Content-Type': 'application/json' } }]
     : [cleaned];
@@ -382,6 +384,15 @@ export const authAPI = {
   // never patches in place. Same payload shape as create.
   createSchemaConfigVersion: (orgId, configId, payload, { sampleRecordText } = {}) =>
     api.post(`/auth/organizations/${orgId}/schema-configs/${configId}/versions`, ...schemaConfigBody(payload, sampleRecordText)),
+  // Schema image (SuperAdmin uploads; organization and SuperAdmin view). The image route needs the bearer
+  // token, so it is fetched as a blob and shown through an object URL.
+  uploadSchemaConfigImage: (orgId, configId, file) => {
+    const form = new FormData();
+    form.append('file', file);
+    return api.post(`/auth/organizations/${orgId}/schema-configs/${configId}/image`, form, { headers: { 'Content-Type': 'multipart/form-data' } });
+  },
+  getSchemaConfigImage: (orgId, configId) =>
+    api.get(`/auth/organizations/${orgId}/schema-configs/${configId}/image`, { responseType: 'blob' }),
   // POST .../set-default — no body; config_id is the path param.
   setSchemaConfigDefault: (orgId, configId) =>
     api.post(`/auth/organizations/${orgId}/schema-configs/${configId}/set-default`),
@@ -433,6 +444,8 @@ export const adminAPI = {
   createSchemaConfigVersion: authAPI.createSchemaConfigVersion,
   setSchemaConfigDefault: authAPI.setSchemaConfigDefault,
   deactivateSchemaConfig: authAPI.deactivateSchemaConfig,
+  uploadSchemaConfigImage: authAPI.uploadSchemaConfigImage,
+  getSchemaConfigImage: authAPI.getSchemaConfigImage,
   promoteSuperAdmin: authAPI.promoteSuperAdmin,
   createSuperAdmin: (payload) =>
     authAPI.createSuperAdmin(
@@ -780,6 +793,11 @@ export const verificationAPI = {
   // credential itself was removed.
   deleteBatch: (batchId) =>
     verificationApi.delete(`/verification/batches/${batchId}`),
+
+  // POST /verification/batches/bulk-delete — SuperAdmin, at most 50 batches. confirmation must be exactly
+  // "DELETE". Each batch is independent; processing batches come back as skipped_processing.
+  bulkDeleteBatches: (batchIds, confirmation) =>
+    verificationApi.post('/verification/batches/bulk-delete', { batch_ids: batchIds, confirmation }),
 
   // POST /verification/batches/{batch_id}/send-rejected-list — superadmin
   // only. Generates an Excel of every user with at least one rejected
@@ -1143,9 +1161,23 @@ export const sdcAPI = {
         space_id: payload.space_id?.trim(),
         schema_id: payload.schema_id?.trim(),
         user_ids: Array.isArray(payload.user_ids) ? payload.user_ids : undefined,
+        partial_authorization_ids: Array.isArray(payload.partial_authorization_ids) ? payload.partial_authorization_ids : undefined,
       })
     );
   },
+
+  // Partial SDC authorization. The organization saves which verified types a not-fully-verified holder
+  // may appear with; only a SuperAdmin generates (generate/issue return 403 for organizations).
+  createPartialAuthorizations: (batchId, holders) =>
+    verificationApi.post(`/sdc/batches/${batchId}/partial-authorizations`, { holders }),
+  getBatchPartialAuthorizations: (batchId, params = {}) =>
+    verificationApi.get(`/sdc/batches/${batchId}/partial-authorizations`, { params: cleanObject({ status: params.status, batch_user_id: params.batchUserId }) }),
+  getPartialAuthorizations: (params = {}) =>
+    verificationApi.get('/sdc/partial-authorizations', { params: cleanObject({ status: params.status, org_id: params.orgId, batch_id: params.batchId }) }),
+  getPartialAuthorization: (authorizationId) =>
+    verificationApi.get(`/sdc/partial-authorizations/${authorizationId}`),
+  cancelPartialAuthorization: (authorizationId) =>
+    verificationApi.post(`/sdc/partial-authorizations/${authorizationId}/cancel`),
 
   // GET /sdc/batches/{batch_id}/approvals — full history (pending, approved,
   // rejected), newest first. Org restricted to its own batches; super admin
@@ -1376,6 +1408,10 @@ export const certificateAccessAPI = {
     publicVerificationApi.post(`/verification/certificate-access/requests/${encodeURIComponent(requestId)}/holder-auth`, { dob, phone_number }, {
       headers: { 'X-Certificate-Access-Token': accessToken },
     }),
+  requestAdditionalReports: (requestId, accessToken) =>
+    publicVerificationApi.post(`/verification/certificate-access/requests/${encodeURIComponent(requestId)}/additional-reports`, null, {
+      headers: { 'X-Certificate-Access-Token': accessToken },
+    }),
   getRequestStatus: (requestId, accessToken) =>
     publicVerificationApi.get(`/verification/certificate-access/requests/${encodeURIComponent(requestId)}/status`, {
       headers: { 'X-Certificate-Access-Token': accessToken },
@@ -1384,6 +1420,8 @@ export const certificateAccessAPI = {
   // Holder (§4e).
   getApproval: (token) =>
     publicVerificationApi.get(`/verification/certificate-access/approvals/${encodeURIComponent(token)}`),
+  decideReports: (token, body) =>
+    publicVerificationApi.post(`/verification/certificate-access/approvals/${encodeURIComponent(token)}/reports`, body),
   decideApproval: (token, body) =>
     publicVerificationApi.post(`/verification/certificate-access/approvals/${encodeURIComponent(token)}`, body),
 };
