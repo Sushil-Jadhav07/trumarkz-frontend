@@ -964,6 +964,12 @@ export const BatchControlCenter = () => {
                     {sdcCertsLoading ? 'Refreshing…' : 'Refresh Certificates'}
                   </Button>
                 )}
+                {(batchDetail?.users || []).some((r) => Object.keys(r.verification_type_status || {}).some((n) => canSendToVerifier(r, n))) && (
+                  <Button variant="primary" size="sm" icon={Mail} className="!px-2 text-xs text-center leading-tight"
+                    onClick={() => setSendToVerifier({})}>
+                    Send to Verifier
+                  </Button>
+                )}
               </div>
               <ShareResultNote className="mt-3" result={shareResults[selectedBatch.id]} retrying={sendingToOrg} onRetry={() => handleSendToOrganization(selectedBatch)} />
               <div className="mt-3 flex items-start gap-2 rounded-xl border border-blue-100 bg-blue-50/60 px-3 py-2.5">
@@ -1186,16 +1192,6 @@ export const BatchControlCenter = () => {
                                           {name}
                                         </button>
                                         <p className={`text-[11px] font-semibold font-inter ${textTone}`}>{label}</p>
-                                        {canSendToVerifier(record, name) && (
-                                          <button
-                                            type="button"
-                                            onClick={() => setSendToVerifier({ record, typeName: name })}
-                                            aria-label={`Send ${name} to a verifier for ${recordTitle(record)}`}
-                                            className="mt-0.5 inline-flex items-center gap-1 text-[10px] font-semibold text-brand-blue font-inter hover:underline"
-                                          >
-                                            <Mail size={10} /> Send to Verifier
-                                          </button>
-                                        )}
                                       </div>
                                     </div>
                                   );
@@ -1405,8 +1401,7 @@ export const BatchControlCenter = () => {
         isOpen={!!sendToVerifier}
         onClose={() => setSendToVerifier(null)}
         batchId={batchId}
-        record={sendToVerifier?.record}
-        typeName={sendToVerifier?.typeName}
+        records={batchDetail?.users || []}
         onDone={() => refreshAfterVerifierAction()}
       />
 

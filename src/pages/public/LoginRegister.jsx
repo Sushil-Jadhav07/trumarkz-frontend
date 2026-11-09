@@ -9,7 +9,7 @@ import { HeroPanel, AuthField } from '@/components/auth/AuthShell';
 import { Input } from '@/components/ui/Input';
 import {
   Mail, Lock, Building2, User, ArrowRight, CheckCircle, Check,
-  AlertCircle, Eye, EyeOff, Layers, ArrowLeft,
+  AlertCircle, Eye, EyeOff, Layers, ArrowLeft, ShieldCheck, UserPlus,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -220,8 +220,15 @@ export const LoginRegister = () => {
               className="w-full max-w-[460px] rounded-2xl border border-[#e6ecf5] bg-white px-6 pb-5 pt-5 shadow-[0_18px_50px_-26px_rgba(20,60,140,0.28)] sm:px-8"
             >
               <div className="mb-4 text-center">
-                <span className="mx-auto mb-2 flex h-[52px] w-[52px] items-center justify-center rounded-2xl bg-[#e9f1fe]">
-                  <Lock size={24} strokeWidth={1.6} className="text-brand-blue" />
+                <span aria-hidden="true" className="relative mx-auto mb-3 flex h-[68px] w-[68px] items-center justify-center rounded-full bg-[#e9f1fe] ring-8 ring-[#f3f7ff]">
+                  <span className="flex h-[48px] w-[48px] items-center justify-center rounded-[16px] bg-brand-blue shadow-[0_10px_22px_-8px_rgba(37,99,235,0.7)] rotate-[-6deg]">
+                    {tab === 'login'
+                      ? <ShieldCheck size={26} strokeWidth={1.8} className="text-white rotate-[6deg]" />
+                      : <UserPlus size={25} strokeWidth={1.8} className="text-white rotate-[6deg]" />}
+                  </span>
+                  <span className="absolute -right-0.5 top-1 flex h-[22px] w-[22px] items-center justify-center rounded-full bg-emerald-500 ring-2 ring-white">
+                    <Check size={13} strokeWidth={3} className="text-white" />
+                  </span>
                 </span>
                 <h2 className="font-inter text-[22px] font-semibold leading-tight tracking-[-0.01em] text-brand-dark">
                   {tab === 'login' ? 'Sign in to TruMarkZ' : 'Create your account'}

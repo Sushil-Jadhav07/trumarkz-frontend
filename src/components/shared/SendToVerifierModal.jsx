@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Info, RefreshCw, Send, User } from 'lucide-react';
+import { Info, RefreshCw, Send } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { CustomSelect } from '@/components/ui/CustomSelect';
@@ -11,12 +11,22 @@ const label = (s) => String(s || '').replace(/_/g, ' ').replace(/\b\w/g, (c) => 
 const defaultSubject = (typeName) => `Verification Request: ${label(typeName)}`;
 const defaultBody = (typeName) =>
   `Hi,\n\nPlease find the attached Excel file with the candidates assigned to you for ${label(typeName)}.\n\nComplete the verification and upload your report using the secure link provided.\n\nRegards,\nTruMarkZ Admin`;
+const nameOf = (r) => r?.full_name || r?.product_name || r?.email || batchUserIdOf(r);
 
-// Individual "Send to Verifier" for ONE user and ONE verification type, through the existing Smart Send
-// endpoint with user_ids = [that user]. Nobody else on the batch is included.
-export const SendToVerifierModal = ({ isOpen, onClose, batchId, record, typeName, onDone }) => {
-  const userId = batchUserIdOf(record);
-  const userName = record?.full_name || record?.product_name || record?.email || userId;
+// Batch Actions → Send to Verifier: pick ONE verification type, then the users whose check for that type is
+// still pending (all are selected by default), then a verifier. One Smart Send call carries exactly the
+// selected users' ids. Users whose check is approved (or rejected) are never listed or sent.
+export const SendToVerifierModal = ({ isOpen, onClose, batchId, records = [], onDone }) => {
+  const types = useMemo(() => {
+    const seen = [];
+    records.forEach((r) => Object.keys(r?.verification_type_status || {}).forEach((name) => {
+      if (canSendToVerifier(r, name) && !seen.includes(name)) seen.push(name);
+    }));
+    return seen;
+  }, [records]);
+
+  const [typeName, setTypeName] = useState('');
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
   const [verifiers, setVerifiers] = useState([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState('');
@@ -25,10 +35,24 @@ export const SendToVerifierModal = ({ isOpen, onClose, batchId, record, typeName
   const [error, setError] = useState('');
   const [summary, setSummary] = useState(null);
 
+  const usersForType = useMemo(() => (typeName ? records.filter((r) => canSendToVerifier(r, typeName)) : []), [records, typeName]);
+
+  // Opening (or the type changing) starts from "everyone still pending for this type".
   useEffect(() => {
-    if (!isOpen || !typeName) return undefined;
+    if (!isOpen) return;
+    setTypeName(types.length === 1 ? types[0] : '');
+    setVerifierId(''); setError(''); setSummary(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen]);
+  useEffect(() => {
+    setSelectedIds(new Set(usersForType.map((r) => String(batchUserIdOf(r)))));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [typeName]);
+
+  useEffect(() => {
+    if (!isOpen || !typeName) { setVerifiers([]); setLoading(false); return undefined; }
     let active = true;
-    setVerifiers([]); setVerifierId(''); setError(''); setSummary(null); setLoadError(''); setLoading(true);
+    setVerifiers([]); setVerifierId(''); setLoadError(''); setLoading(true);
     verifiersAPI.getByType(typeName)
       .then(({ data }) => { if (active) setVerifiers((Array.isArray(data?.verifiers) ? data.verifiers : (Array.isArray(data) ? data : [])).filter((v) => v?.id)); })
       .catch((err) => { if (active) setLoadError(getApiError(err, 'Could not load verifiers for this verification type')); })
@@ -37,18 +61,21 @@ export const SendToVerifierModal = ({ isOpen, onClose, batchId, record, typeName
   }, [isOpen, typeName]);
 
   const selected = useMemo(() => verifiers.find((v) => v.id === verifierId) || null, [verifiers, verifierId]);
-  const eligible = canSendToVerifier(record, typeName);
+  const toggle = (id) => setSelectedIds((prev) => { const next = new Set(prev); if (next.has(id)) next.delete(id); else next.add(id); return next; });
+  const allSelected = usersForType.length > 0 && usersForType.every((r) => selectedIds.has(String(batchUserIdOf(r))));
+  const chosenCount = usersForType.filter((r) => selectedIds.has(String(batchUserIdOf(r)))).length;
 
   const send = async () => {
-    if (!selected || sending || !userId) return;
+    if (!selected || sending || chosenCount === 0) return;
     setSending(true);
     setError('');
     try {
-      // Re-check on the server's latest data: this exact check must still be unapproved.
+      // Re-check on the server's latest data: only users whose check for this type is STILL pending go.
       const { data: latest } = await verificationAPI.getBatchDetails(batchId);
-      const fresh = (Array.isArray(latest?.users) ? latest.users : []).find((u) => String(batchUserIdOf(u)) === String(userId));
-      if (!fresh || !canSendToVerifier(fresh, typeName)) {
-        setError(`${label(typeName)} is no longer pending for ${userName}. Nothing was sent.`);
+      const stillPending = new Set((Array.isArray(latest?.users) ? latest.users : []).filter((u) => canSendToVerifier(u, typeName)).map((u) => String(batchUserIdOf(u))));
+      const userIds = usersForType.map((r) => String(batchUserIdOf(r))).filter((id) => selectedIds.has(id) && stillPending.has(id));
+      if (userIds.length === 0) {
+        setError(`${label(typeName)} is no longer pending for the selected users. Nothing was sent.`);
         onDone?.({ refreshOnly: true });
         return;
       }
@@ -56,7 +83,7 @@ export const SendToVerifierModal = ({ isOpen, onClose, batchId, record, typeName
         batch_id: batchId,
         verification_assignments: [{
           verification_type_name: typeName,
-          verifiers: [{ verifier_id: selected.id, email_subject: defaultSubject(typeName), email_body: defaultBody(typeName), user_ids: [userId] }],
+          verifiers: [{ verifier_id: selected.id, email_subject: defaultSubject(typeName), email_body: defaultBody(typeName), user_ids: userIds }],
         }],
       });
       const result = summarizeSmartSend(data);
@@ -70,41 +97,75 @@ export const SendToVerifierModal = ({ isOpen, onClose, batchId, record, typeName
     }
   };
 
+  const recordsById = Object.fromEntries(records.map((r) => [String(batchUserIdOf(r)), nameOf(r)]));
+
   return (
     <Modal isOpen={isOpen} onClose={() => !sending && onClose()} title="Send to Verifier" size="lg">
       <div className="space-y-4">
         <div className="flex items-start gap-2 rounded-xl border border-blue-100 bg-blue-50/60 px-3 py-2.5">
           <Info size={14} className="mt-0.5 shrink-0 text-brand-blue" />
           <p className="text-xs leading-relaxed text-blue-800 font-inter">
-            This assignment is for <strong>this individual user only</strong>. Other users in the batch are not included or re-assigned.
+            Sent to the users you tick below for the chosen verification — every user whose check is still <strong>pending</strong> is ticked by default. Users who already completed it are never included.
           </p>
         </div>
 
-        <dl className="grid grid-cols-1 gap-3 rounded-xl border border-gray-100 px-4 py-3 sm:grid-cols-2">
-          <div className="min-w-0">
-            <dt className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 font-inter">User</dt>
-            <dd className="mt-0.5 flex items-center gap-1.5 truncate text-sm font-semibold text-brand-dark font-inter"><User size={13} className="shrink-0 text-gray-400" /> {userName}</dd>
-            {record?.email && <dd className="truncate text-xs text-gray-500 font-inter">{record.email}</dd>}
-          </div>
-          <div className="min-w-0">
-            <dt className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 font-inter">Verification type</dt>
-            <dd className="mt-0.5 truncate text-sm font-semibold text-brand-dark font-inter" title={typeName}>{typeName}</dd>
-          </div>
-        </dl>
-
         {summary ? (
           <>
-            <SmartSendResult summary={summary} recordsById={{ [userId]: userName }} onResent={() => onDone?.({ resent: true })} />
+            <SmartSendResult summary={summary} recordsById={recordsById} />
             <Modal.Footer><Button onClick={onClose} className="w-full">Done</Button></Modal.Footer>
           </>
+        ) : types.length === 0 ? (
+          <p className="rounded-xl border border-gray-100 bg-gray-50 px-3 py-3 text-sm text-gray-500 font-inter">No pending verification is waiting for a verifier in this batch.</p>
         ) : (
           <>
-            {!eligible && (
-              <p role="alert" className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 font-inter">This verification is already approved for this user, so it cannot be sent to a verifier.</p>
+            <div>
+              <label className="mb-1.5 block text-xs font-medium text-gray-500 font-inter">Verification type</label>
+              <CustomSelect
+                className="w-full"
+                value={typeName}
+                onChange={setTypeName}
+                placeholder="Select a verification"
+                ariaLabel="Verification type"
+                options={types.map((name) => ({ value: name, label: name }))}
+              />
+            </div>
+
+            {typeName && (
+              <div>
+                <div className="mb-1.5 flex items-center justify-between">
+                  <p className="text-xs font-medium text-gray-500 font-inter">Pending users ({chosenCount} of {usersForType.length} selected)</p>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedIds(allSelected ? new Set() : new Set(usersForType.map((r) => String(batchUserIdOf(r)))))}
+                    className="text-xs font-semibold text-brand-blue hover:underline font-inter"
+                  >
+                    {allSelected ? 'Clear all' : 'Select all'}
+                  </button>
+                </div>
+                <ul className="max-h-48 divide-y divide-gray-100 overflow-y-auto rounded-xl border border-gray-100">
+                  {usersForType.map((r) => {
+                    const id = String(batchUserIdOf(r));
+                    return (
+                      <li key={id}>
+                        <label className="flex cursor-pointer items-center gap-3 px-3 py-2 hover:bg-gray-50">
+                          <input type="checkbox" checked={selectedIds.has(id)} onChange={() => toggle(id)} className="accent-brand-blue" />
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-sm font-medium text-brand-dark font-inter">{nameOf(r)}{r.batch_serial ? ` (${r.batch_serial})` : ''}</span>
+                            {r.email && <span className="block truncate text-xs text-gray-500 font-inter">{r.email}</span>}
+                          </span>
+                        </label>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
             )}
+
             <div>
               <label className="mb-1.5 block text-xs font-medium text-gray-500 font-inter">Verifier</label>
-              {loading ? (
+              {!typeName ? (
+                <p className="text-xs text-gray-400 font-inter">Choose the verification type first.</p>
+              ) : loading ? (
                 <p className="text-xs text-gray-400 font-inter">Loading verifiers…</p>
               ) : loadError ? (
                 <p role="alert" className="text-xs text-red-600 font-inter">{loadError}</p>
@@ -128,8 +189,8 @@ export const SendToVerifierModal = ({ isOpen, onClose, batchId, record, typeName
 
             <Modal.Footer className="flex justify-end gap-2">
               <Button variant="ghost" onClick={onClose} disabled={sending}>Cancel</Button>
-              <Button variant="primary" icon={sending ? RefreshCw : Send} loading={sending} disabled={!selected || !eligible || sending} onClick={send}>
-                Send to Verifier
+              <Button variant="primary" icon={sending ? RefreshCw : Send} loading={sending} disabled={!selected || chosenCount === 0 || sending} onClick={send}>
+                Send to Verifier{chosenCount > 1 ? ` (${chosenCount} users)` : ''}
               </Button>
             </Modal.Footer>
           </>

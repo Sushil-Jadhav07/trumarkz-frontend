@@ -14,11 +14,11 @@ test('Send to Verifier is offered per verification type, not per overall status'
   assert.equal(canSendToVerifier(amaan, 'Passport Verification'), false, 'a type the user does not have');
 });
 
-test('pending, awaiting-upload and rejected checks are eligible; automatic checks are not', () => {
+test('only pending / awaiting-upload checks are eligible; rejected, approved and automatic checks are not', () => {
   const user = { verification_type_status: {
     A: { status: 'rejected' }, B: { status: 'awaiting_upload' }, C: 'pending', D: { status: 'pending', label: 'automatic' }, E: { status: 'verified' },
   } };
-  assert.deepEqual(['A', 'B', 'C', 'D', 'E'].map((t) => canSendToVerifier(user, t)), [true, true, true, false, false]);
+  assert.deepEqual(['A', 'B', 'C', 'D', 'E'].map((t) => canSendToVerifier(user, t)), [false, true, true, false, false]);
   assert.equal(checkStatusOf(user, 'a'), 'rejected', 'type names compare loosely');
   assert.equal(checkStatusOf(user, 'zzz'), null);
 });

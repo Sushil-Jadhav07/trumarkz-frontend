@@ -5,6 +5,7 @@
 // additive and optional, so each one is read defensively and none is invented.
 
 const DONE_STATUSES = new Set(['approved', 'verified', 'completed', 'verification_completed']);
+const REJECTED_STATUSES = new Set(['rejected', 'failed']);
 const norm = (value) => String(value || '').trim().toLowerCase();
 const typeKey = (value) => norm(value).replace(/[\s_-]+/g, '_');
 
@@ -15,14 +16,16 @@ export const checkStatusOf = (record, typeName) => {
   return norm(typeof value === 'string' ? value : value?.status) || 'pending';
 };
 
-// A per-user, per-type "Send to Verifier" is offered when THIS check exists, is a manual one, and is not yet
-// approved (pending / awaiting upload / rejected …). The user's overall status is never consulted.
+// "Send to Verifier" is offered only while THIS check is still pending (pending / awaiting upload …): it exists,
+// is a manual one, and is neither approved nor rejected (rejected checks go through "Resend Rejected").
+// The user's overall status is never consulted.
 export const canSendToVerifier = (record, typeName) => {
   const entry = Object.entries(record?.verification_type_status || {}).find(([name]) => typeKey(name) === typeKey(typeName));
   if (!entry) return false;
   const value = entry[1];
   if (value && typeof value === 'object' && norm(value.label) === 'automatic') return false;
-  return !DONE_STATUSES.has(checkStatusOf(record, typeName));
+  const status = checkStatusOf(record, typeName);
+  return !DONE_STATUSES.has(status) && !REJECTED_STATUSES.has(status);
 };
 
 export const batchUserIdOf = (record) => record?.id || record?.user_id || record?.entity_id || '';

@@ -106,7 +106,7 @@ export const Sidebar = ({ collapsed, onToggle, mobileOpen = false, onMobileClose
         </button>
       </div>
 
-      <nav ref={navRef} className={clsx('relative flex-1 px-3 overflow-y-auto', hasSections ? 'py-3' : 'py-4 space-y-1')}>
+      <nav ref={navRef} className={clsx('relative flex-1 px-3 overflow-y-auto scrollbar-hidden', hasSections ? 'py-3' : 'py-4 space-y-1')}>
         {navItems.map((item, index) => {
           if (item.section) {
             if (isCompact) {
