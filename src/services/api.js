@@ -70,8 +70,8 @@ const getStoredToken = () =>
 const schemaConfigBody = (payload, sampleRecordText) => {
   const cleaned = cleanObject(payload);
   if (Array.isArray(payload.local_fields)) cleaned.local_fields = payload.local_fields;
-  // dhiway_schema: absent keeps the stored schema, null clears it, an object replaces it.
-  if ('dhiway_schema' in payload) cleaned.dhiway_schema = payload.dhiway_schema;
+  // dhiway_schema: absent keeps the stored schema, an object replaces it; clear_dhiway_schema: true removes it.
+  if (payload.dhiway_schema && typeof payload.dhiway_schema === 'object') cleaned.dhiway_schema = payload.dhiway_schema;
   return sampleRecordText
     ? [withSampleRecord(JSON.stringify(cleaned), sampleRecordText), { headers: { 'Content-Type': 'application/json' } }]
     : [cleaned];
@@ -374,10 +374,10 @@ export const authAPI = {
     api.get(`/auth/organizations/${orgId}/schema-configs`, {
       params: cleanObject({ space_type: spaceType, active_only: activeOnly }),
     }),
-  // POST — registers version 1. payload: { space_type, schema_variant?,
-  // schema_id, space_id, label, local_fields?, input_map?, output_map?,
-  // is_default? }, plus the optional pasted sample_record (sent verbatim, see
-  // withSampleRecord). Returns { config, warnings }.
+  // POST — registers an existing Dhiway schema (version 1). payload: { space_type,
+  // schema_id, space_id, label, local_fields?, input_map?, output_map?, dhiway_schema?,
+  // clear_dhiway_schema? }, plus the optional pasted sample_record (sent verbatim, see
+  // withSampleRecord). No is_default: Dhiway Spaces owns the default. Returns { config, warnings }.
   createSchemaConfig: (orgId, payload, { sampleRecordText } = {}) =>
     api.post(`/auth/organizations/${orgId}/schema-configs`, ...schemaConfigBody(payload, sampleRecordText)),
   // POST .../versions — full-replace edit; always creates the next version,
@@ -393,13 +393,15 @@ export const authAPI = {
   },
   getSchemaConfigImage: (orgId, configId) =>
     api.get(`/auth/organizations/${orgId}/schema-configs/${configId}/image`, { responseType: 'blob' }),
-  // POST .../set-default — no body; config_id is the path param.
-  setSchemaConfigDefault: (orgId, configId) =>
-    api.post(`/auth/organizations/${orgId}/schema-configs/${configId}/set-default`),
+  // No set-default call here: Dhiway Spaces is the only place a default is chosen (the old route answers 410).
   // POST .../deactivate — no body. Never deletes; a batch that already
   // froze this config's content stays reproducible forever.
   deactivateSchemaConfig: (orgId, configId) =>
     api.post(`/auth/organizations/${orgId}/schema-configs/${configId}/deactivate`),
+  // POST .../restore — no body. Creates a NEW active version (previous + 1) from an inactive, newest row;
+  // the old row stays inactive. 403 / 404 / 409 as described by the backend.
+  restoreSchemaConfig: (orgId, configId) =>
+    api.post(`/auth/organizations/${orgId}/schema-configs/${configId}/restore`),
 
   // PATCH /auth/superadmins/{user_id} — superadmin-only. Updates an existing
   // superadmin's own details (full_name, phone_number, email, password,
@@ -442,8 +444,8 @@ export const adminAPI = {
   getSchemaConfigs: authAPI.getSchemaConfigs,
   createSchemaConfig: authAPI.createSchemaConfig,
   createSchemaConfigVersion: authAPI.createSchemaConfigVersion,
-  setSchemaConfigDefault: authAPI.setSchemaConfigDefault,
   deactivateSchemaConfig: authAPI.deactivateSchemaConfig,
+  restoreSchemaConfig: authAPI.restoreSchemaConfig,
   uploadSchemaConfigImage: authAPI.uploadSchemaConfigImage,
   getSchemaConfigImage: authAPI.getSchemaConfigImage,
   promoteSuperAdmin: authAPI.promoteSuperAdmin,

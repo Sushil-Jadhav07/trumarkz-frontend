@@ -100,7 +100,7 @@ test('the Dhiway schema box accepts a schema, a wrapped schema and refuses the r
 test('dhiway_schema is omitted when unchanged, null when cleared, an object when replaced', () => {
   const stored = '{"properties":{"a":{}}}';
   assert.deepEqual(dhiwaySchemaForPayload(stored, stored), { send: false });
-  assert.deepEqual(dhiwaySchemaForPayload('', stored), { send: true, value: null });
+  assert.deepEqual(dhiwaySchemaForPayload('', stored), { send: false }, 'a blank box keeps the stored schema');
   assert.deepEqual(dhiwaySchemaForPayload('{"properties":{"b":{}}}', stored), { send: true, value: { properties: { b: {} } } });
   assert.equal(dhiwaySchemaForPayload('{oops', '').error.startsWith('Not valid JSON'), true);
   assert.deepEqual(dhiwaySchemaForPayload('', ''), { send: false });

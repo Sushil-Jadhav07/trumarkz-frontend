@@ -13,6 +13,7 @@ import { ProgressBar } from '@/components/ui/ProgressBar';
 import { authAPI, verificationAPI, sdcAPI, adminAPI, getApiError } from '@/services/api';
 import { authorizationIsStale, describeGenerateError, groupSchemaWarnings } from '@/utils/partialSdc';
 import { normalizeDhiwayDetails, resolveDhiwaySpaceId, batchSdcSpaceId } from '@/utils/dhiway';
+import { normalizeCertificatesByUser, certificateEntriesByUser, certificateEntryFor, certificateDisplay } from '@/utils/sdcCertificates';
 import {
   Search, ShieldCheck, Users, ChevronRight, CheckCircle, Clock, XCircle,
   ArrowLeft, FileText, QrCode, Eye, ChevronDown, Sparkles, RefreshCw, AlertCircle, Building2,
@@ -1167,8 +1168,8 @@ const BatchDetail = ({ batchSummary, onBack }) => {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [selectedRecord, setSelectedRecord] = useState(null);
-  const [sdcRecordsByEmail, setSdcRecordsByEmail] = useState({});
-  const [sdcRecordsByName, setSdcRecordsByName] = useState({});
+  const [certEntriesByUser, setCertEntriesByUser] = useState({}); // { batch_user_id: certificate entry } from certificates_by_user
+  const [certsKnown, setCertsKnown] = useState(true); // false when the backend did not send certificates_by_user
   const [certsLoading, setCertsLoading] = useState(false);
   const [pdfLoadingId, setPdfLoadingId] = useState(null);
   const instanceKey = 'de';
@@ -1183,64 +1184,41 @@ const BatchDetail = ({ batchSummary, onBack }) => {
 
   useEffect(() => { loadBatch(); }, [loadBatch]);
 
-  // Dhiway records are matched to batch users "by email or name" per the
-  // backend docs — email alone isn't enough (test/dummy records often have
-  // empty or non-matching email fields), so also index by title as a fallback.
+  // Individual certificate ownership comes ONLY from GET /sdc/batches/{id}/status → certificates_by_user
+  // (exact batch_user_id → confirmed public id) — never matched by email, name or list position, and a
+  // batch-level "generated" status does not make anyone Ready. Dhiway's record list only decorates a
+  // confirmed public id (looked up by public id).
   const refreshCertificates = useCallback(async (silent = false) => {
     setCertsLoading(true);
     try {
-      // org_id/space_id come straight from THIS batch's own recorded
-      // verification_progress.sdc — that's exactly what was used to generate
-      // its certificates, and is more reliable than the org's *current*
-      // profile setting (space_id from fetchOrgSpaceMap is only a fallback
-      // for older batches that predate this field being recorded).
-      // Paginate through the whole record list — a single page silently hides
-      // any certificate that falls outside the first 100 once an org
-      // accumulates more than that many issued records.
       const orgId   = batchSummary.sdcInfo?.org_id || undefined;
       const spaceId = batchSummary.sdcSpaceId || batchSdcSpaceId(batchSummary.sdcInfo, batchSummary.spaceId) || undefined;
-      // GET /sdc/batches/{batch_id}/status's certificate_ids is the backend's
-      // own authoritative "issued for this batch" set — confirmed backend-
-      // side that these ids can be present before anchorTime is populated
-      // (anchoring is async on Dhiway's end). anchorTime alone was
-      // mislabeling genuinely-issued certs as still-draft.
-      const certIds = await sdcAPI.getBatchStatus(batchSummary.id)
-        .then(({ data }) => new Set(Array.isArray(data?.certificate_ids) ? data.certificate_ids : []))
-        .catch(() => new Set());
-      const allRecords = [];
-      let page = 1;
-      let hasMore = true;
-      while (hasMore) {
-        const { data } = await sdcAPI.getRecords({ active: 1, page, pageSize: 100, org_id: orgId, space_id: spaceId });
-        const pageRecords = Array.isArray(data?.records) ? data.records : [];
-        allRecords.push(...pageRecords);
-        const totalPages = Number(data?.totalPages || data?.total_pages || 0);
-        hasMore = totalPages > 0 ? page < totalPages : pageRecords.length === 100;
-        page += 1;
+      const statusData = await sdcAPI.getBatchStatus(batchSummary.id).then(({ data }) => data).catch(() => null);
+      const { known, byUser } = normalizeCertificatesByUser(statusData);
+      setCertsKnown(known);
+      const confirmedIds = new Set(Object.values(byUser));
+      const metaByPublicId = {};
+      if (confirmedIds.size > 0) {
+        try {
+          let page = 1;
+          let hasMore = true;
+          while (hasMore) {
+            const { data } = await sdcAPI.getRecords({ active: 1, page, pageSize: 100, org_id: orgId, space_id: spaceId });
+            const pageRecords = Array.isArray(data?.records) ? data.records : [];
+            pageRecords.forEach((r) => { if (r?.publicId && confirmedIds.has(r.publicId)) metaByPublicId[r.publicId] = r; });
+            const totalPages = Number(data?.totalPages || data?.total_pages || 0);
+            hasMore = totalPages > 0 ? page < totalPages : pageRecords.length === 100;
+            page += 1;
+          }
+        } catch {
+          // metadata is optional — the confirmed mapping alone is enough to show Ready and to download
+        }
       }
-      const map = {};
-      const byName = {};
-      allRecords.forEach((r) => {
-        // Issued if either signal says so: anchored, or already present in
-        // this batch's own confirmed certificate_ids.
-        const issued = !r.revoked && (!!r.anchorTime || certIds.has(r.publicId));
-        const entry = {
-          id: r.id, publicId: r.publicId, updatedAt: r.updatedAt, title: r.title,
-          anchorTime: r.anchorTime || null, revoked: !!r.revoked, issued,
-          active: !!r.active, latest: !!r.latest, edited: !!r.edited,
-          createdAt: r.createdAt || null,
-          recipients: Array.isArray(r.recipients) ? r.recipients : [],
-        };
-        (r.recipients || []).forEach((email) => {
-          if (email) map[email.toLowerCase()] = entry;
-        });
-        if (r.title?.trim()) byName[r.title.trim().toLowerCase()] = entry;
-      });
-      setSdcRecordsByEmail(map);
-      setSdcRecordsByName(byName);
-      const issuedCount = Object.values(map).filter((m) => m.issued).length;
+      const entries = certificateEntriesByUser(byUser, metaByPublicId);
+      setCertEntriesByUser(entries);
+      const issuedCount = Object.values(entries).filter((entry) => entry.issued).length;
       if (!silent) {
-        toast.success(`Loaded ${allRecords.length} certificate${allRecords.length === 1 ? '' : 's'}`);
+        toast.success(known ? `${issuedCount} certificate${issuedCount === 1 ? '' : 's'} confirmed for this batch` : 'Certificate ownership is not available from this backend yet');
       }
       return issuedCount;
     } catch (err) {
@@ -1251,12 +1229,7 @@ const BatchDetail = ({ batchSummary, onBack }) => {
     }
   }, [batchSummary.id, batchSummary.spaceId, batchSummary.sdcInfo]);
 
-  const matchSdcRecord = useCallback((record) => {
-    const byEmail = record?.email ? sdcRecordsByEmail[record.email.toLowerCase()] : null;
-    if (byEmail) return byEmail;
-    const title = recordTitle(record)?.trim().toLowerCase();
-    return title ? sdcRecordsByName[title] || null : null;
-  }, [sdcRecordsByEmail, sdcRecordsByName]);
+  const matchSdcRecord = useCallback((record) => certificateEntryFor(certEntriesByUser, record), [certEntriesByUser]);
 
   // Auto-pull certificate links once, as soon as we know this batch has SDCs
   // generated — otherwise the Certificate column stays blank until the admin
@@ -1352,7 +1325,7 @@ const BatchDetail = ({ batchSummary, onBack }) => {
                     <td className="px-4 py-3 text-xs text-gray-500 font-inter max-w-[240px] truncate">{record.email || recordId}</td>
                     <td className="px-4 py-3"><Badge status={variant}>{label}</Badge></td>
                     <td className="px-4 py-3">
-                      {match?.issued ? (
+                      {certificateDisplay(match, certsKnown).canDownload ? (
                         <div className="flex items-center gap-2">
                           <Badge status="info">Ready</Badge>
                           <Button
@@ -1373,10 +1346,8 @@ const BatchDetail = ({ batchSummary, onBack }) => {
                             <FileText size={12} /> PDF
                           </Button>
                         </div>
-                      ) : match ? (
-                        <Badge status="pending">Draft</Badge>
                       ) : (
-                        <span className="text-xs text-gray-300 font-inter">-</span>
+                        <Badge status={certificateDisplay(match, certsKnown).badge}>{certificateDisplay(match, certsKnown).label}</Badge>
                       )}
                     </td>
                     <td className="px-4 py-3">

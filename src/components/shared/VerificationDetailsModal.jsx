@@ -103,13 +103,15 @@ const TypeRow = ({ name, info, verifierEmail }) => {
   );
 };
 
-// certificate (optional, admin-only today): { status: 'ready'|'draft'|'not_generated', label, canView, canDownload, downloading }
+// certificate (optional, admin-only today): { status: 'ready'|'revoked'|'not_issued'|'unavailable', label, canView, canDownload, downloading }
 const getCertificateMeta = (certificate) => (
   certificate?.status === 'ready'
     ? { badge: 'info', label: certificate.label || 'Ready' }
+    : certificate?.status === 'revoked'
+      ? { badge: 'error', label: certificate.label || 'Revoked' }
     : certificate?.status === 'draft'
       ? { badge: 'pending', label: certificate.label || 'Draft' }
-      : { badge: 'default', label: certificate?.label || 'Not Generated' }
+      : { badge: 'default', label: certificate?.label || 'Not Issued' }
 );
 
 // One verification check for ONE record — driven entirely by the exact

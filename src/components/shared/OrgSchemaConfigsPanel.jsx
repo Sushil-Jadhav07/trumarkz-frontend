@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Plus, Trash2, Star, RefreshCw, Lock, Pencil, EyeOff, ChevronDown, ChevronUp, Braces, Layers, Package, ShieldCheck, User, Upload, X } from 'lucide-react';
+import { Plus, Trash2, RotateCcw, RefreshCw, Lock, Pencil, EyeOff, ChevronDown, ChevronUp, Braces, Layers, Package, ShieldCheck, User, Upload, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { Modal } from '@/components/ui/Modal';
 import { Input } from '@/components/ui/Input';
@@ -11,7 +11,8 @@ import { SchemaDerivedInfo, SchemaWarningsList } from '@/components/shared/Schem
 import { dhiwaySchemaForPayload, outputMapSource, parseDhiwaySchemaText } from '@/utils/partialSdc';
 import {
   SCHEMA_SPACE_TYPE_OPTIONS, SCHEMA_SEMANTIC_FIELDS,
-  emptySchemaConfigForm, configToForm,
+  emptySchemaConfigForm, configToForm, configSampleText, findRegisteredConfig, unregisteredDhiwaySpaces,
+  latestInChain, isLatestVersion, visibleSchemaConfigs, STALE_VERSION_MESSAGE, RESTORE_CONFIRM_MESSAGE, restoreErrorMessage,
   rowsToMap, schemaConfigJsonToForm,
   duplicateLabelError,
   classifyJsonBox, exampleRecordJson, buildSchemaConfigPayload, setInputMapping,
@@ -33,7 +34,7 @@ import {
 // and one card per schema type side by side. The default is the stacked accordion used by SuperAdmin.
 const TYPE_ICONS = { human: User, product: Package, warranty: ShieldCheck, '': User };
 
-export const OrgSchemaConfigsPanel = ({ orgId, isSuperAdminViewer = false, onConfigsChange, layout = 'accordion' }) => {
+export const OrgSchemaConfigsPanel = ({ orgId, isSuperAdminViewer = false, onConfigsChange, layout = 'accordion', dhiwaySpaces = [] }) => {
   const columns = layout === 'columns';
   const [configs, setConfigs] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -55,12 +56,14 @@ export const OrgSchemaConfigsPanel = ({ orgId, isSuperAdminViewer = false, onCon
 
   const resetJson = (text = '') => { setJsonText(text); setJsonErrors([]); setLabelServerError(''); };
 
-  const [actingId, setActingId] = useState(null); // config id currently being set-default/deactivated
+  const [actingId, setActingId] = useState(null); // config id currently being deactivated
 
+  // Inactive history is always loaded (active_only=false) so version chains can be read; what is shown is
+  // filtered below. Only active rows are reported to the host page.
   const load = () => {
-    if (!orgId) return;
+    if (!orgId) return Promise.resolve();
     setLoading(true);
-    adminAPI.getSchemaConfigs(orgId, { activeOnly: !showInactive })
+    return adminAPI.getSchemaConfigs(orgId, { activeOnly: false })
       .then(({ data }) => {
         const list = Array.isArray(data?.configs) ? data.configs : [];
         setConfigs(list);
@@ -70,43 +73,58 @@ export const OrgSchemaConfigsPanel = ({ orgId, isSuperAdminViewer = false, onCon
       .finally(() => setLoading(false));
   };
 
-  useEffect(load, [orgId, showInactive]);
+  useEffect(() => { load(); }, [orgId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const grouped = useMemo(() => {
     const groups = { human: [], product: [], warranty: [] };
-    configs.forEach((c) => { if (groups[c.space_type]) groups[c.space_type].push(c); });
+    visibleSchemaConfigs(configs, showInactive).forEach((c) => { if (groups[c.space_type]) groups[c.space_type].push(c); });
     return groups;
-  }, [configs]);
+  }, [configs, showInactive]);
+
+  // Message after a conflict or a restore: inline, dismissible.
+  const [listNotice, setListNotice] = useState(null); // { tone: 'info' | 'error' | 'success', text }
 
   const canManage = (config) => isSuperAdminViewer || config?.created_by_role !== 'super_admin';
 
-  const openCreate = (spaceType) => {
+  // `prefill` carries the Space ID / Schema ID of an existing Dhiway space being registered (never created).
+  const openCreate = (spaceType, prefill = null) => {
     setEditingConfig(null);
-    setForm(emptySchemaConfigForm(spaceType));
+    setForm({ ...emptySchemaConfigForm(prefill?.space_type || spaceType), ...(prefill ? { space_id: prefill.space_id, schema_id: prefill.schema_id } : {}) });
     setFormErrors([]);
     resetJson();
     setFormOpen(true);
   };
 
-  const openVersion = (config) => {
+  const openVersion = (picked) => {
+    // A new version is only accepted from the newest row of its chain: always edit that one.
+    const config = latestInChain(configs, picked) || picked;
+    if (config.id !== picked.id) setListNotice({ tone: 'info', text: `Editing the latest version (v${config.version}) of “${config.label}”.` });
     setEditingConfig(config);
+    // Label, IDs, stored Dhiway schema JSON and every mapping come from the saved version; the sample box
+    // shows the saved sample record when the server returns one.
     setForm(configToForm(config));
     setFormErrors([]);
-    // Its current mappings show in the mapping list; the box starts empty for a fresh sample record.
-    resetJson('');
+    resetJson(configSampleText(config));
     setFormOpen(true);
   };
 
-  const handleSetDefault = async (config) => {
+  const unregistered = useMemo(() => unregisteredDhiwaySpaces(dhiwaySpaces, configs), [dhiwaySpaces, configs]);
+
+  // Restore never reactivates the old row: the server creates a new version (previous + 1).
+  const handleRestore = async (config) => {
     if (actingId) return;
+    if (!window.confirm(RESTORE_CONFIRM_MESSAGE)) return;
     setActingId(config.id);
+    setListNotice(null);
     try {
-      await adminAPI.setSchemaConfigDefault(orgId, config.id);
-      toast.success(`"${config.label}" is now the default ${config.space_type} schema`);
-      load();
+      const { data } = await adminAPI.restoreSchemaConfig(orgId, config.id);
+      const restored = data?.config || data;
+      await load();
+      setListNotice({ tone: 'success', text: `“${restored?.label || config.label}” restored as a new active version${restored?.version ? ` (v${restored.version})` : ''}. The earlier versions are kept as history.` });
     } catch (err) {
       const status = err?.response?.status;
-      toast.error(status === 409 ? getApiError(err, 'That configuration is deactivated and cannot be set as default') : getApiError(err, 'Failed to set default'));
+      setListNotice({ tone: 'error', text: restoreErrorMessage(status, getApiError(err, '')) });
+      if (status === 404 || status === 409) load();
     } finally {
       setActingId(null);
     }
@@ -246,6 +264,14 @@ export const OrgSchemaConfigsPanel = ({ orgId, isSuperAdminViewer = false, onCon
       setFormErrors(['Schema ID, Space ID, and Label are all required']);
       return;
     }
+    // Registering the same Dhiway space + schema twice is refused (the server answers 400 as well).
+    if (!editingConfig) {
+      const existing = findRegisteredConfig(configs, { space_type: current.space_type, space_id: current.space_id, schema_id: current.schema_id });
+      if (existing) {
+        setFormErrors([`This Dhiway schema is already registered as “${existing.label}”. Edit that configuration to create a new version instead.`]);
+        return;
+      }
+    }
     // The server's documented duplicate-label rule; shown under the Label field already.
     if (duplicateLabelError(current.label, current.space_type, configs, editingConfig?.id)) {
       setFormErrors([]);
@@ -292,11 +318,23 @@ export const OrgSchemaConfigsPanel = ({ orgId, isSuperAdminViewer = false, onCon
         // Duplicate-label rejections belong on the Label field, verbatim; everything else stays in the list.
         const labelErrors = errors.filter((m) => /schema named/i.test(m));
         setLabelServerError(labelErrors[0] || '');
-        setFormErrors(errors.filter((m) => !labelErrors.includes(m)));
+        const rest = errors.filter((m) => !labelErrors.includes(m));
+        // A duplicate registration is a 400 from the server too: say what to do about it.
+        const duplicate = !editingConfig && rest.some((m) => /already|duplicate|registered/i.test(m));
+        setFormErrors(duplicate
+          ? [...rest, 'To change an existing registration, edit it (a new version) instead of registering it again.']
+          : rest);
+        if (duplicate) load(); // show what is registered now
       } else if (status === 409) {
-        // Two races land here: a concurrent default-set, or a concurrent save with the same label.
-        // Reloading lets the live label check see whatever just won; retrying once is safe.
-        toast.error(getApiError(err, 'Another save just happened for this organization — try again'));
+        const serverMessage = getApiError(err, '');
+        if (editingConfig) {
+          // The row is no longer the newest of its chain (or a concurrent save won): refresh and say so.
+          setFormOpen(false);
+          setListNotice({ tone: 'error', text: STALE_VERSION_MESSAGE + (serverMessage ? ` (${serverMessage})` : '') });
+        } else {
+          // Registration refused (for example another active configuration already uses this Dhiway schema).
+          setFormErrors([serverMessage || 'Another active configuration already uses this Dhiway schema.']);
+        }
         load();
       } else {
         toast.error(getApiError(err, 'Failed to save schema configuration'));
@@ -352,6 +390,29 @@ export const OrgSchemaConfigsPanel = ({ orgId, isSuperAdminViewer = false, onCon
         />
       )}
 
+      {listNotice && (
+        <div role={listNotice.tone === 'error' ? 'alert' : 'status'} className={`mb-3 flex items-start justify-between gap-2 rounded-xl border px-3 py-2 text-xs font-inter ${listNotice.tone === 'error' ? 'border-red-100 bg-red-50 text-red-700' : listNotice.tone === 'success' ? 'border-green-100 bg-green-50 text-green-700' : 'border-blue-100 bg-blue-50 text-brand-dark'}`}>
+          <span>{listNotice.text}</span>
+          <button type="button" onClick={() => setListNotice(null)} aria-label="Dismiss" className="shrink-0 opacity-60 hover:opacity-100"><X size={13} /></button>
+        </div>
+      )}
+
+      {unregistered.length > 0 && (
+        <div className="mb-3 rounded-xl border border-amber-100 bg-amber-50/60 p-3">
+          <p className="text-xs font-semibold text-amber-800 font-inter">Dhiway Spaces not registered here yet</p>
+          <p className="mt-0.5 text-[11px] text-amber-700 font-inter">These spaces are on the profile but have no schema configuration. Registering one reuses its existing Space ID and Schema ID — nothing is created on Dhiway.</p>
+          <ul className="mt-2 space-y-1.5">
+            {unregistered.map((row) => (
+              <li key={`${row.space_type}-${row.space_id}-${row.schema_id}`} className="flex flex-wrap items-center gap-2 rounded-lg bg-white px-2.5 py-1.5 text-[11px] font-inter">
+                <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-semibold capitalize text-gray-600">{row.space_type}</span>
+                <span className="min-w-0 flex-1 truncate font-mono text-gray-600" title={`${row.space_id} / ${row.schema_id}`}>{row.space_id} · {row.schema_id}</span>
+                <button type="button" onClick={() => openCreate(row.space_type, row)} className="shrink-0 font-semibold text-brand-blue hover:underline">Register</button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {loading ? (
         <div className="flex items-center justify-center py-8"><RefreshCw size={18} className="animate-spin text-brand-blue" /></div>
       ) : (
@@ -399,8 +460,10 @@ export const OrgSchemaConfigsPanel = ({ orgId, isSuperAdminViewer = false, onCon
                             <div className="flex flex-wrap items-center gap-1.5">
                               <span className="truncate text-sm font-semibold text-brand-dark font-inter">{config.label}</span>
                               <span className="shrink-0 rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] font-semibold text-gray-500">v{config.version}</span>
-                              {config.is_default && <Badge status="info">Default</Badge>}
-                              {!config.is_active && <Badge status="default">Deactivated</Badge>}
+                              {config.is_default && <span title="Read-only: the default is chosen in Dhiway Spaces"><Badge status="info">Default</Badge></span>}
+                              {config.is_active !== false && <span className="shrink-0 rounded-full bg-green-50 px-1.5 py-0.5 text-[10px] font-semibold text-green-700">Active</span>}
+                              {config.is_active === false && <Badge status="default">Deactivated</Badge>}
+                              {config.is_active === false && isLatestVersion(configs, config) && <span className="shrink-0 rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] font-semibold text-gray-600">Latest version</span>}
                               {locked && (
                                 <span title="Managed by SuperAdmin — the organization cannot edit this" className="flex shrink-0 items-center gap-1 rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-600">
                                   <Lock size={10} /> SuperAdmin-managed
@@ -427,24 +490,25 @@ export const OrgSchemaConfigsPanel = ({ orgId, isSuperAdminViewer = false, onCon
                             </p>
                           </div>
                           <div className="flex shrink-0 items-center gap-1.5">
-                            {config.is_active && !config.is_default && (
+                            {config.is_active !== false ? (
+                              <button
+                                type="button" disabled={locked}
+                                onClick={() => openVersion(config)}
+                                title="Edit (creates a new version)"
+                                className="flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 text-gray-400 hover:border-brand-blue hover:bg-blue-50 hover:text-brand-blue disabled:opacity-40"
+                              >
+                                <Pencil size={13} />
+                              </button>
+                            ) : (
                               <button
                                 type="button" disabled={locked || actingId === config.id}
-                                onClick={() => handleSetDefault(config)}
-                                title="Set as default"
-                                className="flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 text-gray-400 hover:border-amber-200 hover:bg-amber-50 hover:text-amber-600 disabled:opacity-40"
+                                onClick={() => handleRestore(config)}
+                                title={locked ? 'Managed by SuperAdmin — the organization cannot restore this' : 'Restore (creates a new active version)'}
+                                className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-gray-200 px-2.5 text-xs font-semibold text-brand-blue font-inter hover:border-brand-blue hover:bg-blue-50 disabled:opacity-40"
                               >
-                                {actingId === config.id ? <RefreshCw size={13} className="animate-spin" /> : <Star size={13} />}
+                                {actingId === config.id ? <RefreshCw size={13} className="animate-spin" /> : <RotateCcw size={13} />} Restore
                               </button>
                             )}
-                            <button
-                              type="button" disabled={locked}
-                              onClick={() => openVersion(config)}
-                              title="Edit (creates a new version)"
-                              className="flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 text-gray-400 hover:border-brand-blue hover:bg-blue-50 hover:text-brand-blue disabled:opacity-40"
-                            >
-                              <Pencil size={13} />
-                            </button>
                             {config.is_active && (
                               <button
                                 type="button" disabled={locked || actingId === config.id}
@@ -456,15 +520,15 @@ export const OrgSchemaConfigsPanel = ({ orgId, isSuperAdminViewer = false, onCon
                               </button>
                             )}
                           </div>
+                          {config.is_active !== false && (
+                            <div className="w-full rounded-lg border border-gray-100 bg-gray-50/40 p-2.5">
+                              <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-gray-500">Schema image</p>
+                              <SchemaConfigImagePicker orgId={orgId} config={config} onUploaded={(updated) => { const next = updated?.config || updated; if (next?.id) setConfigs((list) => list.map((c) => (c.id === next.id ? { ...c, ...next } : c))); }} />
+                            </div>
+                          )}
                           {expandedFields[config.id] && (
                             <div className="w-full space-y-2">
                               <SchemaDerivedInfo config={config} />
-                              {isSuperAdminViewer && config.is_active !== false && (
-                                <div className="rounded-lg border border-gray-100 p-2.5">
-                                  <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-gray-500">Schema image</p>
-                                  <SchemaConfigImagePicker orgId={orgId} config={config} onUploaded={(updated) => { const next = updated?.config || updated; if (next?.id) setConfigs((list) => list.map((c) => (c.id === next.id ? { ...c, ...next } : c))); }} />
-                                </div>
-                              )}
                             </div>
                           )}
                           {expandedFields[config.id] && (
@@ -536,7 +600,9 @@ export const OrgSchemaConfigsPanel = ({ orgId, isSuperAdminViewer = false, onCon
         isOpen={formOpen}
         onClose={() => !submitting && setFormOpen(false)}
         title={editingConfig ? `Edit "${editingConfig.label}" (new version)` : 'Register Schema Configuration'}
-        description="The schema_id and space_id must already exist on Dhiway — this only registers them here, it never creates anything on Dhiway itself."
+        description={editingConfig
+          ? 'Saving creates a new version; the previous active version is replaced. The Space ID and Schema ID stay as registered on Dhiway.'
+          : 'The Schema ID and Space ID must already exist on Dhiway — this only registers them here. It never creates a Dhiway Space or changes existing Dhiway IDs.'}
         size="2xl"
         onSubmit={handleSubmit}
         formId="schema-config-form"
@@ -586,7 +652,7 @@ export const OrgSchemaConfigsPanel = ({ orgId, isSuperAdminViewer = false, onCon
                 <p className="mt-0.5 text-[11px] text-gray-500 font-inter">
                   The actual JSON of the Dhiway schema behind the Schema ID above: an object with “properties” (and optionally “required”).
                   Only the properties it declares are sent to Dhiway; everything else stays in TruMarkZ.
-                  {editingConfig ? ' Leave it as it is to keep the stored schema, or empty the box to remove it.' : ''}
+                  {editingConfig ? ' The stored schema is kept unless you paste a new one or remove it explicitly; a blank box never removes it.' : ''}
                 </p>
               </div>
               <label className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-brand-blue font-inter hover:bg-blue-50">
@@ -594,8 +660,25 @@ export const OrgSchemaConfigsPanel = ({ orgId, isSuperAdminViewer = false, onCon
                 <input type="file" accept=".json,application/json" onChange={loadSchemaFile} className="sr-only" />
               </label>
             </div>
+            {editingConfig && form.dhiway_schema_original.trim() && (
+              form.clear_dhiway_schema ? (
+                <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-red-100 bg-red-50 px-2.5 py-2">
+                  <p className="text-[11px] text-red-700 font-inter">The stored Dhiway schema will be removed when you save this version.</p>
+                  <button type="button" onClick={() => updateForm({ clear_dhiway_schema: false })} className="text-[11px] font-semibold text-brand-blue hover:underline font-inter">Undo</button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => { if (window.confirm('Remove the stored Dhiway schema from this configuration when you save? The built-in layout is used without it.')) updateForm({ clear_dhiway_schema: true, dhiway_schema_text: '' }); }}
+                  className="mt-2 text-[11px] font-semibold text-red-600 hover:underline font-inter"
+                >
+                  Remove stored Dhiway schema
+                </button>
+              )
+            )}
             <textarea
               id="dhiway-schema-json"
+              disabled={form.clear_dhiway_schema}
               value={form.dhiway_schema_text}
               onChange={(e) => { updateForm({ dhiway_schema_text: e.target.value }); if (formErrors.length) setFormErrors([]); }}
               placeholder='{"properties": {"name": {"type": "string"}}, "required": ["name"]}'
@@ -796,10 +879,10 @@ export const OrgSchemaConfigsPanel = ({ orgId, isSuperAdminViewer = false, onCon
             </div>
           </details>
 
-          <label className="flex items-center gap-2 text-xs font-medium text-brand-dark font-inter">
-            <input type="checkbox" checked={form.is_default} onChange={(e) => updateForm({ is_default: e.target.checked })} className="h-4 w-4 accent-blue-600" />
-            Make this the default {form.space_type} schema for this organization
-          </label>
+          <p className="text-[11px] text-gray-500 font-inter">
+            The default {form.space_type} schema is chosen in Dhiway Spaces, not here.
+            {editingConfig?.is_default ? ' This configuration is currently the default.' : ''}
+          </p>
         </div>
 
         <Modal.Footer className="flex justify-end gap-2">

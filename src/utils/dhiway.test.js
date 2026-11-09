@@ -11,11 +11,11 @@ test('a schema configuration\'s space and schema are added to Dhiway Spaces once
   assert.equal(mergeSchemaConfigSpaces(rows, [cfg({ is_default: true })]).changed, false, 'already there — nothing to do');
 });
 
-test('existing rows are kept; a new type gets its own row; the default config becomes that type\'s default', () => {
+test('existing rows are kept; a new type gets its own row; a configuration never changes the default (Dhiway Spaces owns it)', () => {
   const existing = [{ space_id: 'old', schema_id: 'old-s', space_type: 'human', default: true }, { space_id: 'p', schema_id: 'p-s', space_type: 'product', default: true }];
   const { rows } = mergeSchemaConfigSpaces(existing, [cfg({ is_default: true }), cfg({ space_type: 'warranty', space_id: 'w', schema_id: 'w-s' })]);
   assert.deepEqual(rows.map((r) => [r.space_type, r.space_id, r.default]), [
-    ['human', 'old', false], ['product', 'p', true], ['human', 'sp-1', true], ['warranty', 'w', true],
+    ['human', 'old', true], ['product', 'p', true], ['human', 'sp-1', false], ['warranty', 'w', true],
   ]);
   const notDefault = mergeSchemaConfigSpaces(existing, [cfg()]).rows;
   assert.equal(notDefault.find((r) => r.space_id === 'old').default, true, 'a non-default config never steals the default');

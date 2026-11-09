@@ -21,6 +21,8 @@ import { BULK_DELETE_LIMIT } from '@/utils/partialSdc';
 import { TablePagination } from '@/components/shared/TablePagination';
 import { normalizeDhiwayDetails, resolveDhiwaySpaceId, batchSdcSpaceId } from '@/utils/dhiway';
 import { pendingManualUsers } from '@/utils/pendingManualVerifications';
+import { SmartSendResult } from '@/components/shared/SmartSendResult';
+import { summarizeSmartSend } from '@/utils/smartSend';
 import { batchMatchesDate, batchDateError, batchDatePresets } from '@/utils/batchFilters';
 import { useBatchVerificationFilter } from '@/hooks/useBatchVerificationFilter';
 import {
@@ -362,7 +364,7 @@ const VerifierRow = ({ index, row, typeLabel, allVerifiers, batchTotal, countBef
   const status = count === 0 ? 'pending' : isOver ? 'over' : 'complete';
   const statusMeta = {
     pending:  { label: 'Pending',    tone: 'bg-amber-50 text-amber-600' },
-    complete: { label: 'Complete',   tone: 'bg-emerald-50 text-emerald-600' },
+    complete: { label: 'Assigned',   tone: 'bg-emerald-50 text-emerald-600' },
     over:     { label: 'Over Limit', tone: 'bg-red-50 text-red-600' },
   }[status];
 
@@ -541,6 +543,7 @@ export const SmartSendModal = ({ isOpen, onClose, onSent, batch }) => {
   const [assignments, setAssignments] = useState({});
   const [sending,     setSending]     = useState(false);
   const [savingDraft, setSavingDraft] = useState(false);
+  const [resultSummary, setResultSummary] = useState(null); // the server's answer to the last Smart Send
   // The shared template shown in "Edit Default Template" — only actually
   // used for a row once the admin has typed into it (defaultTemplateTouched)
   // AND that row isn't individually customized. Until touched, each
@@ -583,6 +586,8 @@ export const SmartSendModal = ({ isOpen, onClose, onSent, batch }) => {
   const pendingUsersByType = useMemo(() => Object.fromEntries(verificationTypes.map((type) =>
     [type.verification_name, pendingManualUsers(batchRecords, type.verification_name)]
   )), [verificationTypes, batchRecords]);
+  // Users who still need at least one of these verification types (approved checks are not counted).
+  const eligibleUserCount = new Set(Object.values(pendingUsersByType).flat().map((user) => user.id)).size;
 
   // The template preview defaults to the batch's first needed verification
   // type — the only unambiguous single choice when one shared template can
@@ -610,6 +615,7 @@ export const SmartSendModal = ({ isOpen, onClose, onSent, batch }) => {
     setDefaultTemplate({ subject: '', body: '' });
     setDefaultTemplateTouched(false);
     setEditingKey(null);
+    setResultSummary(null);
     setLoading(true);
     // /verification/batches/{id}/third-party-verifiers is the purpose-built
     // endpoint for "which verification types in this batch need a third
@@ -864,33 +870,13 @@ export const SmartSendModal = ({ isOpen, onClose, onSent, batch }) => {
         await verificationAPI.createEmailDraft({ verification_type: primaryTypeName, subject: defaultTemplate.subject, body: defaultTemplate.body }).catch(() => {});
       }
 
-      // The backend returns 200 even when every assignment fails — real
-      // success/failure lives in the response body (total_sent/total_failed,
-      // and per-entry status/error), not in the HTTP status. Blindly showing
-      // a success toast here (as before) masked failures like "No users in
-      // this batch have 'X'" and closed the modal as if it had worked.
-      const results     = Array.isArray(data?.results) ? data.results : [];
-      const failed      = results.filter((r) => r.status === 'failed');
-      const totalSent   = data?.total_sent ?? (results.length - failed.length);
-      const totalFailed = data?.total_failed ?? failed.length;
-
-      if (totalFailed > 0) {
-        const failureMsg = failed
-          .map((r) => `${slugToLabel(r.verification_type_name)}: ${r.error || 'failed'}`)
-          .join(' | ');
-        toast.error(failureMsg || `${totalFailed} assignment${totalFailed === 1 ? '' : 's'} failed`);
-      }
-      if (totalSent > 0) {
-        toast.success(`Smart Send: ${totalSent} verifier${totalSent === 1 ? '' : 's'} emailed`);
-      }
-
-      // Only advance the batch's workflow state and close the modal if at
-      // least one email actually went out — a total failure should leave the
-      // admin in the modal to fix the assignment and retry.
-      if (totalSent > 0) {
-        onSent?.(data);
-        onClose();
-      }
+      // The backend returns 200 even when every assignment fails — real success/failure lives in the
+      // response body (results[], already_open_requests, skipped_users, total_sent / total_failed /
+      // total_skipped), never in the HTTP status. It is shown as the server reported it, not summarized
+      // into a success toast, and the modal stays open on it.
+      const summary = summarizeSmartSend(data);
+      setResultSummary(summary);
+      if (summary.totals.sent > 0 || summary.resendable.length > 0) onSent?.(data);
     } catch (err) {
       toast.error(getApiError(err, 'Smart Send failed'));
     } finally {
@@ -964,6 +950,23 @@ export const SmartSendModal = ({ isOpen, onClose, onSent, batch }) => {
     </div>
   );
 
+  if (resultSummary) {
+    const recordsById = Object.fromEntries(batchUsers.map((user) => [user.id, user.name]));
+    return (
+      <Modal isOpen={isOpen} onClose={onClose} title="Smart Send Result" size="2xl">
+        <div className="space-y-4">
+          <SmartSendResult summary={resultSummary} recordsById={recordsById} />
+          <Modal.Footer className="flex justify-end gap-2">
+            {resultSummary.totals.failed > 0 && resultSummary.totals.sent === 0 && (
+              <Button variant="outline" onClick={() => setResultSummary(null)}>Back to assignments</Button>
+            )}
+            <Button variant="primary" onClick={onClose}>Done</Button>
+          </Modal.Footer>
+        </div>
+      </Modal>
+    );
+  }
+
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Bulk Send to Verifiers" size="7xl" sidePanel={templateDrawer} sidePanelWidth="max-w-md">
       <div className="space-y-4">
@@ -982,7 +985,7 @@ export const SmartSendModal = ({ isOpen, onClose, onSent, batch }) => {
           <div className="flex gap-3 shrink-0 text-right">
             <div>
               <p className="text-[10px] text-gray-400 font-inter">Eligible Users</p>
-              <p className="text-lg font-bold text-brand-dark font-sora">{batchUsers.length}</p>
+              <p className="text-lg font-bold text-brand-dark font-sora">{eligibleUserCount}</p>
             </div>
             <div>
               <p className="text-[10px] text-gray-400 font-inter">Verifiers</p>
@@ -3285,7 +3288,7 @@ export const BatchMonitor = () => {
       <SmartSendModal
         isOpen={smartSendOpen}
         onClose={() => { setSmartSendOpen(false); setSmartSendBatch(null); }}
-        onSent={(result) => { handleBulkSent(smartSendBatch, result); setSmartSendOpen(false); setSmartSendBatch(null); }}
+        onSent={(result) => { handleBulkSent(smartSendBatch, result); }}
         batch={smartSendBatch}
       />
 

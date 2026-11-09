@@ -9,7 +9,7 @@ import {
   Sparkles, Upload, X, XCircle,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { canSubmitEvidenceFor, filterManualDecisions, manualReviewStatus, stagedManualApprovalUsers, successfulManualUploadCount } from '@/utils/manualApproval';
+import { canSubmitEvidenceFor, filterManualDecisions, manualReviewStatus, stagedManualApprovalUsers, successfulManualUploadCount, usersWithoutReport } from '@/utils/manualApproval';
 
 // Same shape, same page, for Human and Product — request-info's users[]
 // never says which entity type a row is, so nothing here ever guesses that
@@ -93,6 +93,8 @@ export const DocumentUpload = () => {
   // Once an upload attempt comes back "already used", the token's one
   // upload call is spent for good — stop offering "Upload File" anywhere.
   const [uploadLinkUsed, setUploadLinkUsed] = useState(false);
+  // Users on this request who got no report in the last (partial) upload — upload response `users_without_report`.
+  const [missingReportUsers, setMissingReportUsers] = useState([]);
 
   const [rejectingId, setRejectingId] = useState(null); // row whose reject-reason input is open
   const [rejectReason, setRejectReason] = useState('');
@@ -324,6 +326,7 @@ export const DocumentUpload = () => {
         const { data } = await verificationAPI.uploadManualReport(token, files, fileTargets);
         uploadResult = data;
         uploadedFiles = successfulManualUploadCount(data);
+        setMissingReportUsers(usersWithoutReport(data, requestInfo?.users));
         if (uploadedFiles > 0) {
           setPendingFiles({});
           setUploadLinkUsed(true);
@@ -390,7 +393,9 @@ export const DocumentUpload = () => {
       const parts = [];
       if (uploadedFiles) parts.push(`${uploadedFiles} report${uploadedFiles === 1 ? '' : 's'} uploaded`);
       if (finalDecisionIds.length) parts.push(`${finalDecisionIds.length} decision${finalDecisionIds.length === 1 ? '' : 's'} submitted`);
-      if (parts.length) toast.success(parts.join(' · '));
+      const stillMissing = usersWithoutReport(uploadResult, requestInfo?.users).length;
+      if (parts.length && stillMissing > 0) toast(`${parts.join(' · ')} · ${stillMissing} user${stillMissing === 1 ? '' : 's'} still need documents`, { icon: '⚠️' });
+      else if (parts.length) toast.success(parts.join(' · '));
     }
     await loadRequestInfo();
     setBulkSubmitting(false);
@@ -489,6 +494,25 @@ export const DocumentUpload = () => {
                 <div>
                   <p className="text-sm font-semibold text-green-800 font-inter">All assigned records reviewed</p>
                   <p className="text-xs text-green-700 font-inter">Every record on this request has been approved or rejected.</p>
+                </div>
+              </div>
+            )}
+
+            {missingReportUsers.length > 0 && (
+              <div role="alert" className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 flex items-start gap-3">
+                <div className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center shrink-0">
+                  <AlertTriangle size={18} className="text-amber-600" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-amber-800 font-inter">
+                    {missingReportUsers.length} user{missingReportUsers.length === 1 ? '' : 's'} on this request {missingReportUsers.length === 1 ? 'has' : 'have'} no report yet
+                  </p>
+                  <p className="text-xs text-amber-700 font-inter mt-0.5">The upload did not include a report for the people below, so they still need documents. This request is not complete for them.</p>
+                  <ul className="mt-2 flex flex-wrap gap-1.5">
+                    {missingReportUsers.map((user) => (
+                      <li key={user.id} className="rounded-full bg-white px-2.5 py-0.5 text-xs font-medium text-amber-800 ring-1 ring-amber-200 font-inter">{user.name}</li>
+                    ))}
+                  </ul>
                 </div>
               </div>
             )}

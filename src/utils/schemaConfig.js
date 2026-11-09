@@ -48,11 +48,11 @@ export const emptySchemaConfigForm = (spaceType = 'human') => ({
   local_fields: [],
   input_map: [],
   output_map: [],
-  is_default: false,
   // The actual JSON of the Dhiway schema behind schema_id. `original` is what is stored, so an untouched
-  // box is omitted from the request (keeps it) and an emptied box clears it.
+  // or blank box is omitted from the request (keeps it). Removal is only ever the explicit flag below.
   dhiway_schema_text: '',
   dhiway_schema_original: '',
+  clear_dhiway_schema: false,
 });
 
 // local_fields as an array of rows (UI-friendly) <-> the LocalFieldDefinition objects the API expects.
@@ -155,7 +155,6 @@ export const schemaConfigJsonToForm = (text, currentForm, { lockSpaceType = fals
   }
   if (has('input_map')) form.input_map = jsonMapToRows(source.input_map, 'input_map', errors);
   if (has('output_map')) form.output_map = jsonMapToRows(source.output_map, 'output_map', errors);
-  if (has('is_default')) form.is_default = source.is_default === true;
 
   // A sample_record inside a pasted request body goes back into the box, to be sent as the record.
   let sampleText = '';
@@ -258,11 +257,16 @@ export const buildSchemaConfigPayload = (form, { withSampleRecord = false } = {}
     local_fields: withSampleRecord ? [] : (form.local_fields || []).map(localFieldRowToPayload).filter((f) => f.name),
     input_map: rowsToMap(form.input_map),
     output_map: rowsToMap(form.output_map),
-    is_default: !!form.is_default,
   };
-  // dhiway_schema: omitted when untouched (keeps what is stored), null when emptied, the object when replaced.
-  const dhiway = dhiwaySchemaForPayload(form.dhiway_schema_text, form.dhiway_schema_original);
-  if (dhiway.send) payload.dhiway_schema = dhiway.value;
+  // is_default is never sent: Dhiway Spaces owns the default (the set-default route now answers 410).
+  // dhiway_schema: omitted when untouched, blank or null (keeps what is stored); the object when replaced.
+  // Only an explicit removal sends clear_dhiway_schema: true (and then no dhiway_schema).
+  if (form.clear_dhiway_schema) {
+    payload.clear_dhiway_schema = true;
+  } else {
+    const dhiway = dhiwaySchemaForPayload(form.dhiway_schema_text, form.dhiway_schema_original);
+    if (dhiway.send) payload.dhiway_schema = dhiway.value;
+  }
   // The server treats an absent local_fields as "keep the previous version's" and an explicit []
   // as "clear them". With a sample the fields come from it, so the key is left out entirely.
   if (withSampleRecord) delete payload.local_fields;
@@ -294,10 +298,71 @@ export const configToForm = (config) => ({
   local_fields: (config.local_fields || []).map(localFieldToRow),
   input_map: mapToRows(config.input_map),
   output_map: mapToRows(config.output_map),
-  is_default: !!config.is_default,
   dhiway_schema_text: dhiwaySchemaText(config.dhiway_schema),
   dhiway_schema_original: dhiwaySchemaText(config.dhiway_schema),
+  clear_dhiway_schema: false,
 });
+
+// ── Version chains (the server owns versioning; this only reads previous_version_id) ─────────────
+// The newest row of the chain a configuration belongs to: follow rows whose previous_version_id points at it.
+export const latestInChain = (configs, config) => {
+  if (!config) return null;
+  const list = Array.isArray(configs) ? configs : [];
+  let current = config;
+  const seen = new Set();
+  for (;;) {
+    if (seen.has(current.id)) break;
+    seen.add(current.id);
+    const next = list.find((c) => c && c.previous_version_id && c.previous_version_id === current.id);
+    if (!next) break;
+    current = next;
+  }
+  return current;
+};
+
+export const isLatestVersion = (configs, config) => !!config && latestInChain(configs, config)?.id === config.id;
+
+// Rows to show: every active row, and (when asked) only the newest row of each deactivated chain —
+// older versions are history, not separate configurations. Active rows come first.
+export const visibleSchemaConfigs = (configs, showInactive) =>
+  (Array.isArray(configs) ? configs : [])
+    .filter((c) => c && (c.is_active !== false || (showInactive && isLatestVersion(configs, c))))
+    .sort((a, b) => Number(b.is_active !== false) - Number(a.is_active !== false));
+
+export const STALE_VERSION_MESSAGE = 'This configuration is no longer the latest version. The latest configuration has been refreshed. Please review it before making changes.';
+export const RESTORE_CONFIRM_MESSAGE = 'Restore this configuration? A new active version will be created while the previous version history remains preserved.';
+
+// What to say for a failed restore; `fallback` is the server's own message.
+export const restoreErrorMessage = (status, serverMessage) => {
+  if (status === 403) return serverMessage || 'You are not allowed to restore this configuration.';
+  if (status === 404) return serverMessage || 'This configuration no longer exists. The list has been refreshed.';
+  if (status === 409) return serverMessage || 'This configuration cannot be restored right now (another active configuration uses the same Dhiway schema, it is not the newest version, or its label is taken).';
+  return serverMessage || 'The configuration could not be restored.';
+};
+
+// The saved sample record of a configuration (when the server returns one), pretty-printed for the box.
+export const configSampleText = (config) => {
+  const sample = config?.sample_record;
+  if (!sample || typeof sample !== 'object' || Array.isArray(sample) || !Object.keys(sample).length) return '';
+  try { return JSON.stringify(sample, null, 2); } catch { return ''; }
+};
+
+// An existing active configuration with the same entity type, space and schema ids (duplicate registration).
+export const findRegisteredConfig = (configs, { space_type, space_id, schema_id }, ignoreId = null) =>
+  (configs || []).find((c) => c && c.id !== ignoreId && c.is_active !== false
+    && c.space_type === space_type
+    && String(c.space_id || '').trim() === String(space_id || '').trim()
+    && String(c.schema_id || '').trim() === String(schema_id || '').trim()) || null;
+
+// Dhiway Spaces rows (the profile's own list, not a new endpoint) that no active configuration covers yet.
+export const unregisteredDhiwaySpaces = (rows, configs) =>
+  (Array.isArray(rows) ? rows : [])
+    .map((r) => ({
+      space_type: ['human', 'product', 'warranty'].includes(String(r?.space_type || '').toLowerCase()) ? String(r.space_type).toLowerCase() : 'human',
+      space_id: String(r?.space_id || '').trim(),
+      schema_id: String(r?.schema_id || '').trim(),
+    }))
+    .filter((r) => r.space_id && r.schema_id && !findRegisteredConfig(configs, r));
 
 // A record with no fields at all ({}) has nothing for the server to discover. Sending it would still
 // make the server re-derive local_fields — from nothing — and wipe an edited config's existing fields.

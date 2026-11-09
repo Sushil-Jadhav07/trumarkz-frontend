@@ -37,7 +37,7 @@ export const SchemaConfigThumb = ({ orgId, config, className = 'h-14 w-20' }) =>
   return <img src={url} alt={`${config.label} design`} className={`shrink-0 rounded-lg border border-gray-100 object-cover ${className}`} />;
 };
 
-// SuperAdmin picker: choose a PNG / JPEG / WebP (5 MB), preview it, then upload. Only active configurations.
+// Picker for SuperAdmin and the owning organization: choose a PNG / JPEG / WebP (5 MB), preview it, then upload. Only active configurations.
 export const SchemaConfigImagePicker = ({ orgId, config, onUploaded }) => {
   const current = useSchemaConfigImage(orgId, config);
   const inputRef = useRef(null);
@@ -89,7 +89,7 @@ export const SchemaConfigImagePicker = ({ orgId, config, onUploaded }) => {
         {file ? (
           <div className="flex flex-wrap items-center gap-2">
             <button type="button" onClick={upload} disabled={uploading} className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-brand-blue px-3 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-60 font-inter">
-              {uploading ? <RefreshCw size={13} className="animate-spin" /> : <ImagePlus size={13} />} Save image
+              {uploading ? <RefreshCw size={13} className="animate-spin" /> : <ImagePlus size={13} />} {problem ? 'Retry upload' : 'Save image'}
             </button>
             <button type="button" onClick={cancel} disabled={uploading} className="text-xs font-medium text-gray-500 hover:text-brand-dark font-inter">Cancel</button>
             <span className="truncate text-[11px] text-gray-500 font-inter">{file.name}</span>

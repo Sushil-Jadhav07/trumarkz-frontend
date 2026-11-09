@@ -112,3 +112,21 @@ export const filterManualDecisions = (decisions, info, uploadContext) => {
     decisions[id].status !== 'approved' || eligible.has(String(id))
   );
 };
+
+// Upload response field `users_without_report` (additive; absent on older backends): the users on this request
+// who received no report in a partial / tagged upload. Items are batch_user_ids or objects; names come from the
+// request's own users list. Returns [{ id, name }].
+export const usersWithoutReport = (upload, requestUsers = []) => {
+  const raw = upload?.users_without_report;
+  if (!Array.isArray(raw)) return [];
+  const known = new Map((Array.isArray(requestUsers) ? requestUsers : []).map((user) => [String(user?.batch_user_id ?? user?.id ?? ''), user]));
+  const seen = new Set();
+  return raw.map((item) => {
+    const id = String(typeof item === 'object' && item ? (item.batch_user_id ?? item.user_id ?? item.id ?? '') : (item ?? '')).trim();
+    if (!id || seen.has(id)) return null;
+    seen.add(id);
+    const user = known.get(id);
+    const name = (typeof item === 'object' && item ? (item.full_name || item.name || item.product_name) : '') || user?.full_name || user?.product_name || user?.name || id;
+    return { id, name };
+  }).filter(Boolean);
+};

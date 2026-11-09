@@ -249,7 +249,7 @@ export const OrganizationEditor = ({ onClose, orgId, onSuccess }) => {
           "Save Changes" submit. See OrgSchemaConfigsPanel. */}
       {org && !loading && !loadError && (
         <div className="mt-6 border-t border-gray-100 pt-5">
-          <OrgSchemaConfigsPanel orgId={org.id} isSuperAdminViewer onConfigsChange={syncSchemaSpaces} />
+          <OrgSchemaConfigsPanel orgId={org.id} isSuperAdminViewer onConfigsChange={syncSchemaSpaces} dhiwaySpaces={form.dhiways_details || []} />
         </div>
       )}
 

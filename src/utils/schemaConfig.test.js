@@ -5,17 +5,19 @@ import {
   classifyJsonBox, exampleRecordJson, sampleToSend, mappingRowKeys, mappingSources,
   buildSchemaConfigPayload, configToForm, setInputMapping, rowsToMap,
   autoMatchedFields, withSampleRecord, formatServerPath,
+  configSampleText, findRegisteredConfig, unregisteredDhiwaySpaces,
+  latestInChain, isLatestVersion, visibleSchemaConfigs, restoreErrorMessage, STALE_VERSION_MESSAGE, RESTORE_CONFIRM_MESSAGE,
 } from './schemaConfig.js';
 
 // SchemaConfigUpsertRequest, as published by the live API's /openapi.json.
-const UPSERT_FIELDS = ['space_type', 'dhiway_schema', 'schema_id', 'space_id', 'label', 'local_fields', 'input_map', 'output_map', 'is_default', 'sample_record'];
+const UPSERT_FIELDS = ['space_type', 'dhiway_schema', 'schema_id', 'space_id', 'label', 'local_fields', 'input_map', 'output_map', 'clear_dhiway_schema', 'sample_record'];
 const UPSERT_REQUIRED = ['space_type', 'schema_id', 'space_id', 'label'];
 const LOCAL_FIELD_KEYS = ['name', 'type', 'required', 'description', 'aliases', 'path', 'nullable'];
 
 const assertMatchesUpsertContract = (payload) => {
   for (const key of Object.keys(payload)) assert.ok(UPSERT_FIELDS.includes(key), `"${key}" is not in SchemaConfigUpsertRequest`);
   for (const key of UPSERT_REQUIRED) assert.equal(typeof payload[key], 'string', key);
-  assert.equal(typeof payload.is_default, 'boolean');
+  assert.equal('is_default' in payload, false, 'is_default is never sent');
   for (const map of [payload.input_map, payload.output_map]) {
     assert.equal(Object.getPrototypeOf(map), Object.prototype);
     for (const v of Object.values(map)) assert.equal(typeof v, 'string');
@@ -121,7 +123,10 @@ test('editing round-trips the API response: a new version keeps every mapping it
   assert.deepEqual(unchanged.input_map, response.input_map);
   assert.deepEqual(unchanged.output_map, response.output_map);
   assert.deepEqual(unchanged.local_fields, response.local_fields);
-  assert.equal(unchanged.is_default, true);
+  assert.equal('is_default' in unchanged, false);
+  assert.equal(form.label, 'Acme');
+  assert.equal(form.schema_id, 's');
+  assert.equal(form.space_id, 'p');
   assert.equal('schema_variant' in unchanged, false);
   assert.equal('dhiway_schema' in unchanged, false);
 
@@ -224,13 +229,65 @@ test('forms carry no variant; the Dhiway schema box starts empty', () => {
   assert.equal(emptySchemaConfigForm('human').dhiway_schema_text, '');
 });
 
-test('dhiway_schema is omitted when untouched, null when cleared, an object when replaced', () => {
+test('dhiway_schema is preserved when untouched or blank, replaced by an object, removed only by the explicit flag', () => {
   const stored = { properties: { name: { type: 'string' } } };
   const form = configToForm({ space_type: 'human', schema_id: 's', space_id: 'p', label: 'L', dhiway_schema: stored });
-  assert.equal('dhiway_schema' in buildSchemaConfigPayload(form), false);
-  assert.equal(buildSchemaConfigPayload({ ...form, dhiway_schema_text: '' }).dhiway_schema, null);
+  assert.match(form.dhiway_schema_text, /"properties"/, 'the saved JSON prefills the box');
+  const untouched = buildSchemaConfigPayload(form);
+  assert.equal('dhiway_schema' in untouched, false);
+  assert.equal('clear_dhiway_schema' in untouched, false);
+
+  const blank = buildSchemaConfigPayload({ ...form, dhiway_schema_text: '' });
+  assert.equal('dhiway_schema' in blank, false, 'a blank box never sends null');
+  assert.equal('clear_dhiway_schema' in blank, false, 'a blank box never clears');
+
   assert.deepEqual(buildSchemaConfigPayload({ ...form, dhiway_schema_text: '{"properties":{"a":{}}}' }).dhiway_schema, { properties: { a: {} } });
-  assertMatchesUpsertContract(buildSchemaConfigPayload({ ...form, dhiway_schema_text: '' }));
+
+  const cleared = buildSchemaConfigPayload({ ...form, dhiway_schema_text: '', clear_dhiway_schema: true });
+  assert.equal(cleared.clear_dhiway_schema, true);
+  assert.equal('dhiway_schema' in cleared, false);
+  assertMatchesUpsertContract(cleared);
+  assertMatchesUpsertContract(blank);
+  assert.equal(configToForm({ space_type: 'human', label: 'L', dhiway_schema: null }).dhiway_schema_text, '');
+});
+
+test('a create or version payload never carries is_default', () => {
+  assert.equal('is_default' in buildSchemaConfigPayload({ ...emptySchemaConfigForm('human'), label: 'L', schema_id: 's', space_id: 'p' }), false);
+  assert.equal('is_default' in emptySchemaConfigForm('human'), false);
+  assert.equal('is_default' in configToForm({ space_type: 'human', label: 'L', is_default: true }), false);
+});
+
+test('duplicate registration is found by entity type + space + schema, among active configs, ignoring the one being edited', () => {
+  const configs = [
+    { id: 'a', label: 'Main', space_type: 'human', space_id: 'sp', schema_id: 'sc', is_active: true },
+    { id: 'b', label: 'Old', space_type: 'product', space_id: 'sp', schema_id: 'sc', is_active: false },
+  ];
+  assert.equal(findRegisteredConfig(configs, { space_type: 'human', space_id: ' sp ', schema_id: 'sc' }).label, 'Main');
+  assert.equal(findRegisteredConfig(configs, { space_type: 'human', space_id: 'sp', schema_id: 'sc' }, 'a'), null);
+  assert.equal(findRegisteredConfig(configs, { space_type: 'product', space_id: 'sp', schema_id: 'sc' }), null, 'a deactivated config can be registered again');
+  assert.equal(findRegisteredConfig(configs, { space_type: 'human', space_id: 'other', schema_id: 'sc' }), null);
+});
+
+test('Dhiway Spaces without a configuration are listed as unregistered, with legacy rows read as Human', () => {
+  const configs = [{ id: 'a', space_type: 'human', space_id: 'sp1', schema_id: 'sc1', is_active: true }];
+  const rows = [
+    { space_id: 'sp1', schema_id: 'sc1', space_type: 'human' },
+    { space_id: 'sp2', schema_id: 'sc2' },
+    { space_id: 'sp3', schema_id: 'sc3', space_type: 'warranty' },
+    { space_id: '', schema_id: 'x' },
+  ];
+  assert.deepEqual(unregisteredDhiwaySpaces(rows, configs), [
+    { space_type: 'human', space_id: 'sp2', schema_id: 'sc2' },
+    { space_type: 'warranty', space_id: 'sp3', schema_id: 'sc3' },
+  ]);
+  assert.deepEqual(unregisteredDhiwaySpaces(undefined, configs), []);
+});
+
+test('the saved sample record prefills the edit form when the server returns one', () => {
+  assert.match(configSampleText({ sample_record: { name: 'Asha' } }), /"name": "Asha"/);
+  assert.equal(configSampleText({ sample_record: {} }), '');
+  assert.equal(configSampleText({ sample_record: null }), '');
+  assert.equal(configSampleText({}), '');
 });
 
 test('pasted API-shaped JSON fills every field, maps become rows', () => {
@@ -245,6 +302,7 @@ test('pasted API-shaped JSON fills every field, maps become rows', () => {
     output_map: [{ key: 'full_name', value: 'Name' }],
     is_default: true,
   });
+  // (is_default in a pasted body is read-only information and is ignored.)
   const { form, errors } = schemaConfigJsonToForm(json, emptySchemaConfigForm('human'));
   assert.equal(errors, undefined);
   assert.equal(form.label, 'Acme');
@@ -252,7 +310,7 @@ test('pasted API-shaped JSON fills every field, maps become rows', () => {
   assert.deepEqual(form.local_fields.map((f) => [f.name, f.aliasesText]), [['employee_name', 'Emp Name, Name'], ['dept', '']]);
   assert.deepEqual(form.input_map, [{ key: 'full_name', value: 'employee_name' }]);
   assert.deepEqual(form.output_map, [{ key: 'full_name', value: 'Name' }]);
-  assert.equal(form.is_default, true);
+  assert.equal('is_default' in form, false);
 });
 
 test('missing keys keep the current form values; a {config} wrapper is unwrapped', () => {
@@ -294,4 +352,40 @@ test('reserved __schema_record__ is never shown or sent back', async () => {
   assert.deepEqual(visibleCustomFields({ city: 'Pune', __schema_record__: { a: 1 } }), { city: 'Pune' });
   assert.deepEqual(visibleCustomFields(null), {});
   assert.deepEqual(visibleCustomFields(['x']), {});
+});
+
+test('version chains: the newest row is found by following previous_version_id', () => {
+  const rows = [
+    { id: 'v1', version: 1, is_active: false },
+    { id: 'v2', version: 2, is_active: false, previous_version_id: 'v1' },
+    { id: 'v3', version: 3, is_active: false, previous_version_id: 'v2' },
+    { id: 'other', version: 1, is_active: true },
+  ];
+  assert.equal(latestInChain(rows, rows[0]).id, 'v3');
+  assert.equal(latestInChain(rows, rows[2]).id, 'v3');
+  assert.equal(isLatestVersion(rows, rows[1]), false);
+  assert.equal(isLatestVersion(rows, rows[2]), true);
+  assert.equal(isLatestVersion(rows, rows[3]), true);
+  assert.equal(latestInChain(rows, null), null);
+});
+
+test('the list shows active rows and, on request, only the newest row of each inactive chain', () => {
+  const rows = [
+    { id: 'a1', version: 1, is_active: false },
+    { id: 'a2', version: 2, is_active: false, previous_version_id: 'a1' },
+    { id: 'b1', version: 1, is_active: false, space_type: 'product' },
+    { id: 'c2', version: 2, is_active: true, previous_version_id: 'c1' },
+    { id: 'c1', version: 1, is_active: false },
+  ];
+  assert.deepEqual(visibleSchemaConfigs(rows, false).map((c) => c.id), ['c2']);
+  assert.deepEqual(visibleSchemaConfigs(rows, true).map((c) => c.id), ['c2', 'a2', 'b1'], 'active first; superseded versions hidden');
+});
+
+test('restore errors keep the server message and fall back per status', () => {
+  assert.equal(restoreErrorMessage(409, 'label taken'), 'label taken');
+  assert.match(restoreErrorMessage(409, ''), /cannot be restored/);
+  assert.match(restoreErrorMessage(403, ''), /not allowed/);
+  assert.match(restoreErrorMessage(404, ''), /no longer exists/);
+  assert.match(STALE_VERSION_MESSAGE, /no longer the latest version/);
+  assert.match(RESTORE_CONFIRM_MESSAGE, /new active version/);
 });

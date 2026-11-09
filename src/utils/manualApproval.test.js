@@ -79,3 +79,12 @@ test('staging excludes unmatched rows and never authorizes a server approval', (
   assert.deepEqual(stagedManualApprovalUsers(info, { matched: { name: 'AS-01.pdf' } }).map(u => u.batch_user_id), ['matched']);
   assert.deepEqual([...manualApprovalEligibleIds(info)], []);
 });
+
+test('users_without_report lists who still needs documents, with names from the request', async () => {
+  const { usersWithoutReport } = await import('./manualApproval.js');
+  const users = [{ batch_user_id: 'a', full_name: 'Amit Chopra' }, { batch_user_id: 'b', full_name: 'Amaan Chopra' }];
+  assert.deepEqual(usersWithoutReport({ users_without_report: ['b'] }, users), [{ id: 'b', name: 'Amaan Chopra' }]);
+  assert.deepEqual(usersWithoutReport({ users_without_report: [{ batch_user_id: 'b' }, { user_id: 'b' }, { batch_user_id: 'z', full_name: 'Zed' }] }, users), [{ id: 'b', name: 'Amaan Chopra' }, { id: 'z', name: 'Zed' }]);
+  assert.deepEqual(usersWithoutReport({ files_uploaded: 1 }, users), [], 'an older backend without the field shows nothing');
+  assert.deepEqual(usersWithoutReport(null, users), []);
+});

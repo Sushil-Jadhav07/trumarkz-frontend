@@ -73,9 +73,8 @@ export const resolveDhiwaySpaceId = (rows = [], requestedType = 'human') =>
 
 // Brings every active Schema Configuration's space/schema into the org's Dhiway Spaces list
 // (dhiways_details), so both lists agree. Rows already present — same space_id, schema_id and
-// space_type — are left alone, so nothing is ever duplicated. A config marked default becomes the
-// default row for its own space_type; a newly added row is otherwise default only if its type had
-// no row yet. Returns the updated rows and whether anything changed.
+// space_type — are left alone, so nothing is ever duplicated. A newly added row is default only if
+// its type had no row yet; an existing default is never changed from a configuration. Returns the updated rows and whether anything changed.
 export const mergeSchemaConfigSpaces = (rows = [], configs = []) => {
   const next = normalizeDhiwayDetails(rows).map((r) => ({ ...r }));
   let changed = false;
@@ -99,11 +98,8 @@ export const mergeSchemaConfigSpaces = (rows = [], configs = []) => {
         next.push(row);
         changed = true;
       }
-      if (c.is_default && !row.default) {
-        ofType.forEach((r) => { r.default = false; });
-        row.default = true;
-        changed = true;
-      }
+      // The default is owned by Dhiway Spaces alone: a configuration's is_default is read-only here and
+      // never changes which row is the default.
     });
 
   return { rows: next, changed };

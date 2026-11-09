@@ -679,7 +679,7 @@ export const Profile = () => {
 
             {/* Schema configurations: each action is its own immediate API call, independent of the Edit above. */}
             <section aria-label="Schema configurations" className="mb-4 rounded-xl border border-gray-100 bg-white p-5">
-              <OrgSchemaConfigsPanel orgId={user?.id} onConfigsChange={syncSchemaSpaces} layout="columns" />
+              <OrgSchemaConfigsPanel orgId={user?.id} onConfigsChange={syncSchemaSpaces} layout="columns" dhiwaySpaces={user?.dhiwaysDetails || []} />
             </section>
           </>
         )}

@@ -13,12 +13,15 @@ import { VerificationDetailsModal, VerificationCheckDetailsModal } from '@/compo
 import { TablePagination } from '@/components/shared/TablePagination';
 import { useAutomaticBatchRefresh } from '@/hooks/useAutomaticBatchRefresh';
 import { batchSdcSpaceId } from '@/utils/dhiway';
+import { normalizeCertificatesByUser, certificateEntriesByUser, certificateEntryFor, certificateDisplay } from '@/utils/sdcCertificates';
 import { ShareResultNote } from '@/components/shared/ShareResultNote';
+import { SendToVerifierModal } from '@/components/shared/SendToVerifierModal';
+import { canSendToVerifier } from '@/utils/smartSend';
 import { shareResultMessage } from '@/utils/partialSdc';
 import { CertificateAccessPanel, ReportsProtectedBadge } from '@/components/shared/CertificateAccessPanel';
 import { isHumanBatch, canRequireHolderApproval } from '@/utils/certificateAccess';
 import {
-  useBatchList, WORKFLOW_STEPS, isProductRecord, recordTitle, getCertificateProductId,
+  useBatchList, WORKFLOW_STEPS, recordTitle,
   formatVerifTypeLabel, statusBadge,
   SmartSendModal, SendRejectedListModal, DeleteBatchModal, ResendRejectedModal,
 } from '@/pages/admin/BatchMonitor';
@@ -127,13 +130,12 @@ export const BatchControlCenter = () => {
   useAutomaticBatchRefresh({ batchId, batchType: batchDetail?.batch_type, records: batchDetail?.users, onUpdate: setBatchDetail });
   const [smartSendOpen, setSmartSendOpen] = useState(false);
   const [smartSendBatch, setSmartSendBatch] = useState(null);
+  const [sendToVerifier, setSendToVerifier] = useState(null); // { record, typeName } — one user, one verification type
   const [sdcGenerateBatch, setSdcGenerateBatch] = useState(null);
   const [sdcLiveStatus, setSdcLiveStatus] = useState(null); // { batchId, ready, total }
   const [sdcPollingBatchId, setSdcPollingBatchId] = useState(null);
-  const [sdcRecordsByEmail, setSdcRecordsByEmail] = useState({});
-  const [sdcRecordsByName, setSdcRecordsByName] = useState({});
-  const [batchSdcRecords, setBatchSdcRecords] = useState([]);
-  const [batchSdcByRecordId, setBatchSdcByRecordId] = useState({});
+  const [batchSdcByRecordId, setBatchSdcByRecordId] = useState({}); // { batch_user_id: certificate entry } from certificates_by_user
+  const [sdcCertsKnown, setSdcCertsKnown] = useState(true); // false when the backend did not send certificates_by_user
   const [sdcCertsLoading, setSdcCertsLoading] = useState(false);
   const [downloadingSdcId, setDownloadingSdcId] = useState(null);
   const [detailRecord, setDetailRecord] = useState(null);
@@ -168,189 +170,55 @@ export const BatchControlCenter = () => {
     }
   }, [selectedBatch?.batchType, navigate]);
 
-  // Pulls the org's SDC records and matches them to this batch's users by
-  // email — same anchorTime-based issued/draft distinction used elsewhere.
-  // Dhiway records are matched to batch users "by email or name" per the
-  // backend docs — email alone isn't enough (test/dummy records often have
-  // empty or non-matching email fields), so also index by title as a fallback.
-  const refreshSdcCertificates = useCallback(async (batchIdArg = batchId, detailRecordsArg = null, sdcInfoArg = undefined) => {
-    if (!batchIdArg) return;
-    // Prefer the batch's own recorded verification_progress.sdc.{org_id,space_id}
-    // — that's exactly what was used to generate this batch's certificates,
-    // and is more reliable than the org's *current* profile setting (which
-    // this falls back to only for older batches that predate this field).
+  // Individual certificate ownership comes ONLY from GET /sdc/batches/{id}/status → certificates_by_user
+  // (exact batch_user_id → confirmed public id). Certificates are never matched to people by email, name
+  // or list position, and a batch-level "SDC created" status does not make a user Ready. The org's Dhiway
+  // record list is read only to decorate a confirmed public id (title, anchor time…), looked up by public id.
+  const refreshSdcCertificates = useCallback(async (batchIdArg = batchId, _detailRecordsArg = null, sdcInfoArg = undefined) => {
+    if (!batchIdArg) return {};
     const sdcInfo = sdcInfoArg !== undefined ? sdcInfoArg : batchDetail?.verification_progress?.sdc;
     const orgId   = sdcInfo?.org_id || undefined;
     const spaceId = batchSdcSpaceId(sdcInfo, selectedBatch?.spaceId) || undefined;
     setSdcCertsLoading(true);
     try {
-      // GET /sdc/batches/{batch_id}/status's certificate_ids is the backend's
-      // own authoritative "issued for this batch" set (same signal the org
-      // side's BatchStatus.jsx already learned to trust — see its own
-      // comment: "presence in certificate_ids already means issued, don't
-      // also require anchorTime"). The bulk list's anchorTime/revoked fields
-      // track actual on-chain anchoring, a separate and sometimes-delayed
-      // step — a cert can be fully generated and downloadable well before
-      // anchorTime is set, so anchorTime alone was mislabeling every such
-      // cert "Draft". Treat either signal as sufficient.
-      const certIds = await sdcAPI.getBatchStatus(batchIdArg)
-        .then(({ data }) => new Set(Array.isArray(data?.certificate_ids) ? data.certificate_ids : []))
-        .catch(() => new Set());
-      const isIssued = (r) => !r.revoked && (!!r.anchorTime || certIds.has(r.publicId));
+      const statusData = await sdcAPI.getBatchStatus(batchIdArg).then(({ data }) => data).catch(() => null);
+      const { known, byUser } = normalizeCertificatesByUser(statusData);
+      setSdcCertsKnown(known);
+      const confirmedIds = new Set(Object.values(byUser));
 
-      const allRecords = [];
-      let page = 1;
-      let hasMore = true;
-
-      while (hasMore) {
-        const { data } = await sdcAPI.getRecords({ active: 1, page, pageSize: 100, org_id: orgId, space_id: spaceId });
-        const pageRecords = Array.isArray(data?.records) ? data.records : [];
-        allRecords.push(...pageRecords);
-        const totalPages = Number(data?.totalPages || data?.total_pages || 0);
-        hasMore = totalPages > 0 ? page < totalPages : pageRecords.length === 100;
-        page += 1;
-      }
-
-      const byEmail = {};
-      const byName = {};
-      allRecords.forEach((r) => {
-        const issued = isIssued(r);
-        const entry = {
-          id: r.id, publicId: r.publicId, title: r.title, issued,
-          recipients: Array.isArray(r.recipients) ? r.recipients : [],
-          anchorTime: r.anchorTime || null, revoked: !!r.revoked,
-          active: !!r.active, latest: !!r.latest, edited: !!r.edited,
-          createdAt: r.createdAt || null, updatedAt: r.updatedAt || null,
-        };
-        (r.recipients || []).forEach((email) => {
-          if (email) byEmail[email.toLowerCase()] = entry;
-        });
-        if (r.title?.trim()) byName[r.title.trim().toLowerCase()] = entry;
-      });
-      setSdcRecordsByEmail(byEmail);
-      setSdcRecordsByName(byName);
-
-      const detailRecords = detailRecordsArg || batchDetail?.users || selectedBatch?.records || [];
-      const matchedRecords = [];
-      const matchedByRecordId = {};
-      const seenPublicIds = new Set();
-      detailRecords.forEach((record) => {
-        // Confirmed via the live batch-details response: each user is keyed
-        // by `user_id`, not `id` — check all three since the shape can vary.
-        const recordId = record?.id || record?.user_id || record?.entity_id;
-        const recordEmail = record?.email?.trim().toLowerCase();
-        const recordName = recordTitle(record)?.trim().toLowerCase();
-        const match = allRecords.find((item) => {
-          const recipients = (item?.recipients || []).map((value) => value?.trim().toLowerCase()).filter(Boolean);
-          const itemTitle = item?.title?.trim().toLowerCase();
-          return (recordEmail && recipients.includes(recordEmail)) || (recordName && itemTitle === recordName);
-        });
-        if (match?.publicId && !seenPublicIds.has(match.publicId)) {
-          seenPublicIds.add(match.publicId);
-          matchedRecords.push(match);
-        }
-        if (match?.publicId && recordId) {
-          matchedByRecordId[recordId] = {
-            id: match.id,
-            publicId: match.publicId,
-            title: match.title,
-            recipients: match.recipients || [],
-            anchorTime: match.anchorTime || null,
-            revoked: !!match.revoked,
-            issued: isIssued(match),
-            active: !!match.active,
-            latest: !!match.latest,
-            edited: !!match.edited,
-            createdAt: match.createdAt || null,
-            updatedAt: match.updatedAt || null,
-          };
-        }
-      });
-
-      // Product records never match by the pass above — they have no email,
-      // and Dhiway echoes the certificate's own publicId into `title` for
-      // this batch type (confirmed live), so title === recordName never
-      // holds either. The list endpoint carries nothing identity-based for
-      // products, but a single-record detail fetch does: credentialSubject.
-      // product_id (confirmed live via GET /sdc/records/{publicId}). Only
-      // chase this down for whichever records are still unmatched, and only
-      // among the most-recently-created still-unclaimed certs, so this stays
-      // a handful of extra requests rather than one per cert in the space.
-      const currentBatchType = batchDetail?.batch_type || selectedBatch?.batchType;
-      const unmatchedProductRecords = detailRecords.filter((record) => {
-        const recordId = record?.id || record?.user_id || record?.entity_id;
-        return isProductRecord(record, currentBatchType) && recordId && !matchedByRecordId[recordId];
-      });
-
-      if (unmatchedProductRecords.length > 0) {
-        const candidatePool = allRecords
-          .filter((item) => item?.publicId && !seenPublicIds.has(item.publicId))
-          .sort((a, b) => new Date(b.createdAt || b.anchorTime || 0) - new Date(a.createdAt || a.anchorTime || 0))
-          .slice(0, Math.max(unmatchedProductRecords.length * 4, 20));
-
-        const detailed = await Promise.all(
-          candidatePool.map((item) =>
-            sdcAPI.getRecord(item.publicId)
-              .then(({ data }) => ({ item, productId: getCertificateProductId(data) }))
-              .catch(() => null)
-          )
-        );
-
-        const certByProductId = new Map();
-        detailed.forEach((entry) => {
-          if (entry?.productId && !certByProductId.has(entry.productId)) {
-            certByProductId.set(entry.productId, entry.item);
+      // Decorate confirmed public ids with Dhiway metadata (only when there is something to decorate).
+      const metaByPublicId = {};
+      if (confirmedIds.size > 0) {
+        try {
+          let page = 1;
+          let hasMore = true;
+          while (hasMore) {
+            const { data } = await sdcAPI.getRecords({ active: 1, page, pageSize: 100, org_id: orgId, space_id: spaceId });
+            const pageRecords = Array.isArray(data?.records) ? data.records : [];
+            pageRecords.forEach((r) => { if (r?.publicId && confirmedIds.has(r.publicId)) metaByPublicId[r.publicId] = r; });
+            const totalPages = Number(data?.totalPages || data?.total_pages || 0);
+            hasMore = totalPages > 0 ? page < totalPages : pageRecords.length === 100;
+            page += 1;
           }
-        });
-
-        unmatchedProductRecords.forEach((record) => {
-          const recordId = record?.id || record?.user_id || record?.entity_id;
-          const match = certByProductId.get(recordId);
-          if (!match?.publicId || seenPublicIds.has(match.publicId)) return;
-          seenPublicIds.add(match.publicId);
-          matchedRecords.push(match);
-          matchedByRecordId[recordId] = {
-            id: match.id,
-            publicId: match.publicId,
-            title: match.title,
-            recipients: match.recipients || [],
-            anchorTime: match.anchorTime || null,
-            revoked: !!match.revoked,
-            issued: isIssued(match),
-            active: !!match.active,
-            latest: !!match.latest,
-            edited: !!match.edited,
-            createdAt: match.createdAt || null,
-            updatedAt: match.updatedAt || null,
-          };
-        });
+        } catch {
+          // metadata is optional — the confirmed mapping alone is enough to show Ready and to download
+        }
       }
 
-      setBatchSdcRecords(matchedRecords);
-      setBatchSdcByRecordId(matchedByRecordId);
-      // Returned (not just set as state) so a caller that needs the result
-      // synchronously right after awaiting this — the post-generate poll
-      // below, specifically — doesn't have to wait a render cycle for state
-      // to catch up, or re-derive the same match itself.
-      return matchedByRecordId;
+      const entries = certificateEntriesByUser(byUser, metaByPublicId);
+      setBatchSdcByRecordId(entries);
+      // Returned (not just set as state) so a caller that needs the result synchronously right after
+      // awaiting this — the post-generate poll — doesn't have to wait a render cycle.
+      return entries;
     } catch {
-      // silent — certificate column just stays blank if this fails
-      setBatchSdcRecords([]);
       setBatchSdcByRecordId({});
       return {};
     } finally {
       setSdcCertsLoading(false);
     }
-  }, [batchDetail?.users, batchDetail?.verification_progress?.sdc, selectedBatch?.records, selectedBatch?.spaceId, batchId]);
+  }, [batchDetail?.verification_progress?.sdc, selectedBatch?.spaceId, batchId]);
 
-  const matchSdcRecord = useCallback((record) => {
-    const recordId = record?.id || record?.user_id || record?.entity_id;
-    if (recordId && batchSdcByRecordId[recordId]) return batchSdcByRecordId[recordId];
-    const byEmail = record?.email ? sdcRecordsByEmail[record.email.toLowerCase()] : null;
-    if (byEmail) return byEmail;
-    const title = recordTitle(record)?.trim().toLowerCase();
-    return title ? sdcRecordsByName[title] || null : null;
-  }, [batchSdcByRecordId, sdcRecordsByEmail, sdcRecordsByName]);
+  const matchSdcRecord = useCallback((record) => certificateEntryFor(batchSdcByRecordId, record), [batchSdcByRecordId]);
 
   // ── Action: Generate SDC — poll GET /status until done, mirrors the flow
   // used in SDCVerification.jsx so the still-open panel can update itself
@@ -454,10 +322,8 @@ export const BatchControlCenter = () => {
     setBatchDetail(null);
     setSubmittedReports(null);
     setManualAssignments(null);
-    setSdcRecordsByEmail({});
-    setSdcRecordsByName({});
-    setBatchSdcRecords([]);
     setBatchSdcByRecordId({});
+    setSdcCertsKnown(true);
     setLoadingDetail(true);
     setLoadingReports(true);
 
@@ -589,6 +455,25 @@ export const BatchControlCenter = () => {
     // verifier filter reflect them immediately, no full page reload required.
     loadManualAssignments(batch.id);
   };
+
+  // After assigning a verifier, resending, or an approve / reject: re-read the batch (per-user checks and the
+  // batch summary) and the persisted verifier assignments, so each user's row reflects only their own state.
+  const refreshAfterVerifierAction = useCallback(async () => {
+    try {
+      const { data } = await verificationAPI.getBatchDetails(batchId);
+      if (data) setBatchDetail(data);
+    } catch {
+      // the next automatic refresh will pick it up
+    }
+    loadManualAssignments(batchId);
+    fetchData(true);
+  }, [batchId, loadManualAssignments, fetchData]);
+
+  // Approve / reject inside the details modals returns that one record: merge it by exact id only.
+  const handleRecordUpdate = useCallback((record) => {
+    setBatchDetail((previous) => previous ? { ...previous, users: previous.users.map((row) => String(row.id || row.user_id || row.entity_id) === String(record.id) ? { ...row, ...record } : row) } : previous);
+    fetchData(true);
+  }, [fetchData]);
 
   const handleResend = async (requestId, verifierEmail) => {
     setResending(requestId);
@@ -1237,12 +1122,11 @@ export const BatchControlCenter = () => {
                       const batchUserId = record.id || record.user_id || record.entity_id;
                       const checkEntries = Object.entries(record.verification_type_status || {});
                       const rejections = checkEntries.filter(([, v]) => v?.status === 'rejected');
-                      // Certificate — same matchSdcRecord() this page already
-                      // uses for the modal's SDC column, keyed by stable
-                      // BatchUser/product identity, never by display name.
-                      const certMatch = matchSdcRecord(record);
-                      const certState = certMatch ? (certMatch.issued ? 'Ready' : 'Draft') : 'Not Generated';
-                      const certBadgeStatus = certMatch ? (certMatch.issued ? 'info' : 'pending') : 'default';
+                      // Certificate — this exact user's own credential from certificates_by_user
+                      // (batch_user_id), never matched by email, name or position.
+                      const certView = certificateDisplay(matchSdcRecord(record), sdcCertsKnown);
+                      const certState = certView.label;
+                      const certBadgeStatus = certView.badge;
                       return (
                         <tr key={batchUserId} className="hover:bg-gray-50/70 transition-colors align-top">
                           <td className="px-3 py-2.5">
@@ -1302,6 +1186,16 @@ export const BatchControlCenter = () => {
                                           {name}
                                         </button>
                                         <p className={`text-[11px] font-semibold font-inter ${textTone}`}>{label}</p>
+                                        {canSendToVerifier(record, name) && (
+                                          <button
+                                            type="button"
+                                            onClick={() => setSendToVerifier({ record, typeName: name })}
+                                            aria-label={`Send ${name} to a verifier for ${recordTitle(record)}`}
+                                            className="mt-0.5 inline-flex items-center gap-1 text-[10px] font-semibold text-brand-blue font-inter hover:underline"
+                                          >
+                                            <Mail size={10} /> Send to Verifier
+                                          </button>
+                                        )}
                                       </div>
                                     </div>
                                   );
@@ -1502,8 +1396,18 @@ export const BatchControlCenter = () => {
       <SmartSendModal
         isOpen={smartSendOpen}
         onClose={() => { setSmartSendOpen(false); setSmartSendBatch(null); }}
-        onSent={(result) => { handleBulkSent(smartSendBatch, result); setSmartSendOpen(false); setSmartSendBatch(null); }}
+        onSent={(result) => { handleBulkSent(smartSendBatch, result); refreshAfterVerifierAction(); }}
         batch={smartSendBatch}
+      />
+
+      {/* ── Individual Send to Verifier (one user, one verification type) ───────── */}
+      <SendToVerifierModal
+        isOpen={!!sendToVerifier}
+        onClose={() => setSendToVerifier(null)}
+        batchId={batchId}
+        record={sendToVerifier?.record}
+        typeName={sendToVerifier?.typeName}
+        onDone={() => refreshAfterVerifierAction()}
       />
 
       {/* ── Send Rejected List Modal ─────────────────────────────────────────── */}
@@ -1518,12 +1422,13 @@ export const BatchControlCenter = () => {
           ? (verificationDetailsRecord.id || verificationDetailsRecord.user_id || verificationDetailsRecord.entity_id)
           : null;
         const vdCertMatch = verificationDetailsRecord ? matchSdcRecord(verificationDetailsRecord) : null;
+        const vdCertView = certificateDisplay(vdCertMatch, sdcCertsKnown);
         const vdCertificate = verificationDetailsRecord
           ? {
-              status: vdCertMatch ? (vdCertMatch.issued ? 'ready' : 'draft') : 'not_generated',
-              label: vdCertMatch ? (vdCertMatch.issued ? 'Ready' : 'Draft') : 'Not Generated',
-              canView: !!vdCertMatch,
-              canDownload: !!vdCertMatch,
+              status: vdCertView.status,
+              label: vdCertView.label,
+              canView: vdCertView.canView,
+              canDownload: vdCertView.canDownload,
               downloading: vdCertMatch ? downloadingSdcId === vdCertMatch.publicId : false,
             }
           : null;
@@ -1531,7 +1436,7 @@ export const BatchControlCenter = () => {
           <VerificationDetailsModal
             batchId={batchId}
             batchType={batchDetail?.batch_type}
-            onRecordUpdate={(record) => setBatchDetail((previous) => previous ? { ...previous, users: previous.users.map((row) => String(row.id || row.user_id || row.entity_id) === String(record.id) ? { ...row, ...record } : row) } : previous)}
+            onRecordUpdate={handleRecordUpdate}
             showDocuments
             record={verificationDetailsRecord}
             title={verificationDetailsRecord
@@ -1541,8 +1446,8 @@ export const BatchControlCenter = () => {
             onClose={() => setVerificationDetailsRecord(null)}
             verifierByType={vdRecordId ? verifierByRecordAndType[vdRecordId] : undefined}
             certificate={vdCertificate}
-            onViewCertificate={() => vdCertMatch && openSdcCertificate(vdCertMatch.publicId, 'verify')}
-            onDownloadCertificate={() => vdCertMatch && openSdcCertificate(vdCertMatch.publicId, 'pdf')}
+            onViewCertificate={() => vdCertView.canView && openSdcCertificate(vdCertMatch.publicId, 'verify')}
+            onDownloadCertificate={() => vdCertView.canDownload && openSdcCertificate(vdCertMatch.publicId, 'pdf')}
           />
         );
       })()}
@@ -1555,7 +1460,7 @@ export const BatchControlCenter = () => {
           <VerificationCheckDetailsModal
             batchId={batchId}
             batchType={batchDetail?.batch_type}
-            onRecordUpdate={(record) => setBatchDetail((previous) => previous ? { ...previous, users: previous.users.map((row) => String(row.id || row.user_id || row.entity_id) === String(record.id) ? { ...row, ...record } : row) } : previous)}
+            onRecordUpdate={handleRecordUpdate}
             selection={selectedVerification}
             title={recordTitle(svRecord)}
             verifierEmail={verifierByRecordAndType[svRecordId]?.[selectedVerification.typeName]}

@@ -218,11 +218,12 @@ export const parseDhiwaySchemaText = (text) => {
   return { kind: 'ok', schema: parsed };
 };
 
-// What to send as `dhiway_schema`: undefined = omit (keep what is stored), null = clear, object = replace.
+// What to send as `dhiway_schema`: omit (keep what is stored) when the box is unchanged or blank, the
+// object when it was replaced. A blank box never clears: removal is the explicit `clear_dhiway_schema: true`.
 export const dhiwaySchemaForPayload = (text, originalText = '') => {
   if ((text ?? '').trim() === (originalText ?? '').trim()) return { send: false };
   const parsed = parseDhiwaySchemaText(text);
-  if (parsed.kind === 'empty') return { send: true, value: null };
+  if (parsed.kind === 'empty') return { send: false };
   if (parsed.kind === 'ok') return { send: true, value: parsed.schema };
   return { send: false, error: parsed.error };
 };
