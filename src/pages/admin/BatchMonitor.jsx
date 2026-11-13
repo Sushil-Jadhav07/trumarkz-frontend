@@ -1856,7 +1856,7 @@ const WarrantyDetailModal = ({ batchId, batchName, orgId, spaceId, onClose, asPa
 
   const pollSdcStatusUntilDone = useCallback((id) => {
     let attempts = 0;
-    const maxAttempts = 10;
+    const maxAttempts = 30; // about 4 minutes at 8 s
     setSdcPolling(true);
     const tick = async () => {
       attempts += 1;
@@ -1876,7 +1876,7 @@ const WarrantyDetailModal = ({ batchId, batchName, orgId, spaceId, onClose, asPa
         setTimeout(tick, 8000);
       } else {
         setSdcPolling(false);
-        toast.error('Still processing — check the batch again shortly');
+        toast('Still processing — refresh shortly.', { icon: '⏳' });
       }
     };
     tick();

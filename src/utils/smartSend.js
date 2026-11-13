@@ -87,3 +87,34 @@ export const describeUserRef = (item, recordsById = {}) => {
 };
 
 export const requestIdOf = (entry) => entry?.request_id || entry?.token || '';
+
+// ── Resend (POST /verification/manual/resend/{request_id}) ───────────────────────────────────────
+// Several holders can share one request: one button per request, with the holders listed under it.
+export const groupByRequest = (entries, recordsById = {}) => {
+  const groups = new Map();
+  (Array.isArray(entries) ? entries : []).forEach((entry, i) => {
+    const id = requestIdOf(entry);
+    const key = id || `no-request-${i}`;
+    if (!groups.has(key)) groups.set(key, { requestId: id, entry, holders: [] });
+    const group = groups.get(key);
+    const holderIds = Array.isArray(entry?.batch_user_ids) ? entry.batch_user_ids : [entry?.user_id || entry?.batch_user_id].filter(Boolean);
+    const named = entry?.full_name ? [entry.full_name] : holderIds.map((hid) => recordsById[hid] || hid);
+    named.forEach((name) => { if (name && !group.holders.includes(name)) group.holders.push(name); });
+  });
+  return [...groups.values()];
+};
+
+// The line shown after a successful resend call. 200 means the request was reissued; whether the mail server
+// accepted the email is reported separately (email_sent / email_error). Never claims delivery.
+export const resendResultNote = (data, fallbackEmail = '') => {
+  const email = data?.verifier_email || fallbackEmail || 'the verifier';
+  if (data?.email_sent === false) return { ok: false, text: data?.email_error ? `Email failed: ${data.email_error}` : 'The email could not be sent. Try again.' };
+  if (data?.email_sent === true) return { ok: true, text: `Email accepted by the mail server for ${email}. They got a fresh link; the old link no longer works.` };
+  return { ok: true, text: `A fresh link was issued for ${email}.` };
+};
+
+export const resendErrorMessage = (status, serverMessage = '') => {
+  if (status === 400) return 'The verifier has already uploaded the report, so this request is completed and can’t be resent.';
+  if (status === 404) return 'This request could not be found. Refresh the batch and try again.';
+  return serverMessage || 'Failed to resend the verification link';
+};

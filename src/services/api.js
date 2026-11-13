@@ -1414,6 +1414,18 @@ export const certificateAccessAPI = {
     publicVerificationApi.post(`/verification/certificate-access/requests/${encodeURIComponent(requestId)}/additional-reports`, null, {
       headers: { 'X-Certificate-Access-Token': accessToken },
     }),
+  // New (per-check permissions). `resume` re-verifies the same email on a request whose token this browser
+  // doesn't have: it issues a NEW request id and an OTP, then /verify as usual.
+  resumeRequest: (requestId, email) =>
+    publicVerificationApi.post(`/verification/certificate-access/requests/${encodeURIComponent(requestId)}/resume`, { visitor_email: email }),
+  listChecks: (requestId, accessToken) =>
+    publicVerificationApi.get(`/verification/certificate-access/requests/${encodeURIComponent(requestId)}/checks`, {
+      headers: { 'X-Certificate-Access-Token': accessToken },
+    }),
+  requestPermission: (requestId, accessToken, checkIds) =>
+    publicVerificationApi.post(`/verification/certificate-access/requests/${encodeURIComponent(requestId)}/permission-request`, { check_ids: checkIds }, {
+      headers: { 'X-Certificate-Access-Token': accessToken },
+    }),
   getRequestStatus: (requestId, accessToken) =>
     publicVerificationApi.get(`/verification/certificate-access/requests/${encodeURIComponent(requestId)}/status`, {
       headers: { 'X-Certificate-Access-Token': accessToken },
@@ -1422,10 +1434,21 @@ export const certificateAccessAPI = {
   // Holder (§4e).
   getApproval: (token) =>
     publicVerificationApi.get(`/verification/certificate-access/approvals/${encodeURIComponent(token)}`),
+  // Per-check decisions: { decisions: [{ check_id, decision }], dob, phone_number }.
+  decideChecks: (token, body) =>
+    publicVerificationApi.post(`/verification/certificate-access/approvals/${encodeURIComponent(token)}/checks`, body),
   decideReports: (token, body) =>
     publicVerificationApi.post(`/verification/certificate-access/approvals/${encodeURIComponent(token)}/reports`, body),
   decideApproval: (token, body) =>
     publicVerificationApi.post(`/verification/certificate-access/approvals/${encodeURIComponent(token)}`, body),
+};
+
+// Individual SDC sharing (organization session or SuperAdmin): one email per selected holder, with only that
+// holder's own SDC PDF. Never changes shared_with_org.
+export const holderSdcSharesAPI = {
+  list: (batchId) => verificationApi.get(`/sdc/batches/${encodeURIComponent(batchId)}/holder-shares`),
+  send: (batchId, userIds, resend = false) =>
+    verificationApi.post(`/sdc/batches/${encodeURIComponent(batchId)}/holder-shares`, { user_ids: userIds, resend: !!resend }),
 };
 
 // Fetch a report with the signed-in session (or a visitor token) — only ever sent

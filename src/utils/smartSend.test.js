@@ -64,3 +64,23 @@ test('missing optional fields never throw', () => {
   assert.deepEqual(summarizeSmartSend(null).totals, { sent: 0, failed: 0, skipped: 0, alreadyOpen: 0 });
   assert.equal(smartSendHeadline(summarizeSmartSend({})), 'Nothing was sent');
 });
+
+test('holders that share one request are grouped under a single Resend', async () => {
+  const { groupByRequest, resendResultNote, resendErrorMessage } = await import('./smartSend.js');
+  const groups = groupByRequest([
+    { request_id: 'r1', user_id: 'u1', full_name: 'Om Padhi', verifier_email: 'v@x.in' },
+    { request_id: 'r1', user_id: 'u2', full_name: 'Shree Agarwal', verifier_email: 'v@x.in' },
+    { request_id: 'r2', user_id: 'u3', verifier_email: 'w@x.in' },
+  ], { u3: 'Meena Iyer' });
+  assert.equal(groups.length, 2);
+  assert.deepEqual(groups[0].holders, ['Om Padhi', 'Shree Agarwal']);
+  assert.deepEqual(groups[1].holders, ['Meena Iyer']);
+  assert.deepEqual(groupByRequest(null), []);
+  assert.deepEqual(resendResultNote({ email_sent: true, verifier_email: 'v@x.in' }).ok, true);
+  assert.match(resendResultNote({ email_sent: true, verifier_email: 'v@x.in' }).text, /accepted by the mail server/);
+  assert.doesNotMatch(resendResultNote({ email_sent: true }).text, /deliver/i);
+  assert.deepEqual(resendResultNote({ email_sent: false, email_error: 'SMTP 550' }), { ok: false, text: 'Email failed: SMTP 550' });
+  assert.match(resendErrorMessage(400), /already uploaded/);
+  assert.match(resendErrorMessage(404), /could not be found/);
+  assert.equal(resendErrorMessage(500, 'boom'), 'boom');
+});

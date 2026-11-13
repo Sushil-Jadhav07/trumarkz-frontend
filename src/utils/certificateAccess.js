@@ -38,7 +38,7 @@ export const validateAccessRequestCreated = (data) => {
 };
 
 const ACCESS_NEXT_STEPS = {
-  organization_password: 'organization', holder_credentials: 'holder', holder_approval: 'third_party',
+  organization_password: 'organization', holder_credentials: 'holder', holder_approval: 'third_party', select_checks: 'third_party',
 };
 
 export const accessNextStep = (data) => {
@@ -59,7 +59,7 @@ export const validateAccessRequestStatus = (data, requestId, { verified = false 
   }
   if (verified) {
     const nextStep = accessNextStep(data);
-    if (nextStep !== 'holder_approval' && data.status !== 'pending_approval') {
+    if (!['holder_approval', 'select_checks'].includes(nextStep) && data.status !== 'pending_approval') {
       throw new Error('The required identity check could not be confirmed. Start a new access request.');
     }
   }

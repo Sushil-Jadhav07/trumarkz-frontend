@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import {
   AlertTriangle, CheckCircle2, Clock, Download, FileText, Hourglass, KeyRound, Link2, Lock, Mail, RefreshCw, ShieldX, UserCheck, XCircle,
 } from 'lucide-react';
@@ -9,6 +9,11 @@ import {
 } from '@/components/shared/PublicAccessShell';
 import { certificateAccessAPI, fetchReportBlob, getApiError, reportApiBaseUrl } from '@/services/api';
 import { parseReportReference, referenceFromParams, reportUrlFromReference, retryAfterText } from '@/utils/reportAccess';
+import { ChecksSelector, ApprovedReports } from '@/components/shared/CertificateAccessChecks';
+import {
+  approvedReportsWithExpiry, hasApprovedChecks, normalizeChecks, permissionErrorMessage, permissionRequestMessage, selectedCheckIds,
+  toggleCheckSelection, writeAccessCache,
+} from '@/utils/accessChecks';
 import { additionalReportsError, approvedReportsFrom, canAskForMoreReports, isValidEmail, visitorStatusView, validateAccessRequestCreated, validateAccessRequestStatus, accessNextStep, validateDirectAccess, normalisePhoneInput } from '@/utils/certificateAccess';
 
 // Visitor flow for a protected (holder_approval) report — web change report §4d.
@@ -93,6 +98,12 @@ const CertificateAccessRequestContent = ({ params }) => {
   const [approvedReports, setApprovedReports] = useState([]);
   const [accessScope, setAccessScope] = useState(null);
   const [more, setMore] = useState({ busy: false, message: '', error: '', requested: false });
+  // Per-check permissions (next_step "select_checks"): the checks in the holder's SDC, what is ticked, the
+  // reports already approved for this requester, and the last permission request's outcome.
+  const [checksState, setChecksState] = useState({ loaded: false, loading: false, error: null, checks: [] });
+  const [selectedChecks, setSelectedChecks] = useState(() => new Set());
+  const [grantedReports, setGrantedReports] = useState([]);
+  const [permission, setPermission] = useState({ busy: false, message: '', error: '', sentRequestId: '' });
 
   useEffect(() => {
     activeRef.current = true;
@@ -124,6 +135,8 @@ const CertificateAccessRequestContent = ({ params }) => {
     setNextStep('holder_approval'); setPassword(''); setHolderDob(''); setHolderPhone('');
     setReport(null); setError(null);
     setApprovedReports([]); setAccessScope(null); setMore({ busy: false, message: '', error: '', requested: false });
+    setChecksState({ loaded: false, loading: false, error: null, checks: [] }); setSelectedChecks(new Set()); setGrantedReports([]);
+    setPermission({ busy: false, message: '', error: '', sentRequestId: '' });
     if (!keepEmail) setEmail('');
     setStep('email');
   };
@@ -170,6 +183,8 @@ const CertificateAccessRequestContent = ({ params }) => {
         setStatus(data.status);
         setStep('status');
         writeStored({ requestId, email: email.trim(), reference, accessToken: data.access_token, nextStep: selectedStep });
+        // Convenience cache only (never a permission): lets the status link reopen in this browser.
+        writeAccessCache({ requestId, accessToken: data.access_token, email: email.trim() });
       } catch (err) {
         if (!current()) return;
         const described = describeError(err, 'Invalid or expired code');
@@ -190,6 +205,7 @@ const CertificateAccessRequestContent = ({ params }) => {
         setStatus(data.status);
         setAccessScope(data.access_scope || null);
         setApprovedReports(data.status === 'approved' ? approvedReportsFrom(data, reportApiBaseUrl) : []);
+        setGrantedReports(approvedReportsWithExpiry(data, reportApiBaseUrl));
         if (data.status !== 'approved') setReport(null);
         setPollPaused(statusReadsRef.current >= 30);
       } catch (err) {
@@ -299,7 +315,67 @@ const CertificateAccessRequestContent = ({ params }) => {
     if (status === 'pending_approval' && nextStep !== 'holder_approval') {
       view = ['organization_password', 'holder_credentials'].includes(nextStep) ? nextStep : 'failed';
     }
+    // A third party chooses checks while the request is open (and keeps seeing them once some are approved).
+    if (nextStep === 'select_checks' && ['pending_approval', 'approved'].includes(status)) view = 'checks';
   }
+
+  // GET /checks (names only, with each check's own status) and GET /status (approved reports with expiry).
+  const loadChecks = useCallback(async ({ quiet = false } = {}) => {
+    if (!requestId || !accessToken) return;
+    if (!quiet) setChecksState((previous) => ({ ...previous, loading: true, error: null }));
+    try {
+      const [checksRes, statusRes] = await Promise.all([
+        certificateAccessAPI.listChecks(requestId, accessToken),
+        certificateAccessAPI.getRequestStatus(requestId, accessToken).catch(() => null),
+      ]);
+      if (!activeRef.current) return;
+      const checks = normalizeChecks(checksRes.data);
+      setChecksState({ loaded: true, loading: false, error: null, checks });
+      if (statusRes?.data) setGrantedReports(approvedReportsWithExpiry(statusRes.data, reportApiBaseUrl));
+      // Ticks only ever stay on checks that can still be requested.
+      setSelectedChecks((prev) => new Set(selectedCheckIds(prev, checks)));
+    } catch (err) {
+      if (!activeRef.current) return;
+      const code = err?.response?.status;
+      if (code === 404) { writeStored(null); setStatus('not_found'); return; }
+      setChecksState((previous) => ({ ...previous, loaded: true, loading: false, error: describeError(err, 'We couldn’t load the checks. Please try again.').message }));
+    }
+  }, [requestId, accessToken]);
+
+  useEffect(() => {
+    if (view === 'checks' && !checksState.loaded && !checksState.loading) loadChecks();
+  }, [view, checksState.loaded, checksState.loading, loadChecks]);
+
+  // While some checks wait for the holder, look again every minute (visible tab only, at most 30 times).
+  const hasRequestedChecks = checksState.checks.some((c) => c.status === 'requested');
+  useEffect(() => {
+    if (view !== 'checks' || !hasRequestedChecks) return undefined;
+    let reads = 0;
+    const timer = setInterval(() => {
+      if (++reads > 30) { clearInterval(timer); return; }
+      if (document.visibilityState === 'visible') loadChecks({ quiet: true });
+    }, 60_000);
+    return () => clearInterval(timer);
+  }, [view, hasRequestedChecks, loadChecks]);
+
+  const sendPermissionRequest = async () => {
+    const ids = selectedCheckIds(selectedChecks, checksState.checks);
+    if (permission.busy || ids.length === 0 || !requestId || !accessToken) return;
+    setPermission({ busy: true, message: '', error: '', sentRequestId: '' });
+    try {
+      const { data } = await certificateAccessAPI.requestPermission(requestId, accessToken, ids);
+      setPermission({ busy: false, message: permissionRequestMessage(data), error: '', sentRequestId: data?.request_id || requestId });
+      setSelectedChecks(new Set());
+      await loadChecks({ quiet: true });
+    } catch (err) {
+      const code = err?.response?.status;
+      if (code === 404) { writeStored(null); setStatus('not_found'); setPermission({ busy: false, message: '', error: '', sentRequestId: '' }); return; }
+      setPermission({ busy: false, message: '', error: permissionErrorMessage(code, code === 429 || code === 503 ? '' : getApiError(err, '')), sentRequestId: '' });
+      if (code === 422) loadChecks({ quiet: true });
+    }
+  };
+
+  const chosenIds = selectedCheckIds(selectedChecks, checksState.checks);
 
   return (
     <PublicAccessShell badge="Protected report">
@@ -382,6 +458,58 @@ const CertificateAccessRequestContent = ({ params }) => {
               <button type="button" onClick={() => startOver(true)} disabled={busy} className="font-semibold text-brand-blue hover:underline disabled:opacity-60">Start a new request</button>
             </div>
           </form>
+        ) : view === 'checks' ? (
+          <div>
+            <span className="flex h-11 w-11 items-center justify-center rounded-full bg-blue-50 text-brand-blue"><FileText size={20} strokeWidth={1.75} /></span>
+            <h1 className="mt-4 font-sora text-xl font-bold">Choose the reports you need</h1>
+            <p className="mt-2 break-all text-xs text-gray-500">Email verified: <span className="font-medium text-gray-700">{email}</span></p>
+            <p className="mt-3 text-sm leading-6 text-gray-600">These are the checks in this certificate. Select the ones you want to see and ask the holder for permission. Each report opens only if the holder approves that check.</p>
+
+            {grantedReports.length > 0 && (
+              <div className="mt-5">
+                <ApprovedReports reports={grantedReports} accessToken={accessToken} onRefresh={() => loadChecks()} refreshing={checksState.loading} onExpired={() => loadChecks({ quiet: true })} />
+              </div>
+            )}
+
+            <div className="mt-5">
+              {checksState.loading && !checksState.loaded ? (
+                <p role="status" className="flex items-center justify-center gap-2 py-6 text-sm text-gray-500"><RefreshCw size={16} className="animate-spin motion-reduce:animate-none text-brand-blue" /> Loading checks…</p>
+              ) : checksState.error ? (
+                <div role="alert" className="rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-xs text-red-700">
+                  {checksState.error}
+                  <button type="button" onClick={() => loadChecks()} className="ml-2 font-semibold underline">Try again</button>
+                </div>
+              ) : checksState.checks.length === 0 ? (
+                <p className="rounded-xl border border-gray-100 bg-gray-50 px-4 py-4 text-sm text-gray-600">No checks are available to request for this certificate.</p>
+              ) : (
+                <>
+                  {hasApprovedChecks(checksState.checks) && grantedReports.length === 0 && (
+                    <p className="mb-3 text-xs text-gray-500">Some checks are already approved for you. Use Refresh to see their reports.</p>
+                  )}
+                  <ChecksSelector checks={checksState.checks} selected={selectedChecks} disabled={permission.busy}
+                    onToggle={(id) => setSelectedChecks((prev) => toggleCheckSelection(prev, checksState.checks, id))} />
+                </>
+              )}
+            </div>
+
+            {permission.error && <p role="alert" className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{permission.error}</p>}
+            {permission.message && (
+              <div role="status" className="mt-3 rounded-lg bg-green-50 px-3 py-2 text-xs leading-5 text-green-800">
+                {permission.message}
+                {permission.sentRequestId && <> <Link to={`/certificate-access/status/${encodeURIComponent(permission.sentRequestId)}`} className="font-semibold underline">Open the status page</Link></>}
+              </div>
+            )}
+
+            <PrimaryButton type="button" onClick={sendPermissionRequest} loading={permission.busy}
+              disabled={permission.busy || chosenIds.length === 0} className="mt-5 w-full">
+              {permission.busy && <RefreshCw size={16} className="animate-spin motion-reduce:animate-none" />}
+              Request Permission{chosenIds.length > 0 ? ` (${chosenIds.length})` : ''}
+            </PrimaryButton>
+            <p className="mt-3 text-xs leading-5 text-gray-500">The holder gets one email listing exactly these checks. You’ll be emailed their decision, and approved reports stay available to this email for a limited time.</p>
+            <div className="mt-3 text-center">
+              <button type="button" onClick={() => startOver(true)} disabled={permission.busy} className="text-xs font-semibold text-brand-blue hover:underline disabled:opacity-60">Start a new request</button>
+            </div>
+          </div>
         ) : view === 'checking' ? (
           <AccessState icon={RefreshCw} title="Checking your access">
             <p role="status">Loading the latest decision for your request…</p>

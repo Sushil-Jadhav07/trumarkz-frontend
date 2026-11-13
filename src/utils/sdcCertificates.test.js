@@ -65,3 +65,11 @@ test('every exact identifier of a record is tried, nothing else', () => {
   assert.deepEqual(recordUserIds({ batch_user_id: 'b', user_id: 'u', id: 'i', email: 'e', full_name: 'n' }), ['b', 'u', 'i']);
   assert.equal(certificateEntryFor({ e: { publicId: 'x' } }, { email: 'e' }), null);
 });
+
+test('a holder without a confirmed credential is "Processing" while the batch SDC is still being issued, "Not Issued" otherwise', () => {
+  assert.equal(certificateDisplay(null, true, { processing: true }).status, 'processing');
+  assert.equal(certificateDisplay(null, true, { processing: true }).canDownload, false);
+  assert.equal(certificateDisplay(null, true, { processing: false }).status, 'not_issued');
+  assert.equal(certificateDisplay(null, false, { processing: true }).status, 'unavailable');
+  assert.equal(certificateDisplay({ publicId: 'p', issued: true }, true, { processing: true }).status, 'ready', 'a confirmed credential is always Ready');
+});

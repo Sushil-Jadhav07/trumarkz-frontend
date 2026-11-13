@@ -107,6 +107,8 @@ const TypeRow = ({ name, info, verifierEmail }) => {
 const getCertificateMeta = (certificate) => (
   certificate?.status === 'ready'
     ? { badge: 'info', label: certificate.label || 'Ready' }
+    : certificate?.status === 'processing'
+      ? { badge: 'pending', label: certificate.label || 'Processing' }
     : certificate?.status === 'revoked'
       ? { badge: 'error', label: certificate.label || 'Revoked' }
     : certificate?.status === 'draft'

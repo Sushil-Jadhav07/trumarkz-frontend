@@ -15,8 +15,9 @@ import { useAutomaticBatchRefresh } from '@/hooks/useAutomaticBatchRefresh';
 import { batchSdcSpaceId } from '@/utils/dhiway';
 import { normalizeCertificatesByUser, certificateEntriesByUser, certificateEntryFor, certificateDisplay } from '@/utils/sdcCertificates';
 import { ShareResultNote } from '@/components/shared/ShareResultNote';
+import { HolderSdcSharing } from '@/components/shared/HolderSdcSharing';
 import { SendToVerifierModal } from '@/components/shared/SendToVerifierModal';
-import { canSendToVerifier } from '@/utils/smartSend';
+import { canSendToVerifier, resendErrorMessage, resendResultNote } from '@/utils/smartSend';
 import { shareResultMessage } from '@/utils/partialSdc';
 import { CertificateAccessPanel, ReportsProtectedBadge } from '@/components/shared/CertificateAccessPanel';
 import { isHumanBatch, canRequireHolderApproval } from '@/utils/certificateAccess';
@@ -135,6 +136,7 @@ export const BatchControlCenter = () => {
   const [sdcLiveStatus, setSdcLiveStatus] = useState(null); // { batchId, ready, total }
   const [sdcPollingBatchId, setSdcPollingBatchId] = useState(null);
   const [batchSdcByRecordId, setBatchSdcByRecordId] = useState({}); // { batch_user_id: certificate entry } from certificates_by_user
+  const [sdcCertsDone, setSdcCertsDone] = useState(false); // the backend's /status says every certificate is issued
   const [sdcCertsKnown, setSdcCertsKnown] = useState(true); // false when the backend did not send certificates_by_user
   const [sdcCertsLoading, setSdcCertsLoading] = useState(false);
   const [downloadingSdcId, setDownloadingSdcId] = useState(null);
@@ -184,6 +186,7 @@ export const BatchControlCenter = () => {
       const statusData = await sdcAPI.getBatchStatus(batchIdArg).then(({ data }) => data).catch(() => null);
       const { known, byUser } = normalizeCertificatesByUser(statusData);
       setSdcCertsKnown(known);
+      setSdcCertsDone(!!statusData?.done);
       const confirmedIds = new Set(Object.values(byUser));
 
       // Decorate confirmed public ids with Dhiway metadata (only when there is something to decorate).
@@ -242,7 +245,7 @@ export const BatchControlCenter = () => {
   // as before — unchanged behavior there.
   const pollSdcStatusUntilDone = useCallback((polledBatchId, watchUserIds = null) => {
     let attempts = 0;
-    const maxAttempts = 10;
+    const maxAttempts = 30; // about 4 minutes at 8 s: Dhiway issues in the background
     setSdcPollingBatchId(polledBatchId);
     const tick = async () => {
       attempts += 1;
@@ -289,7 +292,7 @@ export const BatchControlCenter = () => {
         setTimeout(tick, 8000);
       } else {
         setSdcPollingBatchId((current) => (current === polledBatchId ? null : current));
-        toast.error('Still processing — check the batch again shortly');
+        toast('Still processing — refresh shortly.', { icon: '⏳' });
       }
     };
     tick();
@@ -324,6 +327,7 @@ export const BatchControlCenter = () => {
     setManualAssignments(null);
     setBatchSdcByRecordId({});
     setSdcCertsKnown(true);
+    setSdcCertsDone(false);
     setLoadingDetail(true);
     setLoadingReports(true);
 
@@ -342,9 +346,8 @@ export const BatchControlCenter = () => {
         // Verified pipeline — gate on the batch's actual SDC status (only present
         // on the detail response, the list endpoint never returns it).
         const sdcInfo = detailData?.verification_progress?.sdc;
-        if (sdcInfo?.status) {
-          await refreshSdcCertificates(batchId, detailData?.users || [], sdcInfo);
-        }
+        // Every time the batch opens (also after a reload): each /status call lets the backend issue pending drafts.
+        await refreshSdcCertificates(batchId, detailData?.users || [], sdcInfo);
       } catch (err) {
         if (!cancelled) toast.error(getApiError(err, 'Failed to load batch details'));
       } finally {
@@ -478,10 +481,11 @@ export const BatchControlCenter = () => {
   const handleResend = async (requestId, verifierEmail) => {
     setResending(requestId);
     try {
-      await verificationAPI.resendManualVerification(requestId, selectedBatch.id);
-      toast.success(`Verification link resent to ${verifierEmail}`);
+      const { data } = await verificationAPI.resendManualVerification(requestId, selectedBatch.id);
+      const note = resendResultNote(data, verifierEmail);
+      if (note.ok) toast.success(note.text); else toast.error(note.text);
     } catch (err) {
-      toast.error(getApiError(err, 'Failed to resend verification link'));
+      toast.error(resendErrorMessage(err?.response?.status, getApiError(err, '')));
     } finally {
       setResending(null);
     }
@@ -629,6 +633,26 @@ export const BatchControlCenter = () => {
       if (!map.has(key)) map.set(key, { key, email: a.verifier_email || key });
     });
     return Array.from(map.values());
+  })();
+
+  // ── Open verifier requests (sent, report not uploaded yet), one entry per request id, so an admin can resend
+  // without running Smart Send first. Only assignments that carry a request_id and are not finished are listed.
+  const openRequests = (() => {
+    const finished = new Set(['completed', 'submitted', 'used', 'verified', 'approved', 'rejected', 'expired']);
+    const byId = {};
+    (batchDetail?.users || []).forEach((u) => { byId[u.id || u.user_id || u.entity_id] = u.full_name || u.product_name || u.email; });
+    const groups = new Map();
+    (manualAssignments?.assignments || []).forEach((a) => {
+      const requestId = a.request_id;
+      if (!requestId || finished.has(String(a.status || a.request_status || '').toLowerCase())) return;
+      if (!groups.has(requestId)) groups.set(requestId, { requestId, verifierEmail: a.verifier_email, typeName: a.verification_type_name, holders: [] });
+      const group = groups.get(requestId);
+      (a.users || []).forEach((u) => {
+        const name = u.full_name || byId[u.batch_user_id] || u.batch_user_id;
+        if (name && !group.holders.includes(name)) group.holders.push(name);
+      });
+    });
+    return [...groups.values()];
   })();
 
   // ── Per-record, per-verification-type verifier — the same manual-
@@ -967,7 +991,7 @@ export const BatchControlCenter = () => {
                 {(batchDetail?.users || []).some((r) => Object.keys(r.verification_type_status || {}).some((n) => canSendToVerifier(r, n))) && (
                   <Button variant="primary" size="sm" icon={Mail} className="!px-2 text-xs text-center leading-tight"
                     onClick={() => setSendToVerifier({})}>
-                    Send to Verifier
+                    Resend to Verifiers
                   </Button>
                 )}
               </div>
@@ -1130,7 +1154,7 @@ export const BatchControlCenter = () => {
                       const rejections = checkEntries.filter(([, v]) => v?.status === 'rejected');
                       // Certificate — this exact user's own credential from certificates_by_user
                       // (batch_user_id), never matched by email, name or position.
-                      const certView = certificateDisplay(matchSdcRecord(record), sdcCertsKnown);
+                      const certView = certificateDisplay(matchSdcRecord(record), sdcCertsKnown, { processing: !!sdcInfo?.status && !sdcCertsDone });
                       const certState = certView.label;
                       const certBadgeStatus = certView.badge;
                       return (
@@ -1322,6 +1346,34 @@ export const BatchControlCenter = () => {
             verifier/report data now lives in Verification Records + its View
             modal instead. ── */}
         <div id="reports-section">
+            {!(selectedBatch.sentRequests?.length > 0) && openRequests.length > 0 && (
+              <div className="rounded-2xl border border-blue-100 bg-white p-5 mb-4">
+                <div className="mb-4">
+                  <p className="font-sora font-semibold text-brand-dark">Open verifier requests</p>
+                  <p className="text-xs text-gray-400 font-inter mt-1">The verifier hasn’t uploaded yet. Resend gives them a fresh link; the old link stops working.</p>
+                </div>
+                <div className="space-y-3">
+                  {openRequests.map((req) => (
+                    <div key={req.requestId} className="flex items-center justify-between gap-3 rounded-xl border border-blue-100 bg-blue-50/40 px-4 py-3">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold text-brand-dark font-inter">{req.typeName}</p>
+                        <p className="truncate text-xs text-gray-500 font-inter">{req.verifierEmail}</p>
+                        {req.holders.length > 0 && <p className="mt-0.5 text-xs text-gray-600 font-inter">{req.holders.length} holder{req.holders.length === 1 ? '' : 's'}: {req.holders.join(', ')}</p>}
+                      </div>
+                      <button
+                        type="button"
+                        disabled={resending === req.requestId}
+                        onClick={() => handleResend(req.requestId, req.verifierEmail)}
+                        className="flex shrink-0 items-center gap-1.5 rounded-lg border border-blue-200 bg-white px-3 py-1.5 text-xs font-semibold font-inter text-brand-blue hover:bg-blue-50 disabled:opacity-50 transition-colors"
+                      >
+                        <RefreshCw size={12} className={resending === req.requestId ? 'animate-spin' : ''} />
+                        {resending === req.requestId ? 'Resending...' : req.holders.length > 1 ? `Resend (${req.holders.length} holders)` : 'Resend'}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
             {selectedBatch.sentRequests?.length > 0 && (
               <div className="rounded-2xl border border-blue-100 bg-white p-5 mb-4">
                 <div className="mb-4">
@@ -1367,6 +1419,11 @@ export const BatchControlCenter = () => {
             )}
 
         </div>
+
+        {/* ── Individual SDC sharing — once SDC generation has run; works whether or not the batch is shared ── */}
+        {!!sdcInfo?.status && isHumanBatch(batchDetail?.batch_type || selectedBatch.batchType) && (
+          <HolderSdcSharing batchId={selectedBatch.id} audience="admin" className="mb-4" confirmedUserIds={Object.keys(batchSdcByRecordId)} />
+        )}
 
         {/* ── Report access (Human batches only — Product/Warranty stay public) ── */}
         {isHumanBatch(batchDetail?.batch_type || selectedBatch.batchType) && (
@@ -1417,7 +1474,7 @@ export const BatchControlCenter = () => {
           ? (verificationDetailsRecord.id || verificationDetailsRecord.user_id || verificationDetailsRecord.entity_id)
           : null;
         const vdCertMatch = verificationDetailsRecord ? matchSdcRecord(verificationDetailsRecord) : null;
-        const vdCertView = certificateDisplay(vdCertMatch, sdcCertsKnown);
+        const vdCertView = certificateDisplay(vdCertMatch, sdcCertsKnown, { processing: !!sdcInfo?.status && !sdcCertsDone });
         const vdCertificate = verificationDetailsRecord
           ? {
               status: vdCertView.status,
@@ -1491,7 +1548,11 @@ export const BatchControlCenter = () => {
           records={batchDetail?.users || sdcGenerateBatch.records || []}
           liveStatus={sdcLiveStatus?.batchId === sdcGenerateBatch.id ? sdcLiveStatus : null}
           polling={sdcPollingBatchId === sdcGenerateBatch.id}
-          onClose={() => { setSdcGenerateBatch(null); setSdcLiveStatus(null); }}
+          onConfirmed={() => refreshSdcCertificates(sdcGenerateBatch.id, batchDetail?.users || [], batchDetail?.verification_progress?.sdc)}
+          onClose={() => {
+            setSdcGenerateBatch(null); setSdcLiveStatus(null);
+            refreshSdcCertificates(batchId, batchDetail?.users || [], batchDetail?.verification_progress?.sdc);
+          }}
           onGenerated={(payload) => {
             const generatedBatchId = sdcGenerateBatch.id;
             setData((prev) => (prev || []).map((b) => (

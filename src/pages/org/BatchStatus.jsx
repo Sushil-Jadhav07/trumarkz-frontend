@@ -23,6 +23,8 @@ import { loadWarrantyCertificates } from '@/utils/warrantyCertificates';
 import { useAutomaticBatchRefresh } from '@/hooks/useAutomaticBatchRefresh';
 import { useBatchPolling } from '@/hooks/useBatchPolling';
 import { PartialAuthorizationPanel } from '@/components/shared/PartialAuthorizationPanel';
+import { HolderSdcSharing } from '@/components/shared/HolderSdcSharing';
+import { normalizeCertificatesByUser } from '@/utils/sdcCertificates';
 import {
   ChevronLeft, ChevronRight, CheckCircle, Clock, Download,
   Eye, FileText, Info, Layers, Package, RefreshCw, Upload,
@@ -60,29 +62,7 @@ const getRecordSubtitle = (r, batchType) =>
 
 const getRecordKey = (r) => r?.id || r?.user_id || r?.entity_id;
 
-// Product records carry no email/reliable title for certificate matching —
-// the authoritative, identity-based key is the certificate's own
-// credentialSubject.product_id, which equals the record's own id
-// (BatchUser.id). Same helper as the admin Batch Monitor / SDC Verification
-// pages, kept in sync so org and admin views never disagree about which
-// record a certificate belongs to.
-const getCertificateProductId = (rec) =>
-  rec?.credential?.credentialSubject?.product_id ||
-  rec?.credentialSubject?.product_id ||
-  rec?.record?.credentialSubject?.product_id ||
-  null;
 
-// Same story for Human records — GET /sdc/records/{public_id} (the only
-// endpoint org callers can use) has no top-level title/recipients at all,
-// only public_id/credential/pdf/verify (confirmed live). The Human
-// identity actually lives at credential.credentialSubject.email, the exact
-// counterpart to Product's credentialSubject.product_id and Warranty's
-// credentialSubject.serial_no.
-const getCertificateEmail = (rec) =>
-  rec?.credential?.credentialSubject?.email ||
-  rec?.credentialSubject?.email ||
-  rec?.record?.credentialSubject?.email ||
-  null;
 
 const VERIFIED_RECORD_STATUSES = new Set(['approved', 'verified']);
 const FAILED_RECORD_STATUSES = new Set(['rejected', 'failed']);
@@ -452,7 +432,8 @@ const BatchDetailModal = ({ batchId, batchName, onClose, asPage = false, onLoade
         if (pollTokenRef.current !== myToken) return;
         setSdcStatus(data || null);
         const ready = data?.done || (Array.isArray(data?.certificate_ids) && data.certificate_ids.length > 0);
-        if (ready || attempt === POLL_MAX_ATTEMPTS - 1) break;
+        // Not shared with this organization yet: the backend returns nothing until then, so waiting is pointless.
+        if (ready || data?.shared_with_org === false || attempt === POLL_MAX_ATTEMPTS - 1) break;
         await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
       }
       if (pollTokenRef.current !== myToken) return;
@@ -463,107 +444,43 @@ const BatchDetailModal = ({ batchId, batchName, onClose, asPage = false, onLoade
       // either way, so skip straight to "not shared"/"nothing generated".
       if (certIds.length === 0) { setSdcByRecordId({}); return; }
 
-      // Fast path: the batch-details response's own verification_progress.
-      // sdc.pid_by_user_id is a direct, authoritative user_id -> certificate
-      // publicId map the backend already computes — confirmed live. Prefer
-      // it over fetching GET /sdc/records/{public_id} per certificate (used
-      // below only as a fallback): that per-record endpoint 404s for an org
-      // caller even once shared_with_org is true (confirmed live — a
-      // backend-side gap, separate from this matching logic), so relying on
-      // it here was the actual reason Ready/Draft never showed up despite
-      // real, issued certificates.
-      if (pidByUserId && typeof pidByUserId === 'object' && Object.keys(pidByUserId).length > 0) {
-        const certIdSet = new Set(certIds);
-        const baseById = {};
-        records.forEach((record) => {
-          const recordId = getRecordKey(record);
-          const publicId = recordId ? pidByUserId[recordId] : null;
-          if (publicId) baseById[recordId] = { publicId, issued: certIdSet.has(publicId) };
-        });
-        // Ready/Draft is already correct from the map above — set it now so
-        // the table is right even if the enrichment below can't complete.
-        setSdcByRecordId(baseById);
+      // A holder's certificate is certificates_by_user[their batch_user_id] from the status response — the
+      // backend's exact, confirmed map. Certificates are never paired by email, name, title or list position.
+      // Only when a (not yet updated) backend does not send that field at all, the batch details' own
+      // sdc.pid_by_user_id — also an exact user id -> publicId map — is used instead.
+      const { known, byUser } = normalizeCertificatesByUser(statusData);
+      const exactMap = known ? byUser : (pidByUserId && typeof pidByUserId === 'object' ? pidByUserId : {});
+      const certIdSet = new Set(certIds);
+      const baseById = {};
+      records.forEach((record) => {
+        const recordId = getRecordKey(record);
+        const publicId = recordId ? exactMap[recordId] : null;
+        if (publicId) baseById[recordId] = { publicId, issued: known ? true : certIdSet.has(publicId) };
+      });
+      // Ready is already correct from the map — set it now so the table is right even if the enrichment below can't complete.
+      setSdcByRecordId(baseById);
 
-        // Best-effort only, from here: adds Created/Anchored/Latest/Active/
-        // Revoked for the "Detail" popup when GET /sdc/records/{public_id}
-        // happens to be reachable. A 404 per entry (the known gap above)
-        // just leaves that record's minimal {publicId, issued} in place —
-        // it never reverts the badge already shown.
-        const enrichedEntries = await Promise.all(
-          Object.entries(baseById).map(([recordId, match]) =>
-            sdcAPI.getRecord(match.publicId)
-              .then(({ data: rec }) => [recordId, {
-                ...match,
-                id: rec?.id || rec?.credential?.id || null,
-                anchorTime: rec?.anchorTime || rec?.credential?.validFrom || rec?.credential?.issuanceDate || null,
-                revoked: !!rec?.revoked,
-                active: !!rec?.active, latest: !!rec?.latest, edited: !!rec?.edited,
-                createdAt: rec?.createdAt || rec?.credential?.issuanceDate || null,
-                updatedAt: rec?.updatedAt || null,
-              }])
-              .catch(() => null)
-          )
-        );
-        if (pollTokenRef.current !== myToken) return;
-        const enrichedById = { ...baseById };
-        enrichedEntries.forEach((entry) => { if (entry) enrichedById[entry[0]] = entry[1]; });
-        setSdcByRecordId(enrichedById);
-        return;
-      }
-
-      const fetched = await Promise.all(
-        certIds.map((publicId) =>
-          sdcAPI.getRecord(publicId)
-            .then(({ data: rec }) => ({
-              // GET /sdc/records/{public_id} (single-record detail) is a
-              // genuinely different, much leaner shape than the bulk list —
-              // confirmed live: no top-level id/title/recipients/anchorTime/
-              // revoked/active/latest/edited here at all, just
-              // public_id/credential/pdf/verify. Everything usable lives
-              // inside `credential` — fall back to its fields rather than
-              // reading top-level keys that don't exist on this endpoint.
+      // Best-effort only: adds Created / Anchored / Latest / Active / Revoked for the "Detail" popup when
+      // GET /sdc/records/{public_id} is reachable. A failure just leaves {publicId, issued} in place.
+      const enrichedEntries = await Promise.all(
+        Object.entries(baseById).map(([recordId, match]) =>
+          sdcAPI.getRecord(match.publicId)
+            .then(({ data: rec }) => [recordId, {
+              ...match,
               id: rec?.id || rec?.credential?.id || null,
-              publicId: rec?.publicId || rec?.public_id || publicId,
-              productId: getCertificateProductId(rec),
-              email: getCertificateEmail(rec),
               anchorTime: rec?.anchorTime || rec?.credential?.validFrom || rec?.credential?.issuanceDate || null,
               revoked: !!rec?.revoked,
-              // Presence in certificate_ids already means the backend
-              // confirmed this certificate is issued for this batch — don't
-              // also require anchorTime, which isn't guaranteed present here.
-              issued: !rec?.revoked,
               active: !!rec?.active, latest: !!rec?.latest, edited: !!rec?.edited,
               createdAt: rec?.createdAt || rec?.credential?.issuanceDate || null,
               updatedAt: rec?.updatedAt || null,
-            }))
+            }])
             .catch(() => null)
         )
       );
       if (pollTokenRef.current !== myToken) return;
-      const certs = fetched.filter(Boolean);
-
-      const byId = {};
-      const usedPublicIds = new Set();
-      records.forEach((record) => {
-        // Confirmed via the live batch-details response: each user is keyed
-        // by `user_id`, not `id` — check all three since the shape can vary.
-        const recordId = getRecordKey(record);
-        if (!recordId) return;
-        const recordEmail = record?.email?.trim().toLowerCase();
-        // batchType (this batch's own real batch_type) decides the branch —
-        // Product batch users carry no product_name/category_name field at
-        // all (their name is under full_name, exactly like a Human record),
-        // so per-record sniffing alone silently misroutes every product
-        // here into the email branch, where it can never match.
-        const match = isProductRecord(record, batchType)
-          ? certs.find((c) => c.productId && c.productId === recordId && !usedPublicIds.has(c.publicId))
-          : certs.find((c) => recordEmail && c.email?.trim().toLowerCase() === recordEmail && !usedPublicIds.has(c.publicId));
-        if (match) {
-          usedPublicIds.add(match.publicId);
-          byId[recordId] = match;
-        }
-      });
-      setSdcByRecordId(byId);
+      const enrichedById = { ...baseById };
+      enrichedEntries.forEach((entry) => { if (entry) enrichedById[entry[0]] = entry[1]; });
+      setSdcByRecordId(enrichedById);
     } catch (err) {
       if (pollTokenRef.current === myToken) {
         setSdcByRecordId({});
@@ -657,6 +574,11 @@ const BatchDetailModal = ({ batchId, batchName, onClose, asPage = false, onLoade
   // mistaken for "nothing generated".
   const sdcSharedWithOrg = !!sdcStatus?.shared_with_org;
   const sdcReadyNotShared = hasSdcActivity && Number(sdcIssuedCount) > 0 && !sdcSharedWithOrg;
+  // Until the SuperAdmin shares the batch, the backend deliberately returns no certificates to the organization:
+  // that is "not shared yet", never "Not Generated" / "Not Issued".
+  const sdcNotShared = hasSdcActivity && !sdcSharedWithOrg;
+  // Shared, but this holder has no confirmed credential yet and the backend is not done: still being issued.
+  const sdcProcessing = hasSdcActivity && sdcSharedWithOrg && !sdcStatus?.done;
   const pct = detail && detail.total > 0
     ? Math.round(((detail.verified + detail.failed) / detail.total) * 100)
     : 0;
@@ -962,6 +884,12 @@ const BatchDetailModal = ({ batchId, batchName, onClose, asPage = false, onLoade
             <PartialAuthorizationPanel batchId={batchId} records={detail.records} />
           )}
 
+          {/* ── Individual SDC sharing — only once the SDCs exist AND the batch is shared with this organization
+              (a 403 from the API hides it again). Lists this batch's holders only. ── */}
+          {detail && hasSdcActivity && sdcSharedWithOrg && isHumanBatch(detail.batchType) && (
+            <HolderSdcSharing batchId={batchId} audience="org" confirmedUserIds={Object.keys(sdcStatus?.certificates_by_user || {})} />
+          )}
+
           {/* ── Rejected List — generated by SuperAdmin, made available here
               directly (never emailed, never a raw GCS URL — always the two
               authenticated proxy endpoints below). Only rendered once one
@@ -1162,8 +1090,10 @@ const BatchDetailModal = ({ batchId, batchName, onClose, asPage = false, onLoade
                               </span>
                             ) : sdcMatch ? (
                               <Badge status="pending">Draft</Badge>
-                            ) : sdcReadyNotShared ? (
-                              <span className="text-[11px] font-medium text-amber-600">Not shared yet</span>
+                            ) : sdcNotShared ? (
+                              <span className="text-[11px] font-medium text-amber-600">Not shared with your organization yet</span>
+                            ) : sdcProcessing ? (
+                              <span className="text-[11px] font-medium text-blue-600">Processing</span>
                             ) : (
                               <span className="text-[11px] text-gray-400">Not Generated</span>
                             )}
@@ -1234,12 +1164,14 @@ const BatchDetailModal = ({ batchId, batchName, onClose, asPage = false, onLoade
             status: certsLoading ? 'loading'
               : certsError ? 'error'
               : vdSdcMatch ? (vdSdcMatch.issued ? 'ready' : 'draft')
-              : sdcReadyNotShared ? 'not_shared'
+              : sdcNotShared ? 'not_shared'
+              : sdcProcessing ? 'processing'
               : 'not_generated',
             label: certsLoading ? 'Checking…'
               : certsError ? "Couldn't check"
               : vdSdcMatch ? (vdSdcMatch.issued ? 'Ready' : 'Draft')
-              : sdcReadyNotShared ? 'Not shared yet'
+              : sdcNotShared ? 'Not shared with your organization yet'
+              : sdcProcessing ? 'Processing'
               : 'Not Generated',
             canView: false,
             canDownload: !!vdSdcMatch,

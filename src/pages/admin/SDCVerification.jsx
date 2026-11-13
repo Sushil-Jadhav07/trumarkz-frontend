@@ -73,20 +73,6 @@ const getRecordSerialNumber = (record) =>
   record?.metadata?.serial_number ||
   '';
 
-// Plain Product batches have no serial_number field, and Dhiway echoes the
-// certificate's own publicId into `title` for them (confirmed live) — so
-// neither key in matchCertificates below can ever pair them up, forcing the
-// blind positional fallback further down. A single-record detail fetch
-// (GET /sdc/records/{publicId}) does carry an identity-based key though:
-// credentialSubject.product_id (confirmed live) — same shape Dhiway uses for
-// serial_no. Used as a second, authoritative pass before falling back to
-// position-guessing.
-const getCertificateProductId = (rec) =>
-  rec?.credential?.credentialSubject?.product_id ||
-  rec?.credentialSubject?.product_id ||
-  rec?.record?.credentialSubject?.product_id ||
-  null;
-
 const formatDate = (value) => {
   if (!value) return '-';
   const date = new Date(value);
@@ -219,14 +205,18 @@ const ELIGIBILITY_META = {
 // org_id is fixed backend-side, space_id comes from the org's own Dhiway
 // Space ID (set on the Profile page), and schema_id resolves from the
 // batch's industry — none of these are supplied by the caller anymore.
-export const GenerateSDCModal = ({ batch, onClose, onGenerated, liveStatus, polling, records = [] }) => {
+export const GenerateSDCModal = ({ batch, onClose, onGenerated, onConfirmed, liveStatus, polling, records = [] }) => {
   const [active, setActive] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [retrying, setRetrying] = useState(false);
   const [result, setResult] = useState(null); // raw API response, shown for reference after submit
   const [sentPayload, setSentPayload] = useState(null);
-  const [certMatches, setCertMatches] = useState([]);
-  const [certLoading, setCertLoading] = useState(false);
+  // What Dhiway has actually CONFIRMED, read from GET /sdc/batches/{id}/status → certificates_by_user
+  // (exact batch_user_id → public id). The generate / issue responses only say a job was accepted.
+  const [confirm, setConfirm] = useState({ known: true, byUser: {}, attempts: 0, gaveUp: false });
+  const [recheck, setRecheck] = useState(0);
+  const onConfirmedRef = useRef(onConfirmed);
+  onConfirmedRef.current = onConfirmed;
   const [openingId, setOpeningId] = useState(null);
 
   // ── Selection — which records to generate for ──────────────────────────
@@ -300,169 +290,39 @@ export const GenerateSDCModal = ({ batch, onClose, onGenerated, liveStatus, poll
   // The last generate failure, described (see describeGenerateError). Shown inline in the form.
   const [genError, setGenError] = useState(null);
 
-  // Matches this batch's records against the org's Dhiway record list by
-  // email/title for human records and serial/title for product/warranty
-  // records so the success panel can offer a direct "View" link instead of
-  // sending the admin elsewhere to find it.
-  //
-  // Scoped to exactly the ids this generate call actually targeted
-  // (sentPayload.user_ids) when a selection was made — NOT every record in
-  // the batch. Confirmed live: generating for one specific selected record
-  // (who genuinely had no cert yet) still showed an unrelated OTHER
-  // record's pre-existing certificate in this panel, because the matching
-  // loop below ran over the whole batch's `records` regardless of what was
-  // actually selected — any batch member who already happened to have a
-  // matching Dhiway cert got pulled in and shown as if they were part of
-  // this result. Falls back to every record only for a true whole-batch
-  // generate (no user_ids sent at all).
-  const matchCertificates = useCallback(async () => {
-    const targetIds = Array.isArray(sentPayload?.user_ids) && sentPayload.user_ids.length > 0
-      ? new Set(sentPayload.user_ids)
-      : null;
-    const scopedRecords = targetIds
-      ? records.filter((r) => targetIds.has(recordSDCId(r)))
-      : records;
-    if (!scopedRecords.length) return;
-    setCertLoading(true);
-    try {
-      const allRecords = [];
-      let page = 1;
-      let hasMore = true;
-      while (hasMore) {
-        const { data } = await sdcAPI.getRecords({
-          active: 1, page, pageSize: 100,
-          org_id: batch?.sdcInfo?.org_id || undefined,
-          space_id: batch?.sdcSpaceId || batchSdcSpaceId(batch?.sdcInfo, batch?.spaceId) || undefined,
-        });
-        const pageRecords = Array.isArray(data?.records) ? data.records : [];
-        allRecords.push(...pageRecords);
-        const totalPages = Number(data?.totalPages || data?.total_pages || 0);
-        hasMore = totalPages > 0 ? page < totalPages : pageRecords.length === 100;
-        page += 1;
-      }
-
-      const recordsByTitle = new Map();
-      const recordsByRecipient = new Map();
-      allRecords.forEach((item) => {
-        const titleKey = normalizeMatchKey(item?.title);
-        if (titleKey && !recordsByTitle.has(titleKey)) recordsByTitle.set(titleKey, item);
-        (item?.recipients || []).forEach((recipient) => {
-          const recipientKey = normalizeMatchKey(recipient);
-          if (recipientKey && !recordsByRecipient.has(recipientKey)) recordsByRecipient.set(recipientKey, item);
-        });
-      });
-
-      const matches = [];
-      const matchedPublicIds = new Set();
-      const matchedRecordIds = new Set();
-
-      scopedRecords.forEach((r) => {
-        const email = normalizeMatchKey(r?.email);
-        const serial = normalizeMatchKey(getRecordSerialNumber(r));
-        const title = normalizeMatchKey(recordTitle(r));
-        const isProductLike = isProductRecord(r) || !!serial;
-
-        const match = isProductLike
-          ? [serial, title]
-              .filter(Boolean)
-              .map((key) => recordsByTitle.get(key))
-              .find((item) => item && !matchedPublicIds.has(item.publicId))
-          : [
-              email && recordsByRecipient.get(email),
-              title && recordsByTitle.get(title),
-            ].find((item) => item && !matchedPublicIds.has(item.publicId));
-
-        if (match?.publicId) {
-          matchedPublicIds.add(match.publicId);
-          matches.push({ publicId: match.publicId, title: recordTitle(r) || match.title });
-          const recordId = r?.id || r?.user_id || r?.entity_id;
-          if (recordId) matchedRecordIds.add(recordId);
-        }
-      });
-
-      // Product-like records with no serial number (plain Product batches
-      // have none) never match the pass above — Dhiway echoes the
-      // certificate's own publicId into `title` for them (confirmed live),
-      // so title/serial matching finds nothing. Fetch full detail for the
-      // still-unclaimed, most-recently-created certs and pair by the
-      // certificate's own credentialSubject.product_id, an authoritative
-      // identity key, before ever falling back to position-guessing below.
-      const unmatchedProductRecords = scopedRecords.filter((r) => {
-        const recordId = r?.id || r?.user_id || r?.entity_id;
-        const serial = normalizeMatchKey(getRecordSerialNumber(r));
-        return recordId && (isProductRecord(r) || !!serial) && !matchedRecordIds.has(recordId);
-      });
-
-      if (unmatchedProductRecords.length > 0) {
-        const candidatePool = allRecords
-          .filter((item) => item?.publicId && !matchedPublicIds.has(item.publicId))
-          .sort((a, b) => new Date(b.createdAt || b.anchorTime || 0) - new Date(a.createdAt || a.anchorTime || 0))
-          .slice(0, Math.max(unmatchedProductRecords.length * 4, 20));
-
-        const detailed = await Promise.all(
-          candidatePool.map((item) =>
-            sdcAPI.getRecord(item.publicId)
-              .then(({ data }) => ({ item, productId: getCertificateProductId(data) }))
-              .catch(() => null)
-          )
-        );
-
-        const certByProductId = new Map();
-        detailed.forEach((entry) => {
-          if (entry?.productId && !certByProductId.has(entry.productId)) {
-            certByProductId.set(entry.productId, entry.item);
-          }
-        });
-
-        unmatchedProductRecords.forEach((r) => {
-          const recordId = r?.id || r?.user_id || r?.entity_id;
-          const cert = certByProductId.get(recordId);
-          if (!cert?.publicId || matchedPublicIds.has(cert.publicId)) return;
-          matchedPublicIds.add(cert.publicId);
-          matches.push({ publicId: cert.publicId, title: recordTitle(r) || cert.title });
-        });
-      }
-
-      // Position-based last resort: pairs record N with the Nth
-      // most-recently-created cert in the whole space, purely by array
-      // position — there's no identity check at all. Safe-ish for a true
-      // whole-batch generate (records and candidate certs are both the
-      // full set, created together), but for a scoped/selected generation
-      // this would happily label an unrelated record's pre-existing
-      // certificate with the selected record's name. Never run it when
-      // this result is scoped to a specific selection — an unmatched
-      // selected record just shows "not matched yet" instead (see the
-      // empty-state message below) rather than a guess that could be wrong.
-      if (matches.length === 0 && allRecords.length > 0 && !targetIds) {
-        const fallbackRecords = [...scopedRecords];
-        const fallbackCertificates = [...allRecords].sort((a, b) => {
-          const aTime = new Date(a.createdAt || a.updatedAt || a.anchorTime || 0).getTime();
-          const bTime = new Date(b.createdAt || b.updatedAt || b.anchorTime || 0).getTime();
-          return bTime - aTime;
-        });
-
-        fallbackRecords.forEach((r, index) => {
-          const cert = fallbackCertificates[index];
-          if (cert?.publicId) {
-            matches.push({ publicId: cert.publicId, title: recordTitle(r) || cert.title });
-          }
-        });
-      }
-
-      setCertMatches(matches);
-    } catch {
-      setCertMatches([]);
-    } finally {
-      setCertLoading(false);
-    }
-  }, [records, sentPayload, batch?.spaceId, batch?.sdcInfo]);
-
+  // After generate / issue the certificates are only "accepted". Dhiway finishes them in the background, so ask
+  // the status endpoint (exact ids, never email / name / position) until every requested holder is confirmed.
   useEffect(() => {
-    if (result && !(result.issue_pending && !liveStatus)) {
-      matchCertificates();
-    }
+    if (!result || (result.issue_pending && !liveStatus) || !batch?.id) return undefined;
+    const targets = Array.isArray(sentPayload?.user_ids) && sentPayload.user_ids.length > 0
+      ? sentPayload.user_ids.map(String)
+      : records.map((r) => String(recordSDCId(r))).filter(Boolean);
+    let cancelled = false;
+    let timer = null;
+    let attempts = 0;
+    const MAX_ATTEMPTS = 38; // about 5 minutes at 8 s
+    const tick = async () => {
+      attempts += 1;
+      let all = false;
+      try {
+        const { data } = await sdcAPI.getBatchStatus(batch.id);
+        if (cancelled) return;
+        const { known, byUser } = normalizeCertificatesByUser(data);
+        all = known && targets.length > 0 && targets.every((id) => byUser[id]);
+        setConfirm({ known, byUser, attempts, gaveUp: false });
+        if (all) onConfirmedRef.current?.();
+      } catch {
+        // transient: keep trying
+      }
+      if (cancelled || all) return;
+      if (attempts >= MAX_ATTEMPTS) { setConfirm((c) => ({ ...c, attempts, gaveUp: true })); return; }
+      timer = setTimeout(tick, 8000);
+    };
+    setConfirm((c) => ({ ...c, attempts: 0, gaveUp: false }));
+    tick();
+    return () => { cancelled = true; if (timer) clearTimeout(timer); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [result, liveStatus]);
+  }, [result, liveStatus, recheck, batch?.id]);
 
   const handleViewCertificate = async (publicId) => {
     setOpeningId(publicId);
@@ -565,72 +425,95 @@ export const GenerateSDCModal = ({ batch, onClose, onGenerated, liveStatus, poll
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.35, ease: 'easeOut' }}
-            className="flex flex-col items-center justify-center gap-4 py-8 text-center"
+            className="flex flex-col items-center justify-center gap-5 py-7 text-center"
           >
-            <div className="relative flex items-center justify-center w-16 h-16">
-              <AnimatePresence>
-                {polling && (
-                  <>
-                    <motion.span
-                      key="ring-1"
-                      className="absolute inset-0 rounded-full bg-brand-blue/15"
-                      initial={{ scale: 1, opacity: 0.6 }}
-                      animate={{ scale: 1.7, opacity: 0 }}
-                      exit={{ opacity: 0 }}
-                      transition={{ duration: 1.8, repeat: Infinity, ease: 'easeOut' }}
-                    />
-                    <motion.span
-                      key="ring-2"
-                      className="absolute inset-0 rounded-full bg-brand-blue/10"
-                      initial={{ scale: 1, opacity: 0.5 }}
-                      animate={{ scale: 2, opacity: 0 }}
-                      exit={{ opacity: 0 }}
-                      transition={{ duration: 1.8, repeat: Infinity, ease: 'easeOut', delay: 0.4 }}
-                    />
-                  </>
-                )}
-              </AnimatePresence>
-              {polling ? (
-                <motion.div
-                  animate={{ rotate: 360 }}
-                  transition={{ duration: 0.8, repeat: Infinity, ease: 'linear' }}
-                  className="relative w-11 h-11 rounded-full border-[3px] border-brand-blue/15 border-t-brand-blue"
+            {/* Emblem: soft pulses behind a slowly turning ring with the shield at its centre */}
+            <div className="relative flex h-24 w-24 items-center justify-center">
+              {polling && [0, 0.6, 1.2].map((delay) => (
+                <motion.span
+                  key={delay}
+                  aria-hidden="true"
+                  className="absolute inset-2 rounded-full bg-brand-blue/20"
+                  initial={{ scale: 0.9, opacity: 0.55 }}
+                  animate={{ scale: 1.65, opacity: 0 }}
+                  transition={{ duration: 2.4, repeat: Infinity, ease: 'easeOut', delay }}
                 />
-              ) : (
-                <div className="relative flex items-center justify-center w-11 h-11 rounded-full bg-brand-blue/10">
-                  <Clock size={20} className="text-brand-blue" />
-                </div>
+              ))}
+              <span aria-hidden="true" className="absolute inset-0 rounded-full border border-brand-blue/10" />
+              {polling && (
+                <motion.span
+                  aria-hidden="true"
+                  className="absolute inset-0 rounded-full border-[3px] border-transparent border-t-brand-blue border-r-brand-blue/40"
+                  animate={{ rotate: 360 }}
+                  transition={{ duration: 1.1, repeat: Infinity, ease: 'linear' }}
+                />
               )}
+              <motion.span
+                className="relative flex h-14 w-14 items-center justify-center rounded-full bg-brand-blue text-white shadow-[0_10px_24px_-10px_rgba(37,99,235,0.8)]"
+                animate={polling ? { scale: [1, 1.06, 1] } : { scale: 1 }}
+                transition={{ duration: 1.6, repeat: polling ? Infinity : 0, ease: 'easeInOut' }}
+              >
+                {polling ? <ShieldCheck size={26} strokeWidth={1.8} /> : <Clock size={24} strokeWidth={1.8} />}
+              </motion.span>
             </div>
 
             <motion.div
               initial={{ opacity: 0, y: 4 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.15, duration: 0.3 }}
+              className="w-full max-w-[300px]"
             >
-              <p className="text-sm font-semibold text-brand-dark font-inter">
+              <p className="text-base font-semibold text-brand-dark font-inter">
                 {polling ? 'Finishing certificate issuance…' : 'Issuance still pending'}
               </p>
-              <p className="text-xs text-gray-400 font-inter mt-1">
+              <p className="mt-1 text-xs leading-5 text-gray-500 font-inter">
                 {polling
                   ? 'Checking Dhiway automatically — this can take up to a minute.'
                   : 'Click "Issue Certificates Now" to finish.'}
               </p>
+
+              {polling && (
+                <>
+                  {/* Indeterminate progress bar */}
+                  <div className="mt-4 h-1.5 w-full overflow-hidden rounded-full bg-brand-blue/10" role="progressbar" aria-label="Issuing certificates">
+                    <motion.span
+                      className="block h-full w-2/5 rounded-full bg-brand-blue"
+                      animate={{ x: ['-100%', '250%'] }}
+                      transition={{ duration: 1.5, repeat: Infinity, ease: 'easeInOut' }}
+                    />
+                  </div>
+                  {/* Where it is: the first step is already done */}
+                  <ol className="mt-4 flex items-center justify-between text-[11px] font-medium font-inter">
+                    {[['Sent', 'done'], ['Issuing', 'active'], ['Ready', 'todo']].map(([label, state], i) => (
+                      <li key={label} className="flex items-center gap-1.5">
+                        <span className={`flex h-4 w-4 items-center justify-center rounded-full text-[9px] ${state === 'done' ? 'bg-green-500 text-white' : state === 'active' ? 'bg-brand-blue text-white' : 'bg-gray-200 text-gray-500'}`}>
+                          {state === 'done' ? <CheckCircle size={10} strokeWidth={3} /> : state === 'active' ? (
+                            <motion.span className="h-1.5 w-1.5 rounded-full bg-white" animate={{ opacity: [1, 0.3, 1] }} transition={{ duration: 1, repeat: Infinity }} />
+                          ) : i + 1}
+                        </span>
+                        <span className={state === 'todo' ? 'text-gray-400' : 'text-brand-dark'}>{label}</span>
+                      </li>
+                    ))}
+                  </ol>
+                </>
+              )}
             </motion.div>
 
-            <Modal.Footer><motion.div
-              initial={{ opacity: 0, y: 4 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.28, duration: 0.3 }}
-              className="flex gap-3 pt-1"
-            >
-              {!polling && (
-                <Button variant="secondary" loading={retrying} onClick={handleIssueNow}>
-                  <Sparkles size={14} /> Issue Certificates Now
-                </Button>
-              )}
-              <Button onClick={onClose}>Done</Button>
-            </motion.div></Modal.Footer>
+            <Modal.Footer>
+              <motion.div
+                initial={{ opacity: 0, y: 4 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.28, duration: 0.3 }}
+                className="flex w-full flex-wrap items-center justify-center gap-3"
+              >
+                {!polling && (
+                  <Button variant="secondary" loading={retrying} onClick={handleIssueNow}>
+                    <Sparkles size={14} /> Issue Certificates Now
+                  </Button>
+                )}
+                <Button onClick={onClose} className="min-w-[120px]">Done</Button>
+              </motion.div>
+            </Modal.Footer>
           </motion.div>
         </Modal>
       );
@@ -639,27 +522,54 @@ export const GenerateSDCModal = ({ batch, onClose, onGenerated, liveStatus, poll
     // Done — minimal summary + a direct way to actually view the certificate.
     const alreadyGenerated = Array.isArray(result.already_generated_user_ids) ? result.already_generated_user_ids : [];
     const unconfirmed = Array.isArray(result.accepted_unconfirmed_user_ids) ? result.accepted_unconfirmed_user_ids : [];
-    const nothingNew = result.records_sent === 0 && alreadyGenerated.length > 0;
-    const issuedLabel = nothingNew
-      ? 'Nothing to generate — already up to date'
-      : liveStatus
-        ? `${liveStatus.ready}/${liveStatus.total} issued`
-        : `${result.issued_count ?? 0}/${result.records_sent ?? '—'} issued`;
+    const targetIds = Array.isArray(sentPayload?.user_ids) && sentPayload.user_ids.length > 0
+      ? sentPayload.user_ids.map(String)
+      : records.map((r) => String(recordSDCId(r))).filter(Boolean);
+    const confirmedIds = targetIds.filter((id) => confirm.byUser[id]);
+    const allConfirmed = confirm.known && targetIds.length > 0 && confirmedIds.length === targetIds.length;
+    const nothingNew = allConfirmed && result.records_sent === 0 && alreadyGenerated.length > 0;
+    const stillIssuing = !allConfirmed && confirm.known && !confirm.gaveUp;
+    const dhiwayNote = result?.dhiway_response?.status === 'PROCESSING' ? (result.dhiway_response.message || 'Dhiway accepted the issue request and is processing it in the background.') : '';
+    const nameOf = (id) => { const r = records.find((rec) => String(recordSDCId(rec)) === id); return r ? recordTitle(r) : id; };
     return (
-      <Modal isOpen onClose={onClose} title={nothingNew ? 'SDC Generation Complete' : 'Certificates Issued'} size="xl">
+      <Modal isOpen onClose={onClose} title={allConfirmed ? (nothingNew ? 'SDC Generation Complete' : 'Certificates Issued') : stillIssuing ? 'Issuing Certificates' : 'Certificates Not Confirmed Yet'} size="xl">
         <div className="space-y-5">
-          {/* Success summary */}
-          <div className="flex items-center gap-3 rounded-2xl border border-emerald-100 bg-gradient-to-r from-emerald-50 to-green-50 px-4 py-3.5">
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-emerald-500/15 text-emerald-600">
-              <CheckCircle size={20} />
+          {/* Status: green only once Dhiway has confirmed every requested certificate */}
+          {allConfirmed ? (
+            <div className="flex items-center gap-3 rounded-2xl border border-emerald-100 bg-gradient-to-r from-emerald-50 to-green-50 px-4 py-3.5">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-emerald-500/15 text-emerald-600"><CheckCircle size={20} /></div>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-semibold text-brand-dark font-inter">{nothingNew ? 'Nothing to generate — already up to date' : 'All certificates are issued'}</p>
+                <p className="text-xs text-emerald-700 font-inter">{confirmedIds.length}/{targetIds.length} confirmed by Dhiway</p>
+              </div>
             </div>
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-semibold text-brand-dark font-inter">
-                {nothingNew ? 'SDC Generation Complete' : 'SDC Certificates Created'}
-              </p>
-              <p className="text-xs text-emerald-700 font-inter">{issuedLabel}</p>
+          ) : !confirm.known ? (
+            <div role="status" className="flex items-start gap-3 rounded-2xl border border-gray-100 bg-gray-50 px-4 py-3.5">
+              <AlertCircle size={18} className="mt-0.5 shrink-0 text-gray-500" />
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-semibold text-brand-dark font-inter">Certificates were submitted</p>
+                <p className="text-xs leading-5 text-gray-600 font-inter">This backend does not report which certificates are confirmed yet. Use “Refresh Certificates” on the batch page to check.</p>
+              </div>
             </div>
-          </div>
+          ) : (
+            <div role="status" className={`flex items-start gap-3 rounded-2xl border px-4 py-3.5 ${stillIssuing ? 'border-blue-100 bg-blue-50/60' : 'border-amber-100 bg-amber-50'}`}>
+              <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${stillIssuing ? 'bg-brand-blue/10 text-brand-blue' : 'bg-amber-100 text-amber-600'}`}>
+                {stillIssuing ? <RefreshCw size={20} className="animate-spin motion-reduce:animate-none" /> : <Clock size={20} />}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-semibold text-brand-dark font-inter">{stillIssuing ? 'Dhiway is issuing the certificates' : 'Not all certificates are confirmed yet'}</p>
+                <p className="text-xs leading-5 text-gray-600 font-inter">
+                  {confirmedIds.length}/{targetIds.length} confirmed. {stillIssuing ? 'This runs in the background and can take a few minutes — this page checks automatically.' : 'Dhiway has not confirmed the rest. Check again, or use “Refresh Certificates” on the batch page later.'}
+                </p>
+                {dhiwayNote && <p className="mt-1 text-[11px] text-gray-500 font-inter">{dhiwayNote}</p>}
+                {!stillIssuing && (
+                  <button type="button" onClick={() => setRecheck((n) => n + 1)} className="mt-2 inline-flex items-center gap-1.5 text-xs font-semibold text-brand-blue hover:underline font-inter">
+                    <RefreshCw size={12} /> Check again
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Exactly who this call targeted — resolved by name, not just a
               count, so it's immediately verifiable against what you
@@ -734,30 +644,30 @@ export const GenerateSDCModal = ({ batch, onClose, onGenerated, liveStatus, poll
 
           <div>
             <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-gray-400 font-inter">Certificates</p>
-            {certLoading ? (
-              <LoadingSkeleton variant="list" label="Fetching issued certificates" rows={2}/>
-            ) : certMatches.length > 0 ? (
-              <div className="max-h-64 space-y-2 overflow-y-auto pr-1">
-                {certMatches.map((m) => (
-                  <div key={m.publicId} className="flex items-center justify-between gap-3 rounded-xl border border-gray-100 bg-white px-3.5 py-2.5 transition-colors hover:border-brand-blue/30 hover:bg-blue-50/30">
-                    <div className="flex min-w-0 items-center gap-2.5">
-                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand-blue/10 text-brand-blue">
-                        <ShieldCheck size={14} />
-                      </div>
-                      <span className="min-w-0 truncate text-sm font-medium text-brand-dark font-inter">{m.title}</span>
-                    </div>
-                    <Button variant="ghost" size="sm" loading={openingId === m.publicId} onClick={() => handleViewCertificate(m.publicId)}>
-                      <Eye size={13} /> View
-                    </Button>
-                  </div>
-                ))}
-              </div>
+            {targetIds.length === 0 ? (
+              <p className="rounded-xl border border-gray-100 bg-gray-50 px-3 py-2.5 text-xs text-gray-500 font-inter">No holders in this request.</p>
             ) : (
-              <div className="flex items-start gap-2 rounded-xl border border-amber-100 bg-amber-50 px-3 py-2.5">
-                <AlertCircle size={13} className="mt-0.5 shrink-0 text-amber-500" />
-                <p className="text-xs text-amber-700 font-inter leading-relaxed">
-                  Not matched yet — Dhiway can take a minute to index new certificates. Reopen "Generate SDC" or use "Refresh Certificates" shortly.
-                </p>
+              <div className="max-h-64 space-y-2 overflow-y-auto pr-1">
+                {targetIds.map((id) => {
+                  const publicId = confirm.byUser[id];
+                  return (
+                    <div key={id} className="flex items-center justify-between gap-3 rounded-xl border border-gray-100 bg-white px-3.5 py-2.5">
+                      <div className="flex min-w-0 items-center gap-2.5">
+                        <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${publicId ? 'bg-brand-blue/10 text-brand-blue' : 'bg-gray-100 text-gray-400'}`}><ShieldCheck size={14} /></div>
+                        <span className="min-w-0 truncate text-sm font-medium text-brand-dark font-inter">{nameOf(id)}</span>
+                      </div>
+                      {publicId ? (
+                        <Button variant="ghost" size="sm" loading={openingId === publicId} onClick={() => handleViewCertificate(publicId)}>
+                          <Eye size={13} /> View
+                        </Button>
+                      ) : (
+                        <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-gray-100 px-2.5 py-1 text-[11px] font-medium text-gray-600 font-inter">
+                          {stillIssuing && <RefreshCw size={11} className="animate-spin motion-reduce:animate-none" />} {stillIssuing ? 'Issuing…' : 'Not confirmed yet'}
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -1665,7 +1575,7 @@ const SDCVerification = () => {
   // instead of showing "Issuance Pending" after certificates already issued.
   const pollBatchStatusUntilDone = useCallback((batchId) => {
     let attempts = 0;
-    const maxAttempts = 10; // ~80s worst case at 8s intervals
+    const maxAttempts = 30; // about 4 minutes at 8 s: Dhiway issues in the background
     setPollingBatchId(batchId);
     const tick = async () => {
       attempts += 1;
@@ -1684,7 +1594,7 @@ const SDCVerification = () => {
         setTimeout(tick, 8000);
       } else {
         setPollingBatchId((current) => (current === batchId ? null : current));
-        toast.error('Still processing — check the batch again shortly');
+        toast('Still processing — refresh shortly.', { icon: '⏳' });
       }
     };
     tick();

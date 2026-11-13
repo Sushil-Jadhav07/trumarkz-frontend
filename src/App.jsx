@@ -29,6 +29,7 @@ import DocumentUpload from '@/pages/public/DocumentUpload';
 import ConsentRequest from '@/pages/public/ConsentRequest';
 import CertificateAccessRequest from '@/pages/public/CertificateAccessRequest';
 import CertificateAccessApprove from '@/pages/public/CertificateAccessApprove';
+import CertificateAccessStatus from '@/pages/public/CertificateAccessStatus';
 import OrgRegistration from '@/pages/org/OrgRegistration';
 import IndividualRegistration from '@/pages/individual/IndividualRegistration';
 import OTPVerification from '@/pages/org/OTPVerification';
@@ -158,6 +159,7 @@ const AnimatedRoutes = () => {
           {/* Human Secure Certificate Access — public, no account. The approval link path is fixed by the backend email. */}
           <Route path="/certificate-access/request" element={<CertificateAccessRequest />} />
           <Route path="/certificate-access/approve/:token" element={<CertificateAccessApprove />} />
+          <Route path="/certificate-access/status/:requestId" element={<CertificateAccessStatus />} />
           <Route path="/verification/consent/:token" element={<ConsentRequest />} />
           <Route path="/skills/verify/upload/:token" element={<SkillVerifierUpload />} />
           <Route path="/privacy-policy" element={<PrivacyPolicy />} />

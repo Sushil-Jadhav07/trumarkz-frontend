@@ -5,6 +5,10 @@ import {
   PublicAccessShell, AccessCard, AccessState, PrimaryButton, SecondaryButton,
 } from '@/components/shared/PublicAccessShell';
 import { certificateAccessAPI, getApiError } from '@/services/api';
+import { CheckStatusChip } from '@/components/shared/CertificateAccessChecks';
+import {
+  applyCheckDecisions, buildCheckDecisions, holderDecidable, holderWaiting, normalizeHolderChecks, setHolderDecision,
+} from '@/utils/accessChecks';
 import { retryAfterText } from '@/utils/reportAccess';
 import {
   REPORT_DECISION_META, applyReportDecisions, formatAccessDate, holderApprovalReports, normalisePhoneInput,
@@ -16,6 +20,9 @@ import {
 // with the DOB (and phone, when one is on record). Each requested report is approved or declined on its
 // own; "Approve all" / "Decline all" decide every report still waiting in THIS request. The link stays
 // valid while reports remain undecided (until the deadline).
+// Newer requests list per-CHECK permissions (info.checks): each requested check is accepted or declined on its
+// own ("Submit decisions") or all together ("Accept all" / "Reject all"); an older combined report is decided
+// together with the checks it covers.
 
 const describeError = (err, fallback) => {
   const status = err?.response?.status;
@@ -36,6 +43,8 @@ const FIELD = 'mt-1.5 h-11 w-full rounded-xl border border-gray-200 px-3 text-sm
 const CertificateAccessApproveContent = ({ token }) => {
   const [load, setLoad] = useState({ loading: true, info: null, error: null });
   const [reports, setReports] = useState([]);
+  const [checks, setChecks] = useState([]);
+  const [staged, setStaged] = useState({}); // check key -> 'approve' | 'reject'
   const [dob, setDob] = useState('');
   const [phone, setPhone] = useState('');
   const [submitting, setSubmitting] = useState(null); // 'all-approve' | 'all-reject' | 'report:<id>:<decision>' | null
@@ -52,6 +61,8 @@ const CertificateAccessApproveContent = ({ token }) => {
       if (generationRef.current !== generation) return;
       validateHolderInfo(data);
       setReports(holderApprovalReports(data));
+      setChecks(normalizeHolderChecks(data));
+      setStaged({});
       setLoad({ loading: false, info: data, error: null });
     } catch (err) {
       if (generationRef.current !== generation) return;
@@ -62,7 +73,10 @@ const CertificateAccessApproveContent = ({ token }) => {
   useEffect(() => { fetchInfo(); return () => { generationRef.current++; }; }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const { loading, info, error } = load;
-  const hasReportList = reports.length > 0;
+  const checksMode = checks.some((c) => c.status !== 'not_requested');
+  const waitingChecks = holderWaiting(checks);
+  const stagedDecisions = buildCheckDecisions(staged, checks);
+  const hasReportList = !checksMode && reports.length > 0;
   const waiting = undecidedReports(reports);
 
   // Shared identity check for every decision.
@@ -94,6 +108,21 @@ const CertificateAccessApproveContent = ({ token }) => {
     }
   };
 
+  const afterChecks = (nextChecks) => {
+    setChecks(nextChecks);
+    setStaged({});
+    if (holderWaiting(nextChecks).length === 0) setResult('done');
+  };
+
+  // Per-check decisions the holder staged, sent together.
+  const submitChecks = () => send('checks-submit', async (generation) => {
+    const decisions = buildCheckDecisions(staged, checks);
+    if (decisions.length === 0) { setFormError({ message: 'Choose Accept or Decline for at least one check.' }); return; }
+    const { data } = await certificateAccessAPI.decideChecks(token, { decisions, ...identityBody() });
+    if (generationRef.current !== generation) return;
+    afterChecks(applyCheckDecisions(checks, data, decisions));
+  });
+
   const afterDecision = (nextReports) => {
     setReports(nextReports);
     if (undecidedReports(nextReports).length === 0) setResult('done');
@@ -111,12 +140,18 @@ const CertificateAccessApproveContent = ({ token }) => {
   const decideAll = (decision) => send(`all-${decision}`, async (generation) => {
     const { data } = await certificateAccessAPI.decideApproval(token, { decision, ...identityBody() });
     if (generationRef.current !== generation) return;
+    if (checksMode) {
+      afterChecks(applyCheckDecisions(checks, null, waitingChecks.map((c) => ({ check_id: c.id, decision }))));
+      return;
+    }
     if (!hasReportList) { setResult(decision === 'approve' ? 'approved' : 'rejected'); return; }
     const decisions = waiting.map((r) => ({ report_id: r.report_id, decision }));
     afterDecision(applyReportDecisions(reports, data, decisions));
   });
 
-  const approvedCount = reports.filter((r) => r.status === 'approved').length;
+  const shownChecks = checks.filter((c) => c.status !== 'not_requested');
+  const approvedCount = checksMode ? checks.filter((c) => c.status === 'approved').length : reports.filter((r) => r.status === 'approved').length;
+  const totalCount = checksMode ? shownChecks.length : reports.length;
 
   return (
     <PublicAccessShell badge="Certificate holder approval">
@@ -137,9 +172,19 @@ const CertificateAccessApproveContent = ({ token }) => {
           <div>
             <AccessState icon={CheckCircle2} tone="bg-green-50 text-green-600" title="All decisions recorded">
               {approvedCount > 0
-                ? `${info?.visitor_email} can view ${approvedCount} of the ${reports.length} report${reports.length === 1 ? '' : 's'} you approved, while the approved access remains active.`
+                ? `${info?.visitor_email} can view the ${approvedCount} of ${totalCount} ${checksMode ? 'check' : 'report'}${totalCount === 1 ? '' : 's'} you approved, while the approved access remains active.`
                 : `${info?.visitor_email} won’t be able to view any of these reports.`}
             </AccessState>
+            {checksMode ? (
+              <ul className="mt-5 divide-y divide-gray-100 rounded-xl border border-gray-100 text-sm">
+                {shownChecks.map((c) => (
+                  <li key={c.key} className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5">
+                    <span className="flex items-center gap-2 font-medium text-brand-dark"><FileText size={14} className="text-gray-500" />{c.name}</span>
+                    <CheckStatusChip status={c.status} />
+                  </li>
+                ))}
+              </ul>
+            ) : (
             <ul className="mt-5 divide-y divide-gray-100 rounded-xl border border-gray-100 text-sm">
               {reports.map((r) => {
                 const meta = REPORT_DECISION_META[r.status] || REPORT_DECISION_META.requested;
@@ -151,6 +196,7 @@ const CertificateAccessApproveContent = ({ token }) => {
                 );
               })}
             </ul>
+            )}
           </div>
         ) : result === 'gone' || error?.status === 404 ? (
           <AccessState icon={LinkIcon} tone="bg-gray-100 text-gray-600" title="This link has expired or was already used">
@@ -166,7 +212,7 @@ const CertificateAccessApproveContent = ({ token }) => {
             {error.message}
           </AccessState>
         ) : (
-          <form onSubmit={(e) => { e.preventDefault(); decideAll('approve'); }} noValidate>
+          <form onSubmit={(e) => { e.preventDefault(); if (checksMode) submitChecks(); else decideAll('approve'); }} noValidate>
             <span className="flex h-11 w-11 items-center justify-center rounded-full bg-blue-50 text-brand-blue"><UserCheck size={20} strokeWidth={1.75} /></span>
             <h1 className="mt-4 font-sora text-xl font-bold">Someone wants to view your verification reports</h1>
             <dl className="mt-4 divide-y divide-gray-100 rounded-xl border border-gray-100 text-sm">
@@ -176,7 +222,39 @@ const CertificateAccessApproveContent = ({ token }) => {
               <div className="flex flex-wrap justify-between gap-2 px-4 py-2.5"><dt className="flex items-center gap-1.5 text-gray-500"><Clock size={13} /> Respond by</dt><dd className="font-medium text-orange-700">{formatAccessDate(info?.approval_deadline)}</dd></div>
             </dl>
 
-            {hasReportList ? (
+            {checksMode ? (
+              <div className="mt-5">
+                <p className="text-xs font-medium text-gray-700">Checks requested ({waitingChecks.length} waiting for you)</p>
+                <ul className="mt-2 divide-y divide-gray-100 rounded-xl border border-gray-100">
+                  {checks.map((c) => {
+                    const open = holderDecidable(c);
+                    const choice = staged[c.key];
+                    const note = c.sharesWith.length ? `This older combined report also covers ${c.sharesWith.join(', ')}. They are decided together.` : '';
+                    return (
+                      <li key={c.key} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+                        <div className="min-w-0">
+                          <p className="flex items-center gap-2 text-sm font-medium text-brand-dark"><FileText size={14} className="shrink-0 text-gray-500" />{c.name}</p>
+                          {note && <p className="mt-0.5 text-xs leading-5 text-amber-700">{note}</p>}
+                          {!open && <span className="mt-1 inline-flex"><CheckStatusChip status={c.status} /></span>}
+                        </div>
+                        {open && (
+                          <div className="flex gap-2" role="group" aria-label={`Decision for ${c.name}`}>
+                            <button type="button" aria-pressed={choice === 'reject'} onClick={() => setStaged((d) => setHolderDecision(d, checks, c.key, 'reject'))} disabled={!!submitting}
+                              className={`inline-flex h-9 items-center gap-1.5 rounded-lg border px-3 text-xs font-semibold disabled:opacity-60 ${choice === 'reject' ? 'border-red-300 bg-red-50 text-red-700' : 'border-gray-200 text-gray-700 hover:bg-gray-50'}`}>
+                              <XCircle size={13} /> Decline
+                            </button>
+                            <button type="button" aria-pressed={choice === 'approve'} onClick={() => setStaged((d) => setHolderDecision(d, checks, c.key, 'approve'))} disabled={!!submitting}
+                              className={`inline-flex h-9 items-center gap-1.5 rounded-lg border px-3 text-xs font-semibold disabled:opacity-60 ${choice === 'approve' ? 'border-green-300 bg-green-50 text-green-700' : 'border-gray-200 text-gray-700 hover:bg-gray-50'}`}>
+                              <CheckCircle2 size={13} /> Accept
+                            </button>
+                          </div>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            ) : hasReportList ? (
               <div className="mt-5">
                 <p className="text-xs font-medium text-gray-700">Reports requested ({reports.length})</p>
                 <ul className="mt-2 divide-y divide-gray-100 rounded-xl border border-gray-100">
@@ -222,6 +300,21 @@ const CertificateAccessApproveContent = ({ token }) => {
 
             {formError && <p role="alert" className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{formError.message}</p>}
 
+            {checksMode ? (
+              <div className="mt-6 space-y-3">
+                <PrimaryButton type="submit" loading={submitting === 'checks-submit'} disabled={!!submitting || stagedDecisions.length === 0} className="w-full">
+                  {submitting === 'checks-submit' ? <RefreshCw size={16} className="animate-spin motion-reduce:animate-none" /> : <CheckCircle2 size={16} />} Submit decisions{stagedDecisions.length > 0 ? ` (${stagedDecisions.length})` : ''}
+                </PrimaryButton>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <SecondaryButton onClick={() => decideAll('reject')} disabled={!!submitting || waitingChecks.length === 0}>
+                    {submitting === 'all-reject' ? <RefreshCw size={16} className="animate-spin motion-reduce:animate-none" /> : <XCircle size={16} />} Reject all
+                  </SecondaryButton>
+                  <SecondaryButton onClick={() => decideAll('approve')} disabled={!!submitting || waitingChecks.length === 0}>
+                    {submitting === 'all-approve' ? <RefreshCw size={16} className="animate-spin motion-reduce:animate-none" /> : <CheckCircle2 size={16} />} Accept all
+                  </SecondaryButton>
+                </div>
+              </div>
+            ) : (
             <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2">
               <SecondaryButton onClick={() => decideAll('reject')} disabled={!!submitting}>
                 {submitting === 'all-reject' ? <RefreshCw size={16} className="animate-spin motion-reduce:animate-none" /> : <XCircle size={16} />} {hasReportList && waiting.length > 1 ? 'Decline all' : 'Decline'}
@@ -230,7 +323,8 @@ const CertificateAccessApproveContent = ({ token }) => {
                 {submitting === 'all-approve' ? <RefreshCw size={16} className="animate-spin motion-reduce:animate-none" /> : <CheckCircle2 size={16} />} {hasReportList && waiting.length > 1 ? 'Approve all' : 'Approve access'}
               </PrimaryButton>
             </div>
-            <p className="mt-4 text-xs leading-5 text-gray-500">Didn’t expect this? Choose Decline. “All” applies only to the reports in this request that are still waiting.</p>
+            )}
+            <p className="mt-4 text-xs leading-5 text-gray-500">Didn’t expect this? Choose Decline. “All” applies only to the {checksMode ? 'checks' : 'reports'} in this request that are still waiting.</p>
           </form>
         )}
       </AccessCard>

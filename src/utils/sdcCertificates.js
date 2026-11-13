@@ -76,12 +76,15 @@ export const certificateEntriesByUser = (byUser, metaByPublicId) =>
   Object.fromEntries(Object.entries(byUser || {}).map(([userId, publicId]) => [userId, buildCertificateEntry(publicId, metaByPublicId)]));
 
 // Display state for one user. `known` comes from normalizeCertificatesByUser.
-export const certificateDisplay = (entry, known = true) => {
+// `processing`: the batch's SDC step has run but the backend's status is not done yet, so a holder without a
+// confirmed credential is still being issued ("Processing"), not "Not Issued".
+export const certificateDisplay = (entry, known = true, { processing = false } = {}) => {
   if (entry) {
     return entry.issued
       ? { status: 'ready', label: 'Ready', badge: 'info', canView: true, canDownload: true }
       : { status: 'revoked', label: 'Revoked', badge: 'error', canView: false, canDownload: false };
   }
+  if (known && processing) return { status: 'processing', label: 'Processing', badge: 'pending', canView: false, canDownload: false };
   return known
     ? { status: 'not_issued', label: 'Not Issued', badge: 'default', canView: false, canDownload: false }
     : { status: 'unavailable', label: 'Unavailable', badge: 'default', canView: false, canDownload: false };
