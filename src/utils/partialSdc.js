@@ -257,3 +257,31 @@ export const schemaImageProblem = (file) => {
 
 export const DOB_REQUIRED_MESSAGE = 'Date of birth is required for a Permission Required record.';
 export const isPermissionRequired = (credentialVisibility) => String(credentialVisibility || '').toLowerCase() === 'private';
+
+// ── What the SuperAdmin sees about an organization's authorization ─────────────────────────────
+
+// The authorization that matters for each holder: an active one wins, then the newest of any other state.
+export const authorizationsByHolder = (list) => {
+  const rank = (a) => (a?.status === 'active' ? 2 : a?.status === 'generating' ? 1 : 0);
+  const map = {};
+  (Array.isArray(list) ? list : []).forEach((auth) => {
+    const id = auth?.batch_user_id;
+    if (!id) return;
+    const current = map[id];
+    const newer = !current || rank(auth) > rank(current)
+      || (rank(auth) === rank(current) && String(auth.created_at || '') > String(current.created_at || ''));
+    if (newer) map[id] = auth;
+  });
+  return map;
+};
+
+// One display state per authorization: 'authorized' | 'outdated' | 'generating' | 'used' | 'closed'.
+export const authorizationDisplay = (auth) => {
+  if (!auth) return null;
+  const types = (auth.items || []).map((i) => i.verification_type_name).filter(Boolean);
+  if (authorizationIsStale(auth)) return { kind: 'outdated', label: 'Authorization outdated', types, stale: auth.stale_verification_types || [] };
+  if (auth.status === 'active') return { kind: 'authorized', label: 'Authorized by organization', types, stale: [] };
+  if (auth.status === 'generating') return { kind: 'generating', label: 'SDC being generated', types, stale: [] };
+  if (auth.status === 'consumed') return { kind: 'used', label: 'Authorized · used for SDC', types, stale: [] };
+  return { kind: 'closed', label: AUTHORIZATION_STATUS[auth.status]?.label || 'Not active', types, stale: [] };
+};

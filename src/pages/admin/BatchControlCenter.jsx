@@ -16,9 +16,10 @@ import { batchSdcSpaceId } from '@/utils/dhiway';
 import { normalizeCertificatesByUser, certificateEntriesByUser, certificateEntryFor, certificateDisplay } from '@/utils/sdcCertificates';
 import { ShareResultNote } from '@/components/shared/ShareResultNote';
 import { HolderSdcSharing } from '@/components/shared/HolderSdcSharing';
+import { OrgAuthorizationBanner } from '@/components/shared/OrgAuthorizationBanner';
 import { SendToVerifierModal } from '@/components/shared/SendToVerifierModal';
 import { canSendToVerifier, resendErrorMessage, resendResultNote } from '@/utils/smartSend';
-import { shareResultMessage } from '@/utils/partialSdc';
+import { shareResultMessage, authorizationsByHolder, authorizationDisplay } from '@/utils/partialSdc';
 import { CertificateAccessPanel, ReportsProtectedBadge } from '@/components/shared/CertificateAccessPanel';
 import { isHumanBatch, canRequireHolderApproval } from '@/utils/certificateAccess';
 import {
@@ -111,7 +112,8 @@ export const BatchControlCenter = () => {
   const [resending, setResending] = useState(null); // request token being resent
   const [sendingToOrg, setSendingToOrg] = useState(false);
   const [shareResults, setShareResults] = useState({}); // batch id -> last share response (email status)
-  const [activeAuthCount, setActiveAuthCount] = useState(0); // active partial SDC authorizations of the open batch
+  const [batchAuths, setBatchAuths] = useState([]); // the organization's partial SDC authorizations for the open batch (every state)
+  const activeAuthCount = batchAuths.filter((a) => a.status === 'active').length;
 
   const [submittedReports, setSubmittedReports] = useState(null);
   const [loadingReports, setLoadingReports] = useState(false);
@@ -538,14 +540,14 @@ export const BatchControlCenter = () => {
   // Active partial authorizations of the open batch: they make "Generate SDC" available for holders that are
   // not fully verified (the organization authorizes, only the SuperAdmin generates).
   const openBatchId = selectedBatch?.id;
-  useEffect(() => {
-    if (!openBatchId) { setActiveAuthCount(0); return undefined; }
-    let active = true;
-    sdcAPI.getBatchPartialAuthorizations(openBatchId, { status: 'active' })
-      .then(({ data }) => { if (active) setActiveAuthCount(Array.isArray(data?.authorizations) ? data.authorizations.length : 0); })
-      .catch(() => { if (active) setActiveAuthCount(0); });
-    return () => { active = false; };
+  const loadAuths = useCallback(() => {
+    if (!openBatchId) { setBatchAuths([]); return Promise.resolve(); }
+    return sdcAPI.getBatchPartialAuthorizations(openBatchId)
+      .then(({ data }) => setBatchAuths(Array.isArray(data?.authorizations) ? data.authorizations : []))
+      .catch(() => setBatchAuths([]));
   }, [openBatchId]);
+  useEffect(() => { loadAuths(); }, [loadAuths]);
+  const authByHolder = authorizationsByHolder(batchAuths);
 
   if (!listLoading && !selectedBatch) {
     return (
@@ -864,6 +866,13 @@ export const BatchControlCenter = () => {
             <CheckCircle size={18} className="text-emerald-500 shrink-0" />
           </div>
         )}
+
+        {/* ── The organization has authorized a partial SDC for some holders ───── */}
+        <OrgAuthorizationBanner
+          authorizations={batchAuths}
+          records={batchDetail?.users || []}
+          onGenerate={() => setSdcGenerateBatch(selectedBatch)}
+        />
 
         {/* ── Stat cards ───────────────────────────────────────────────────── */}
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-3">
@@ -1290,6 +1299,16 @@ export const BatchControlCenter = () => {
                           </td>
                           <td className="px-3 py-2.5">
                             <Badge status={status.variant}>{status.label}</Badge>
+                            {(() => {
+                              const view = authorizationDisplay(authByHolder[batchUserId]);
+                              if (!view || view.kind === 'closed') return null;
+                              const tone = view.kind === 'outdated' ? 'bg-amber-50 text-amber-800' : view.kind === 'used' ? 'bg-gray-100 text-gray-600' : 'bg-green-50 text-green-700';
+                              return (
+                                <span title={view.types.length ? `Authorized verifications: ${view.types.join(', ')}` : undefined} className={`mt-1 inline-flex max-w-full rounded-full px-2 py-0.5 text-[10px] font-semibold font-inter ${tone}`}>
+                                  {view.label}
+                                </span>
+                              );
+                            })()}
                           </td>
                           <td className="px-3 py-2.5">
                             <Badge status={certBadgeStatus}>{certState}</Badge>
@@ -1574,6 +1593,7 @@ export const BatchControlCenter = () => {
           onClose={() => {
             setSdcGenerateBatch(null); setSdcLiveStatus(null);
             refreshSdcCertificates(batchId, batchDetail?.users || [], batchDetail?.verification_progress?.sdc);
+            loadAuths();
           }}
           onGenerated={(payload) => {
             const generatedBatchId = sdcGenerateBatch.id;

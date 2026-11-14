@@ -119,3 +119,24 @@ test('schema images: type and size are pre-checked', () => {
   assert.match(schemaImageProblem({ type: 'image/png', size: 6 * 1024 * 1024 }), /5 MB/);
   assert.match(schemaImageProblem(null), /Choose/);
 });
+
+test('the SuperAdmin sees which holders the organization authorized, which are outdated and which were used', async () => {
+  const { authorizationsByHolder, authorizationDisplay } = await import('./partialSdc.js');
+  const list = [
+    { id: 'a1', batch_user_id: 'u1', status: 'superseded', created_at: '2026-11-14T10:00:00Z', items: [] },
+    { id: 'a2', batch_user_id: 'u1', status: 'active', is_valid: true, stale_verification_types: [], created_at: '2026-11-14T11:00:00Z', items: [{ verification_type_name: 'Allergy Testing' }] },
+    { id: 'a3', batch_user_id: 'u2', status: 'active', is_valid: false, stale_verification_types: ['PAN'], created_at: '2026-11-14T11:00:00Z', items: [{ verification_type_name: 'PAN' }] },
+    { id: 'a4', batch_user_id: 'u3', status: 'consumed', created_at: '2026-11-13T11:00:00Z', items: [] },
+    { id: 'a5', batch_user_id: 'u3', status: 'cancelled', created_at: '2026-11-14T09:00:00Z', items: [] },
+  ];
+  const map = authorizationsByHolder(list);
+  assert.equal(map.u1.id, 'a2', 'the active one wins over an older replaced one');
+  assert.equal(authorizationDisplay(map.u1).kind, 'authorized');
+  assert.deepEqual(authorizationDisplay(map.u1).types, ['Allergy Testing']);
+  assert.equal(authorizationDisplay(map.u2).kind, 'outdated');
+  assert.deepEqual(authorizationDisplay(map.u2).stale, ['PAN']);
+  assert.equal(map.u3.id, 'a5', 'with nothing active, the newest wins');
+  assert.equal(authorizationDisplay(null), null);
+  assert.equal(authorizationDisplay({ status: 'consumed', items: [] }).kind, 'used');
+  assert.deepEqual(authorizationsByHolder(null), {});
+});
