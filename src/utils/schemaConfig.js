@@ -273,6 +273,16 @@ export const buildSchemaConfigPayload = (form, { withSampleRecord = false } = {}
   return payload;
 };
 
+// On an edit, advanced settings the user did not change are left out of the request, so the backend carries
+// the saved ones over (sending local_fields / input_map / output_map REPLACES them).
+export const omitUnchangedAdvanced = (payload, originalPayload) => {
+  const out = { ...payload };
+  ['local_fields', 'input_map', 'output_map'].forEach((key) => {
+    if (key in out && JSON.stringify(out[key]) === JSON.stringify(originalPayload?.[key])) delete out[key];
+  });
+  return out;
+};
+
 // Adds the pasted text as sample_record verbatim. Re-serialising it through JSON.parse/stringify
 // would move integer-like keys ("10", "2") ahead of the rest, so the server would discover the
 // record's fields in a different order than the user wrote them.

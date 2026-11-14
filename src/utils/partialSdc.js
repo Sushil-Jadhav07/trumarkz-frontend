@@ -111,7 +111,11 @@ export const describeGenerateError = (err) => {
     return { kind: 'legacy', message: text || 'These holders already have an SDC in the legacy Human layout.', userIds: obj.batch_user_ids };
   }
   if (status === 409) return { kind: 'busy', message: text || 'Another generation is using this selection — retry shortly.' };
-  if (status === 422) return { kind: 'validation', message: text || 'The Dhiway schema rejected this data. Nothing was sent.' };
+  if (status === 422) {
+    const body = err?.response?.data;
+    const list = (Array.isArray(obj?.errors) ? obj.errors : Array.isArray(body?.errors) ? body.errors : []).map((e) => (typeof e === 'string' ? e : e?.message || e?.msg || JSON.stringify(e))).filter(Boolean);
+    return { kind: 'validation', message: text || 'The Dhiway schema rejected this data. Nothing was sent.', errors: list };
+  }
   if (status === 502) return { kind: 'dhiway', message: text || 'Dhiway returned an error. The authorization was released; you can retry.' };
   return { kind: 'other', message: text || '' };
 };
@@ -166,6 +170,9 @@ const WARNING_TITLES = {
   SAMPLE_EMPTY: 'The sample record is empty',
   OUTPUT_KEY_UNSOURCED: 'An output map key has no input',
   IDENTITY_FIELD_NOT_IN_SCHEMA: 'Schema is missing product_id / serial_no — SDC generation will be refused',
+  SAMPLE_FIELDS_SENT_UNVERIFIED: 'These example fields will be sent to Dhiway under their own names (not verified)',
+  SAMPLE_FIELD_NOT_IN_DHIWAY_SCHEMA: 'Example fields the Dhiway schema does not declare — kept in TruMarkZ, never sent',
+  SAMPLE_TYPE_MISMATCH: 'Example value type differs from the Dhiway schema',
 };
 
 // Server warning_details (and plain `warnings` from older responses) -> { warning: [], info: [] } rows

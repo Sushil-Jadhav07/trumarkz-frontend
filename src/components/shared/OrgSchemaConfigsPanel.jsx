@@ -11,7 +11,7 @@ import { SchemaDerivedInfo, SchemaWarningsList } from '@/components/shared/Schem
 import { dhiwaySchemaForPayload, outputMapSource, parseDhiwaySchemaText } from '@/utils/partialSdc';
 import {
   SCHEMA_SPACE_TYPE_OPTIONS, SCHEMA_SEMANTIC_FIELDS,
-  emptySchemaConfigForm, configToForm, configSampleText, findRegisteredConfig, unregisteredDhiwaySpaces,
+  emptySchemaConfigForm, configToForm, configSampleText, omitUnchangedAdvanced, findRegisteredConfig, unregisteredDhiwaySpaces,
   latestInChain, isLatestVersion, visibleSchemaConfigs, STALE_VERSION_MESSAGE, RESTORE_CONFIRM_MESSAGE, restoreErrorMessage,
   rowsToMap, schemaConfigJsonToForm,
   duplicateLabelError,
@@ -53,6 +53,11 @@ export const OrgSchemaConfigsPanel = ({ orgId, isSuperAdminViewer = false, onCon
   const [labelServerError, setLabelServerError] = useState('');
   const [jsonText, setJsonText] = useState('');
   const [jsonErrors, setJsonErrors] = useState([]);
+  // The example as it was when loaded: an edit only sends the example again when it was changed.
+  const [sampleOriginal, setSampleOriginal] = useState('');
+  const [sampleStored, setSampleStored] = useState(null); // the saved configuration's sample_record_stored (null = not editing)
+  // Edit: the saved configuration is fetched fresh every time; nothing is filled in until it has arrived.
+  const [editLoad, setEditLoad] = useState({ loading: false, error: '' });
 
   const resetJson = (text = '') => { setJsonText(text); setJsonErrors([]); setLabelServerError(''); };
 
@@ -92,20 +97,52 @@ export const OrgSchemaConfigsPanel = ({ orgId, isSuperAdminViewer = false, onCon
     setForm({ ...emptySchemaConfigForm(prefill?.space_type || spaceType), ...(prefill ? { space_id: prefill.space_id, schema_id: prefill.schema_id } : {}) });
     setFormErrors([]);
     resetJson();
+    setSampleOriginal(''); setSampleStored(null); setEditLoad({ loading: false, error: '' });
     setFormOpen(true);
   };
 
+  // Edit: GET the saved configuration (everything stored for it, the sample_record exactly as saved) and only then
+  // fill the form, so nothing is overwritten with empty defaults while the request is running. A superseded
+  // version points to the newest one (newer_version_id): that one is loaded instead.
+  const loadForEdit = async (picked) => {
+    setEditLoad({ loading: true, error: '' });
+    try {
+      let { data } = await adminAPI.getSchemaConfig(orgId, picked.id);
+      let config = data?.config || data;
+      if (config?.newer_version_id && config.newer_version_id !== config.id) {
+        ({ data } = await adminAPI.getSchemaConfig(orgId, config.newer_version_id));
+        config = data?.config || data;
+        setListNotice({ tone: 'info', text: `Editing the latest version (v${config.version}) of “${config.label}”.` });
+      }
+      if (!config || !config.id) throw new Error('The saved configuration was not returned.');
+      if (config.is_active === false) {
+        setEditLoad({ loading: false, error: 'This configuration is deactivated. Restore it first, then edit the new version.' });
+        return;
+      }
+      const sampleText = configSampleText(config);
+      setEditingConfig(config);
+      setForm(configToForm(config));
+      resetJson(sampleText);
+      setSampleOriginal(sampleText);
+      setSampleStored(config.sample_record_stored === false || (!sampleText && config.sample_record == null) ? false : true);
+      setEditLoad({ loading: false, error: '' });
+    } catch (err) {
+      const status = err?.response?.status;
+      setEditLoad({
+        loading: false,
+        error: status === 404 ? 'This configuration no longer exists. Close this window and refresh the list.' : getApiError(err, err?.message || 'The saved configuration could not be loaded.'),
+      });
+    }
+  };
+
   const openVersion = (picked) => {
-    // A new version is only accepted from the newest row of its chain: always edit that one.
-    const config = latestInChain(configs, picked) || picked;
-    if (config.id !== picked.id) setListNotice({ tone: 'info', text: `Editing the latest version (v${config.version}) of “${config.label}”.` });
-    setEditingConfig(config);
-    // Label, IDs, stored Dhiway schema JSON and every mapping come from the saved version; the sample box
-    // shows the saved sample record when the server returns one.
-    setForm(configToForm(config));
+    setEditingConfig(picked);
+    setForm(emptySchemaConfigForm(picked.space_type));
     setFormErrors([]);
-    resetJson(configSampleText(config));
+    resetJson('');
+    setSampleOriginal(''); setSampleStored(null);
     setFormOpen(true);
+    loadForEdit(picked);
   };
 
   const unregistered = useMemo(() => unregisteredDhiwaySpaces(dhiwaySpaces, configs), [dhiwaySpaces, configs]);
@@ -151,6 +188,8 @@ export const OrgSchemaConfigsPanel = ({ orgId, isSuperAdminViewer = false, onCon
   // a configuration JSON. Re-read on every keystroke so the field list and mapping options stay live.
   const box = classifyJsonBox(jsonText);
   const discovery = box.kind === 'sample' ? box.discovery : null;
+  const sampleChanged = jsonText.trim() !== sampleOriginal.trim();
+  const editBlocked = editLoad.loading || !!editLoad.error;
 
   const applyConfigJson = () => {
     const result = schemaConfigJsonToForm(jsonText, form, { lockSpaceType: !!editingConfig });
@@ -207,6 +246,18 @@ export const OrgSchemaConfigsPanel = ({ orgId, isSuperAdminViewer = false, onCon
     })()
     : null;
 
+  const loadSampleFile = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    if (file.size > 1024 * 1024) { setJsonErrors(['That file is too large (1 MB limit).']); return; }
+    try {
+      resetJson(await file.text());
+    } catch {
+      setJsonErrors(['That file could not be read.']);
+    }
+  };
+
   const loadSchemaFile = async (event) => {
     const file = event.target.files?.[0];
     event.target.value = '';
@@ -226,10 +277,12 @@ export const OrgSchemaConfigsPanel = ({ orgId, isSuperAdminViewer = false, onCon
   const setOutputRow = (index, patch) => setForm((f) => ({ ...f, output_map: f.output_map.map((row, i) => (i === index ? { ...row, ...patch } : row)) }));
   const addOutputRow = () => setForm((f) => ({ ...f, output_map: [...f.output_map, { key: '', value: '' }] }));
   const removeOutputRow = (index) => setForm((f) => ({ ...f, output_map: f.output_map.filter((_, i) => i !== index) }));
+  const setFieldProp = (index, patch) => setForm((f) => ({ ...f, local_fields: f.local_fields.map((row, i) => (i === index ? { ...row, ...patch } : row)) }));
   const setAliases = (index, aliasesText) => setForm((f) => ({ ...f, local_fields: f.local_fields.map((row, i) => (i === index ? { ...row, aliasesText } : row)) }));
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (editBlocked) return;
 
     // Only genuinely invalid input stops the save. A valid sample record goes to the server as
     // sample_record, which derives the fields from it; nothing in it is required.
@@ -237,8 +290,14 @@ export const OrgSchemaConfigsPanel = ({ orgId, isSuperAdminViewer = false, onCon
       setJsonErrors([`${box.error} — fix it, or clear the box`]);
       return;
     }
+    if (!editingConfig && box.kind === 'empty') {
+      setJsonErrors(['Paste an example JSON object — it is the one input needed to register a schema.']);
+      return;
+    }
     let current = form;
-    let sampleText = willSendSample ? jsonText : '';
+    // The example is source data: it goes to the server as sample_record, which finds the fields. It is sent only
+    // when it is new or was changed; the Dhiway schema is never derived from it.
+    let sampleText = willSendSample && sampleChanged ? jsonText : '';
     if (box.kind === 'config') {
       const result = schemaConfigJsonToForm(jsonText, form, { lockSpaceType: !!editingConfig });
       if (result.errors) {
@@ -279,7 +338,10 @@ export const OrgSchemaConfigsPanel = ({ orgId, isSuperAdminViewer = false, onCon
     }
 
     const sendSample = !!sampleText;
-    const payload = buildSchemaConfigPayload(current, { withSampleRecord: sendSample });
+    let payload = buildSchemaConfigPayload(current, { withSampleRecord: sendSample });
+    // Advanced settings the user did not touch are left out, so the backend keeps the saved ones.
+    if (editingConfig) payload = omitUnchangedAdvanced(payload, buildSchemaConfigPayload(configToForm(editingConfig)));
+    else ['input_map', 'output_map'].forEach((key) => { if (!Object.keys(payload[key] || {}).length) delete payload[key]; });
     const options = sendSample ? { sampleRecordText: sampleText } : {};
 
     setSubmitting(true);
@@ -292,7 +354,7 @@ export const OrgSchemaConfigsPanel = ({ orgId, isSuperAdminViewer = false, onCon
       const serverFields = data?.config?.local_fields?.length ?? 0;
       // Notes (warning_details, or the older plain `warnings`) stay on the page, inline.
       const detailsFromServer = data?.warning_details || data?.config?.warning_details;
-      setSaveNotice({ label: payload.label, details: detailsFromServer, plain: data?.warnings });
+      setSaveNotice({ label: payload.label, details: detailsFromServer, plain: data?.warnings, fields: Array.isArray(data?.config?.local_fields) ? data.config.local_fields : [] });
       toast.success(
         `${editingConfig ? `New version saved for "${payload.label}"` : `"${payload.label}" registered`}`
         + (sendSample ? ` — server discovered ${plural(serverFields, 'field')}` : ''),
@@ -381,13 +443,31 @@ export const OrgSchemaConfigsPanel = ({ orgId, isSuperAdminViewer = false, onCon
       </div>}
 
       {saveNotice && (
-        <SchemaWarningsList
-          className="mb-3"
-          details={saveNotice.details}
-          plain={saveNotice.plain}
-          title={`Saved “${saveNotice.label}”. Notes about this configuration (nothing was blocked):`}
-          onDismiss={() => setSaveNotice(null)}
-        />
+        <div className="mb-3 space-y-2">
+          <SchemaWarningsList
+            details={saveNotice.details}
+            plain={saveNotice.plain}
+            title={`Saved “${saveNotice.label}”. Notes about this configuration (nothing was blocked):`}
+            onDismiss={() => setSaveNotice(null)}
+          />
+          {saveNotice.fields?.length > 0 && (
+            <details className="rounded-xl border border-gray-100 bg-white">
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2 text-xs font-semibold text-brand-dark font-inter">
+                <span>Fields found in the example <span className="font-normal text-gray-500">— {saveNotice.fields.length} saved for “{saveNotice.label}”</span></span>
+                <button type="button" onClick={(e) => { e.preventDefault(); setSaveNotice(null); }} aria-label="Dismiss" className="text-gray-400 hover:text-gray-700"><X size={13} /></button>
+              </summary>
+              <ul className="max-h-48 divide-y divide-gray-50 overflow-y-auto border-t border-gray-100">
+                {saveNotice.fields.map((f, i) => (
+                  <li key={`${f.name}-${i}`} className="flex items-center gap-2 px-3 py-1 text-[11px] font-inter">
+                    <span className="min-w-0 flex-1 truncate font-mono text-brand-dark" title={f.name}>{f.name}</span>
+                    <span className="shrink-0 text-gray-500">{f.type || 'string'}</span>
+                    {Array.isArray(f.path) && formatServerPath(f.path) !== f.name && <span className="shrink-0 font-mono text-gray-400">{formatServerPath(f.path)}</span>}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+        </div>
       )}
 
       {listNotice && (
@@ -461,6 +541,8 @@ export const OrgSchemaConfigsPanel = ({ orgId, isSuperAdminViewer = false, onCon
                               <span className="truncate text-sm font-semibold text-brand-dark font-inter">{config.label}</span>
                               <span className="shrink-0 rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] font-semibold text-gray-500">v{config.version}</span>
                               {config.is_default && <span title="Read-only: the default is chosen in Dhiway Spaces"><Badge status="info">Default</Badge></span>}
+                              {config.sample_record_stored === true && <span className="shrink-0 rounded-full bg-green-50 px-1.5 py-0.5 text-[10px] font-semibold text-green-700">Sample saved</span>}
+                              {config.sample_record_stored === false && <span title="The original sample JSON was not stored — paste it again when editing" className="shrink-0 rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">Sample missing</span>}
                               {config.is_active !== false && <span className="shrink-0 rounded-full bg-green-50 px-1.5 py-0.5 text-[10px] font-semibold text-green-700">Active</span>}
                               {config.is_active === false && <Badge status="default">Deactivated</Badge>}
                               {config.is_active === false && isLatestVersion(configs, config) && <span className="shrink-0 rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] font-semibold text-gray-600">Latest version</span>}
@@ -608,6 +690,20 @@ export const OrgSchemaConfigsPanel = ({ orgId, isSuperAdminViewer = false, onCon
         formId="schema-config-form"
       >
         <div className="space-y-4">
+          {editLoad.loading && (
+            <div role="status" className="flex items-center justify-center gap-2 py-10 text-sm text-gray-500 font-inter">
+              <RefreshCw size={16} className="animate-spin motion-reduce:animate-none text-brand-blue" /> Loading the saved configuration…
+            </div>
+          )}
+          {!editLoad.loading && editLoad.error && (
+            <div role="alert" className="space-y-3 rounded-xl border border-red-100 bg-red-50 p-4">
+              <p className="text-sm text-red-700 font-inter">{editLoad.error}</p>
+              <button type="button" onClick={() => editingConfig && loadForEdit(editingConfig)} className="inline-flex items-center gap-1.5 text-xs font-semibold text-brand-blue hover:underline font-inter">
+                <RefreshCw size={12} /> Try again
+              </button>
+            </div>
+          )}
+          <div className={editBlocked ? 'hidden' : 'space-y-4'}>
           {formErrors.length > 0 && (
             <div className="rounded-xl border border-red-100 bg-red-50 p-3">
               {formErrors.map((e, i) => <p key={i} className="text-xs text-red-600 font-inter">{e}</p>)}
@@ -646,12 +742,112 @@ export const OrgSchemaConfigsPanel = ({ orgId, isSuperAdminViewer = false, onCon
           <div>
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
+                <label htmlFor="schema-config-json" className="flex items-center gap-1.5 text-xs font-medium text-brand-dark font-inter">
+                  <Braces size={13} className="text-brand-blue" /> Example JSON / Sample Schema
+                </label>
+                <p className="mt-0.5 text-[11px] text-gray-400 font-inter">
+                  Paste one example record — the only JSON you need. It is source data, not a Dhiway schema: every field is found with its exact
+                  name and type (nested objects and arrays too), but nothing is registered on Dhiway. Fields TruMarkZ fills itself, such as identity,
+                  created_time and images, are never asked for.
+                </p>
+              </div>
+              <div className="flex shrink-0 items-center gap-1.5">
+                <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-brand-blue font-inter hover:bg-blue-50">
+                  <Upload size={12} /> Upload .json
+                  <input type="file" accept=".json,application/json" onChange={loadSampleFile} className="sr-only" />
+                </label>
+                <button
+                  type="button"
+                  onClick={insertExample}
+                  className="rounded-lg border border-gray-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-brand-blue font-inter hover:bg-blue-50"
+                >
+                  Insert example
+                </button>
+              </div>
+            </div>
+            <textarea
+              id="schema-config-json"
+              value={jsonText}
+              onChange={(e) => { setJsonText(e.target.value); if (jsonErrors.length) setJsonErrors([]); }}
+              placeholder='{"name": "…", "third+party+qr1": "…", "contact": {"city": "…"}, "skills": ["…"]}'
+              rows={10}
+              spellCheck={false}
+              className="mt-2 w-full resize-y rounded-xl border border-gray-200 bg-gray-50/60 p-3 font-mono text-[11px] leading-relaxed text-brand-dark outline-none placeholder:font-inter placeholder:text-gray-400 focus:border-brand-blue focus:bg-white"
+            />
+            {editingConfig && sampleStored === false && (
+              <p role="status" className="mt-1.5 rounded-lg border border-amber-100 bg-amber-50 px-2.5 py-1.5 text-[11px] leading-relaxed text-amber-800 font-inter">
+                The original sample JSON wasn’t stored — paste it again to update the fields. The current fields and mappings are still shown under Advanced settings.
+              </p>
+            )}
+
+            {(jsonErrors.length > 0 || box.kind === 'invalid') && (
+              <div className="mt-2 rounded-lg border border-red-100 bg-red-50 px-2.5 py-2">
+                {(jsonErrors.length ? jsonErrors : [box.error]).map((e, i) => (
+                  <p key={i} className="text-[11px] text-red-600 font-inter">{e}</p>
+                ))}
+              </div>
+            )}
+
+            {box.kind === 'config' && (
+              <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-blue-100 bg-blue-50/60 px-2.5 py-2">
+                <p className="text-[11px] text-brand-dark font-inter">
+                  This looks like a configuration JSON (local_fields / input_map / output_map), not a sample record.
+                </p>
+                <button type="button" onClick={applyConfigJson} className="rounded-lg bg-brand-blue px-3 py-1.5 text-[11px] font-semibold text-white font-inter hover:bg-blue-700">
+                  Apply configuration
+                </button>
+              </div>
+            )}
+
+            {discovery && (
+              <div className="mt-2 rounded-lg border border-gray-100 bg-white">
+                <div className="flex items-center justify-between gap-2 border-b border-gray-100 px-2.5 py-1.5">
+                  <p className="text-[11px] font-semibold text-brand-dark font-inter">
+                    {discovery.fields.length
+                      ? <>{plural(discovery.fields.length, 'field')} found<span className="font-normal text-gray-400"> — names and types are read from your example</span></>
+                      : <>This record is empty<span className="font-normal text-gray-400"> — it has no fields, so it won’t be sent</span></>}
+                  </p>
+                  {jsonText && (
+                    <button type="button" onClick={() => resetJson('')} className="text-[11px] font-semibold text-gray-500 font-inter hover:text-brand-dark">
+                      Clear
+                    </button>
+                  )}
+                </div>
+                {discovery.duplicates.length > 0 && (
+                  <p className="border-b border-amber-100 bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-700 font-inter">
+                    Repeated key{discovery.duplicates.length === 1 ? '' : 's'} in the sample: {discovery.duplicates.join(', ')} — each is listed once.
+                  </p>
+                )}
+                <ul className="max-h-44 divide-y divide-gray-50 overflow-y-auto">
+                  {discovery.fields.map((f) => (
+                    <li key={f.path} className="flex items-center gap-2 px-2.5 py-1 text-[11px] font-inter" style={{ paddingLeft: 10 + (f.depth - 1) * 12 }}>
+                      <span className="min-w-0 flex-1 truncate font-mono text-brand-dark" title={f.path}>{f.path}</span>
+                      <span className="shrink-0 text-gray-400">{f.types.length > 1 ? 'mixed' : f.types[0]}</span>
+                      {f.mappable
+                        ? <span className="shrink-0 rounded bg-green-50 px-1.5 py-0.5 text-[10px] font-semibold text-green-700">mappable</span>
+                        : <span className="shrink-0 rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-semibold text-gray-500">{f.note}</span>}
+                    </li>
+                  ))}
+                </ul>
+                <p className="border-t border-gray-100 px-2.5 py-1.5 text-[11px] text-gray-400 font-inter">
+                  Every path here, nested ones included, becomes a field on the server. Only a top-level field holding a plain
+                  value can be picked for an input mapping, because a mapping stores one source field name.
+                </p>
+              </div>
+            )}
+          </div>
+
+          {isSuperAdminViewer && (
+          <div>
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
                 <label htmlFor="dhiway-schema-json" className="flex items-center gap-1.5 text-xs font-medium text-brand-dark font-inter">
-                  <Braces size={13} className="text-brand-blue" /> Dhiway schema JSON
+                  <Braces size={13} className="text-brand-blue" /> Actual Dhiway schema JSON <span className="font-normal text-gray-500">(optional, authoritative)</span>
                 </label>
                 <p className="mt-0.5 text-[11px] text-gray-500 font-inter">
-                  The actual JSON of the Dhiway schema behind the Schema ID above: an object with “properties” (and optionally “required”).
-                  Only the properties it declares are sent to Dhiway; everything else stays in TruMarkZ.
+                  Optional. The real JSON of the Dhiway schema behind this Schema ID. When stored it is authoritative: only the fields it declares
+                  are sent to Dhiway, and its required fields are checked before anything is sent. TruMarkZ cannot fetch it from Dhiway, so it is
+                  only ever what is pasted here. The example above is compared with it when you save.
                   {editingConfig ? ' The stored schema is kept unless you paste a new one or remove it explicitly; a blank box never removes it.' : ''}
                 </p>
               </div>
@@ -695,96 +891,11 @@ export const OrgSchemaConfigsPanel = ({ orgId, isSuperAdminViewer = false, onCon
               </p>
             )}
           </div>
-
-          <div>
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <label htmlFor="schema-config-json" className="flex items-center gap-1.5 text-xs font-medium text-brand-dark font-inter">
-                  <Braces size={13} className="text-brand-blue" /> Example of your source data
-                </label>
-                <p className="mt-0.5 text-[11px] text-gray-400 font-inter">
-                  Paste one record exactly as your organization sends it — any field names, nesting, arrays or types. It is
-                  sent as-is; the server discovers its fields and does not store the record itself.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={insertExample}
-                className="shrink-0 rounded-lg border border-gray-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-brand-blue font-inter hover:bg-blue-50"
-              >
-                Insert example
-              </button>
-            </div>
-            <textarea
-              id="schema-config-json"
-              value={jsonText}
-              onChange={(e) => { setJsonText(e.target.value); if (jsonErrors.length) setJsonErrors([]); }}
-              placeholder="Paste a sample record here"
-              rows={8}
-              spellCheck={false}
-              className="mt-2 w-full resize-y rounded-xl border border-gray-200 bg-gray-50/60 p-3 font-mono text-[11px] leading-relaxed text-brand-dark outline-none placeholder:font-inter placeholder:text-gray-400 focus:border-brand-blue focus:bg-white"
-            />
-
-            {(jsonErrors.length > 0 || box.kind === 'invalid') && (
-              <div className="mt-2 rounded-lg border border-red-100 bg-red-50 px-2.5 py-2">
-                {(jsonErrors.length ? jsonErrors : [box.error]).map((e, i) => (
-                  <p key={i} className="text-[11px] text-red-600 font-inter">{e}</p>
-                ))}
-              </div>
-            )}
-
-            {box.kind === 'config' && (
-              <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-blue-100 bg-blue-50/60 px-2.5 py-2">
-                <p className="text-[11px] text-brand-dark font-inter">
-                  This looks like a configuration JSON (local_fields / input_map / output_map), not a sample record.
-                </p>
-                <button type="button" onClick={applyConfigJson} className="rounded-lg bg-brand-blue px-3 py-1.5 text-[11px] font-semibold text-white font-inter hover:bg-blue-700">
-                  Apply configuration
-                </button>
-              </div>
-            )}
-
-            {discovery && (
-              <div className="mt-2 rounded-lg border border-gray-100 bg-white">
-                <div className="flex items-center justify-between gap-2 border-b border-gray-100 px-2.5 py-1.5">
-                  <p className="text-[11px] font-semibold text-brand-dark font-inter">
-                    {discovery.fields.length
-                      ? <>Preview: {plural(discovery.fields.length, 'field')} found<span className="font-normal text-gray-400"> — the server works out the final field list when you save</span></>
-                      : <>This record is empty<span className="font-normal text-gray-400"> — it has no fields, so it won’t be sent</span></>}
-                  </p>
-                  {jsonText && (
-                    <button type="button" onClick={() => resetJson('')} className="text-[11px] font-semibold text-gray-500 font-inter hover:text-brand-dark">
-                      Clear
-                    </button>
-                  )}
-                </div>
-                {discovery.duplicates.length > 0 && (
-                  <p className="border-b border-amber-100 bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-700 font-inter">
-                    Repeated key{discovery.duplicates.length === 1 ? '' : 's'} in the sample: {discovery.duplicates.join(', ')} — each is listed once.
-                  </p>
-                )}
-                <ul className="max-h-44 divide-y divide-gray-50 overflow-y-auto">
-                  {discovery.fields.map((f) => (
-                    <li key={f.path} className="flex items-center gap-2 px-2.5 py-1 text-[11px] font-inter" style={{ paddingLeft: 10 + (f.depth - 1) * 12 }}>
-                      <span className="min-w-0 flex-1 truncate font-mono text-brand-dark" title={f.path}>{f.path}</span>
-                      <span className="shrink-0 text-gray-400">{f.types.join(' | ')}</span>
-                      {f.mappable
-                        ? <span className="shrink-0 rounded bg-green-50 px-1.5 py-0.5 text-[10px] font-semibold text-green-700">mappable</span>
-                        : <span className="shrink-0 rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-semibold text-gray-500">{f.note}</span>}
-                    </li>
-                  ))}
-                </ul>
-                <p className="border-t border-gray-100 px-2.5 py-1.5 text-[11px] text-gray-400 font-inter">
-                  Every path here, nested ones included, becomes a field on the server. Only a top-level field holding a plain
-                  value can be picked for an input mapping, because a mapping stores one source field name.
-                </p>
-              </div>
-            )}
-          </div>
+          )}
 
           <details className="group rounded-xl border border-gray-200 bg-white" open={false}>
             <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3.5 py-2.5 text-xs font-semibold text-brand-dark font-inter">
-              <span>Advanced settings <span className="font-normal text-gray-500">— input mapping, field aliases and manual output mapping</span></span>
+              <span>Advanced settings <span className="font-normal text-gray-500">— aliases, required flags, descriptions, input mapping and output mapping</span></span>
               <ChevronDown size={14} className="shrink-0 text-gray-400 transition-transform group-open:rotate-180" />
             </summary>
             <div className="space-y-5 border-t border-gray-100 px-3.5 py-3.5">
@@ -830,21 +941,31 @@ export const OrgSchemaConfigsPanel = ({ orgId, isSuperAdminViewer = false, onCon
           </div>
 
 
-              {form.local_fields.some((f) => f.name?.trim()) && !willSendSample && (
+              {form.local_fields.some((f) => f.name?.trim()) && !(sampleChanged && willSendSample) && (
                 <div>
-                  <p className="text-xs font-medium text-brand-dark font-inter">Field aliases</p>
-                  <p className="mt-0.5 mb-2 text-[11px] text-gray-500 font-inter">Other column names an upload may use for a field, separated by commas.</p>
+                  <p className="text-xs font-medium text-brand-dark font-inter">Fields</p>
+                  <p className="mt-0.5 mb-2 text-[11px] text-gray-500 font-inter">Aliases are other column names an upload may use for a field (separated by commas). A required field must have a value in every uploaded record.</p>
                   <ul className="space-y-1.5">
                     {form.local_fields.map((field, index) => (field.name?.trim() ? (
-                      <li key={`${field.name}-${index}`} className="flex items-center gap-2">
+                      <li key={`${field.name}-${index}`} className="flex flex-wrap items-center gap-2">
                         <span className="w-[140px] shrink-0 truncate font-mono text-[11px] text-brand-dark" title={field.name}>{field.name}</span>
                         <input
                           aria-label={`Aliases for ${field.name}`}
                           value={field.aliasesText}
                           onChange={(e) => setAliases(index, e.target.value)}
-                          placeholder="e.g. Emp Name, Employee"
-                          className="h-8 min-w-0 flex-1 rounded-lg border border-gray-200 px-2.5 text-xs font-inter outline-none focus:border-brand-blue"
+                          placeholder="Aliases, e.g. Emp Name, Employee"
+                          className="h-8 min-w-[140px] flex-1 rounded-lg border border-gray-200 px-2.5 text-xs font-inter outline-none focus:border-brand-blue"
                         />
+                        <input
+                          aria-label={`Description for ${field.name}`}
+                          value={field.description || ''}
+                          onChange={(e) => setFieldProp(index, { description: e.target.value })}
+                          placeholder="Description"
+                          className="h-8 min-w-[120px] flex-1 rounded-lg border border-gray-200 px-2.5 text-xs font-inter outline-none focus:border-brand-blue"
+                        />
+                        <label className="flex shrink-0 items-center gap-1.5 text-[11px] font-medium text-gray-600 font-inter">
+                          <input type="checkbox" checked={!!field.required} onChange={(e) => setFieldProp(index, { required: e.target.checked })} className="accent-blue-600" aria-label={`${field.name} is required`} /> Required
+                        </label>
                       </li>
                     ) : null))}
                   </ul>
@@ -883,11 +1004,12 @@ export const OrgSchemaConfigsPanel = ({ orgId, isSuperAdminViewer = false, onCon
             The default {form.space_type} schema is chosen in Dhiway Spaces, not here.
             {editingConfig?.is_default ? ' This configuration is currently the default.' : ''}
           </p>
+          </div>
         </div>
 
         <Modal.Footer className="flex justify-end gap-2">
           <button type="button" onClick={() => setFormOpen(false)} disabled={submitting} className="rounded-xl border border-gray-200 px-4 py-2.5 text-sm font-medium text-gray-600 font-inter hover:bg-gray-50 disabled:opacity-50">Cancel</button>
-          <button type="submit" form="schema-config-form" disabled={submitting} className="rounded-xl bg-brand-blue px-4 py-2.5 text-sm font-medium text-white font-inter hover:bg-blue-700 disabled:opacity-60">
+          <button type="submit" form="schema-config-form" disabled={submitting || editBlocked} className="rounded-xl bg-brand-blue px-4 py-2.5 text-sm font-medium text-white font-inter hover:bg-blue-700 disabled:opacity-60">
             {submitting ? 'Saving…' : editingConfig ? 'Save New Version' : 'Register'}
           </button>
         </Modal.Footer>

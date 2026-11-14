@@ -389,3 +389,28 @@ test('restore errors keep the server message and fall back per status', () => {
   assert.match(STALE_VERSION_MESSAGE, /no longer the latest version/);
   assert.match(RESTORE_CONFIRM_MESSAGE, /new active version/);
 });
+
+test('on an edit, advanced settings the user did not change are left out; changed ones (even emptied) are sent', async () => {
+  const { omitUnchangedAdvanced } = await import('./schemaConfig.js');
+  const config = { space_type: 'product', schema_id: 's', space_id: 'p', label: 'L',
+    local_fields: [{ name: 'colour', type: 'string', required: false, aliases: [], path: ['colour'] }],
+    input_map: { product_name: 'Item' }, output_map: { colour: 'colour' } };
+  const original = buildSchemaConfigPayload(configToForm(config));
+  const untouched = omitUnchangedAdvanced(buildSchemaConfigPayload(configToForm(config)), original);
+  assert.deepEqual(['local_fields', 'input_map', 'output_map'].filter((k) => k in untouched), []);
+  assert.equal(untouched.label, 'L');
+
+  const form = configToForm(config);
+  form.local_fields[0].aliasesText = 'Colour, Color';
+  form.output_map = [];
+  const changed = omitUnchangedAdvanced(buildSchemaConfigPayload(form), original);
+  assert.deepEqual(changed.local_fields[0].aliases, ['Colour', 'Color']);
+  assert.deepEqual(changed.output_map, {}, 'an emptied map is sent so it replaces the saved one');
+  assert.ok(!('input_map' in changed));
+});
+
+test('the saved sample comes back exactly; an older configuration without one gives an empty editor', () => {
+  assert.deepEqual(JSON.parse(configSampleText({ sample_record: { 'third+party+qr1': '', nested: { a: [1] } }, sample_record_stored: true })), { 'third+party+qr1': '', nested: { a: [1] } });
+  assert.equal(configSampleText({ sample_record: null, sample_record_stored: false }), '');
+  assert.equal(configSampleText({}), '');
+});

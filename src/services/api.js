@@ -70,6 +70,10 @@ const getStoredToken = () =>
 const schemaConfigBody = (payload, sampleRecordText) => {
   const cleaned = cleanObject(payload);
   if (Array.isArray(payload.local_fields)) cleaned.local_fields = payload.local_fields;
+  // An explicit map replaces the saved one — even an emptied map: omitted keys keep what is saved.
+  ['input_map', 'output_map'].forEach((key) => {
+    if (payload[key] && typeof payload[key] === 'object' && !Array.isArray(payload[key])) cleaned[key] = payload[key];
+  });
   // dhiway_schema: absent keeps the stored schema, an object replaces it; clear_dhiway_schema: true removes it.
   if (payload.dhiway_schema && typeof payload.dhiway_schema === 'object') cleaned.dhiway_schema = payload.dhiway_schema;
   return sampleRecordText
@@ -374,6 +378,11 @@ export const authAPI = {
     api.get(`/auth/organizations/${orgId}/schema-configs`, {
       params: cleanObject({ space_type: spaceType, active_only: activeOnly }),
     }),
+  // GET one configuration with everything stored for it: the sample_record exactly as saved
+  // (null + sample_record_stored:false for older ones), dhiway_schema, local_fields, maps, image_url and
+  // newer_version_id (the newest version's id when this one was superseded). 404 unknown / other organization.
+  getSchemaConfig: (orgId, configId) =>
+    api.get(`/auth/organizations/${orgId}/schema-configs/${configId}`),
   // POST — registers an existing Dhiway schema (version 1). payload: { space_type,
   // schema_id, space_id, label, local_fields?, input_map?, output_map?, dhiway_schema?,
   // clear_dhiway_schema? }, plus the optional pasted sample_record (sent verbatim, see
@@ -442,6 +451,7 @@ export const adminAPI = {
   getOrganization: authAPI.getOrganization,
   updateOrganization: authAPI.updateOrganization,
   getSchemaConfigs: authAPI.getSchemaConfigs,
+  getSchemaConfig: authAPI.getSchemaConfig,
   createSchemaConfig: authAPI.createSchemaConfig,
   createSchemaConfigVersion: authAPI.createSchemaConfigVersion,
   deactivateSchemaConfig: authAPI.deactivateSchemaConfig,

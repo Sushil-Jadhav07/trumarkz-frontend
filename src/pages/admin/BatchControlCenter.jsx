@@ -136,6 +136,8 @@ export const BatchControlCenter = () => {
   const [sdcLiveStatus, setSdcLiveStatus] = useState(null); // { batchId, ready, total }
   const [sdcPollingBatchId, setSdcPollingBatchId] = useState(null);
   const [batchSdcByRecordId, setBatchSdcByRecordId] = useState({}); // { batch_user_id: certificate entry } from certificates_by_user
+  const [sdcStatusName, setSdcStatusName] = useState(''); // sdc_status from GET /sdc/batches/{id}/status
+  const [sdcSharedFromStatus, setSdcSharedFromStatus] = useState(null); // shared_with_org from the same response
   const [sdcCertsDone, setSdcCertsDone] = useState(false); // the backend's /status says every certificate is issued
   const [sdcCertsKnown, setSdcCertsKnown] = useState(true); // false when the backend did not send certificates_by_user
   const [sdcCertsLoading, setSdcCertsLoading] = useState(false);
@@ -187,6 +189,8 @@ export const BatchControlCenter = () => {
       const { known, byUser } = normalizeCertificatesByUser(statusData);
       setSdcCertsKnown(known);
       setSdcCertsDone(!!statusData?.done);
+      setSdcStatusName(statusData?.sdc_status ? String(statusData.sdc_status) : '');
+      setSdcSharedFromStatus(typeof statusData?.shared_with_org === 'boolean' ? statusData.shared_with_org : null);
       const confirmedIds = new Set(Object.values(byUser));
 
       // Decorate confirmed public ids with Dhiway metadata (only when there is something to decorate).
@@ -328,6 +332,8 @@ export const BatchControlCenter = () => {
     setBatchSdcByRecordId({});
     setSdcCertsKnown(true);
     setSdcCertsDone(false);
+    setSdcStatusName('');
+    setSdcSharedFromStatus(null);
     setLoadingDetail(true);
     setLoadingReports(true);
 
@@ -505,6 +511,7 @@ export const BatchControlCenter = () => {
     try {
       const { data: shareData } = await verificationAPI.shareWithOrganization(batch.id);
       setShareResults((prev) => ({ ...prev, [batch.id]: shareData }));
+      setSdcSharedFromStatus(true);
       const msg = shareResultMessage(shareData);
       if (msg.tone === 'warning') toast(`${batch.name}: ${msg.text}`, { icon: '⚠️', duration: 7000 });
       else toast.success(`${batch.name}: ${msg.text}`);
@@ -583,6 +590,13 @@ export const BatchControlCenter = () => {
   // verification_progress, so selectedBatch.sdcInfo is always stale —
   // prefer the detail response (batchDetail), which does have it.
   const sdcInfo = batchDetail?.verification_progress?.sdc || selectedBatch.sdcInfo || null;
+  // The SDC step has run for this batch. Human batches carry verification_progress.sdc; Product batches may not,
+  // so the batch status and the /status response count too — otherwise their Send to Organization never appears.
+  const sdcGenerated = !!sdcInfo?.status
+    || ['sdc_created', 'sdc_generated'].includes(String(batchDetail?.status || selectedBatch.rawStatus || '').toLowerCase())
+    || !!sdcStatusName;
+  // Shared: the server's answer (the status response, else the batch), never a local flag.
+  const sdcShared = sdcSharedFromStatus ?? !!selectedBatch.sharedWithOrganization;
   const detailRecords = batchDetail?.users || selectedBatch.records || [];
   // Check the whole batch so pagination and filters do not hide an issue.
   const showIssuesColumn = detailRecords.some((record) =>
@@ -638,17 +652,25 @@ export const BatchControlCenter = () => {
   // ── Open verifier requests (sent, report not uploaded yet), one entry per request id, so an admin can resend
   // without running Smart Send first. Only assignments that carry a request_id and are not finished are listed.
   const openRequests = (() => {
-    const finished = new Set(['completed', 'submitted', 'used', 'verified', 'approved', 'rejected', 'expired']);
+    const typeKey = (v) => String(v || '').trim().toLowerCase().replace(/[\s_-]+/g, '_');
+    const done = new Set(['approved', 'verified', 'completed', 'verification_completed', 'rejected', 'failed', 'submitted', 'used', 'expired']);
     const byId = {};
-    (batchDetail?.users || []).forEach((u) => { byId[u.id || u.user_id || u.entity_id] = u.full_name || u.product_name || u.email; });
+    (batchDetail?.users || []).forEach((u) => { byId[u.id || u.user_id || u.entity_id] = u; });
     const groups = new Map();
     (manualAssignments?.assignments || []).forEach((a) => {
       const requestId = a.request_id;
-      if (!requestId || finished.has(String(a.status || a.request_status || '').toLowerCase())) return;
-      if (!groups.has(requestId)) groups.set(requestId, { requestId, verifierEmail: a.verifier_email, typeName: a.verification_type_name, holders: [] });
-      const group = groups.get(requestId);
+      if (!requestId || done.has(String(a.status || a.request_status || '').toLowerCase())) return;
       (a.users || []).forEach((u) => {
-        const name = u.full_name || byId[u.batch_user_id] || u.batch_user_id;
+        const record = byId[u.batch_user_id];
+        // Open means: this holder's check for this type is still undecided AND no report has been uploaded for it.
+        const entry = Object.entries(record?.verification_type_status || {}).find(([name]) => typeKey(name) === typeKey(a.verification_type_name));
+        const value = entry?.[1];
+        const status = String(typeof value === 'string' ? value : value?.status || '').toLowerCase();
+        const hasReport = !!(value && typeof value === 'object' && value.report_url);
+        if (!record || !entry || done.has(status) || hasReport) return;
+        if (!groups.has(requestId)) groups.set(requestId, { requestId, verifierEmail: a.verifier_email, typeName: a.verification_type_name, holders: [] });
+        const name = u.full_name || record.full_name || record.product_name || u.batch_user_id;
+        const group = groups.get(requestId);
         if (name && !group.holders.includes(name)) group.holders.push(name);
       });
     });
@@ -777,17 +799,17 @@ export const BatchControlCenter = () => {
             <div className="flex items-center gap-2.5 flex-wrap min-w-0">
               <h1 className="font-sora text-2xl font-bold text-brand-dark truncate">{selectedBatch.name}</h1>
               <Badge status={selectedBatch.statusMeta.badge}>{selectedBatch.statusMeta.label}</Badge>
-              {selectedBatch.sharedWithOrganization && <Badge status="success">Shared with Organization</Badge>}
+              {sdcShared && <Badge status="success">Shared with Organization</Badge>}
               <ReportsProtectedBadge mode={accessMode || batchDetail?.certificate_access_mode || selectedBatch.certificateAccessMode} />
             </div>
             <div className="flex items-center gap-2 shrink-0">
               <Button
                 variant="outline" size="sm" icon={Share2}
-                disabled={!sdcInfo?.status || selectedBatch.sharedWithOrganization || sendingToOrg}
-                title={selectedBatch.sharedWithOrganization ? 'Already shared with the organization' : (!sdcInfo?.status ? 'Generate SDC certificates first' : undefined)}
+                disabled={!sdcGenerated || sdcShared || sendingToOrg}
+                title={sdcShared ? 'Already shared with the organization' : (!sdcGenerated ? 'Generate SDC certificates first' : undefined)}
                 onClick={() => handleSendToOrganization(selectedBatch)}
               >
-                {selectedBatch.sharedWithOrganization ? 'Shared' : 'Share'}
+                {sdcShared ? 'Shared' : 'Share'}
               </Button>
               <Button variant="primary" size="sm" icon={Pencil} onClick={() => setEditBatchOpen(true)}>
                 Edit Batch
@@ -950,7 +972,7 @@ export const BatchControlCenter = () => {
                   <p className="font-sora font-semibold text-brand-dark">Batch Actions</p>
                   <p className="text-xs text-gray-400 font-inter mt-1">Whole-batch controls only</p>
                 </div>
-                {selectedBatch.sharedWithOrganization && <Badge status="success">Shared</Badge>}
+                {sdcShared && <Badge status="success">Shared</Badge>}
               </div>
               <div className="grid grid-cols-2 gap-2">
                 {batchHasManualCheck
@@ -974,14 +996,14 @@ export const BatchControlCenter = () => {
                   onClick={() => { setResendRejectedPrefill(null); setResendRejectedTarget(selectedBatch); }}>
                   Resend Rejected
                 </Button>
-                {!!sdcInfo?.status && !selectedBatch.sharedWithOrganization && !shareResults[selectedBatch.id] && (
+                {sdcGenerated && !sdcShared && !shareResults[selectedBatch.id] && (
                   <Button variant="success" size="sm" icon={sendingToOrg ? RefreshCw : Send}
                     className="!px-2 text-xs text-center leading-tight" disabled={sendingToOrg}
                     onClick={() => handleSendToOrganization(selectedBatch)}>
                     {sendingToOrg ? 'Sending…' : 'Send to Organization'}
                   </Button>
                 )}
-                {!!sdcInfo?.status && (
+                {sdcGenerated && (
                   <Button variant="outline" size="sm" icon={RefreshCw} className={`!px-2 text-xs text-center leading-tight ${sdcCertsLoading ? 'animate-pulse' : ''}`}
                     disabled={sdcCertsLoading}
                     onClick={() => refreshSdcCertificates(selectedBatch.id, batchDetail?.users || selectedBatch.records || [], batchDetail?.verification_progress?.sdc)}>
@@ -1154,7 +1176,7 @@ export const BatchControlCenter = () => {
                       const rejections = checkEntries.filter(([, v]) => v?.status === 'rejected');
                       // Certificate — this exact user's own credential from certificates_by_user
                       // (batch_user_id), never matched by email, name or position.
-                      const certView = certificateDisplay(matchSdcRecord(record), sdcCertsKnown, { processing: !!sdcInfo?.status && !sdcCertsDone });
+                      const certView = certificateDisplay(matchSdcRecord(record), sdcCertsKnown, { processing: sdcGenerated && !sdcCertsDone });
                       const certState = certView.label;
                       const certBadgeStatus = certView.badge;
                       return (
@@ -1421,7 +1443,7 @@ export const BatchControlCenter = () => {
         </div>
 
         {/* ── Individual SDC sharing — once SDC generation has run; works whether or not the batch is shared ── */}
-        {!!sdcInfo?.status && isHumanBatch(batchDetail?.batch_type || selectedBatch.batchType) && (
+        {sdcGenerated && isHumanBatch(batchDetail?.batch_type || selectedBatch.batchType) && (
           <HolderSdcSharing batchId={selectedBatch.id} audience="admin" className="mb-4" confirmedUserIds={Object.keys(batchSdcByRecordId)} />
         )}
 
@@ -1474,7 +1496,7 @@ export const BatchControlCenter = () => {
           ? (verificationDetailsRecord.id || verificationDetailsRecord.user_id || verificationDetailsRecord.entity_id)
           : null;
         const vdCertMatch = verificationDetailsRecord ? matchSdcRecord(verificationDetailsRecord) : null;
-        const vdCertView = certificateDisplay(vdCertMatch, sdcCertsKnown, { processing: !!sdcInfo?.status && !sdcCertsDone });
+        const vdCertView = certificateDisplay(vdCertMatch, sdcCertsKnown, { processing: sdcGenerated && !sdcCertsDone });
         const vdCertificate = verificationDetailsRecord
           ? {
               status: vdCertView.status,

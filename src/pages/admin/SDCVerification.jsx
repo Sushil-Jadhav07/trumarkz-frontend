@@ -726,7 +726,16 @@ export const GenerateSDCModal = ({ batch, onClose, onGenerated, onConfirmed, liv
             )}
             {genError.kind === 'busy' && <p className="text-xs text-red-700/90 font-inter">Wait a moment, then press Generate again.</p>}
             {genError.kind === 'dhiway' && <p className="text-xs text-red-700/90 font-inter">The authorization was released. You can generate again.</p>}
-            {genError.kind === 'validation' && <p className="text-xs text-red-700/90 font-inter">Nothing was sent to Dhiway. Check the organization's schema configuration.</p>}
+            {genError.kind === 'validation' && (
+              <>
+                {genError.errors?.length > 0 && (
+                  <ul className="list-disc space-y-0.5 pl-4 text-xs text-red-700 font-inter">
+                    {genError.errors.map((e, i) => <li key={i}>{e}</li>)}
+                  </ul>
+                )}
+                <p className="text-xs text-red-700/90 font-inter">Nothing was sent to Dhiway. Check the organization's schema configuration.</p>
+              </>
+            )}
           </div>
         )}
 
