@@ -1453,6 +1453,18 @@ export const certificateAccessAPI = {
     publicVerificationApi.post(`/verification/certificate-access/approvals/${encodeURIComponent(token)}`, body),
 };
 
+// Share SDC via Email: already-generated Human SDC PDFs emailed to any typed address. Per batch; the PDF is always resolved
+// by the server from the holder (never sent from here). Organization: only after the batch was sent to it (403 before).
+export const sdcEmailSharesAPI = {
+  load: (batchId) => verificationApi.get(`/sdc/batches/${encodeURIComponent(batchId)}/sdc-email-shares`),
+  // body: { select_all: true | user_ids: [...], emails: [...] } — exactly one of select_all / user_ids.
+  sendBulk: (batchId, body) => verificationApi.post(`/sdc/batches/${encodeURIComponent(batchId)}/sdc-email-shares/bulk`, body, { timeout: 180000 }),
+  // body: { rows: [{ user_id, emails: [...] }] }
+  sendHolderWise: (batchId, body) => verificationApi.post(`/sdc/batches/${encodeURIComponent(batchId)}/sdc-email-shares/holder-wise`, body, { timeout: 180000 }),
+  history: (batchId, { limit = 50, offset = 0 } = {}) =>
+    verificationApi.get(`/sdc/batches/${encodeURIComponent(batchId)}/sdc-email-shares/history`, { params: { limit, offset } }),
+};
+
 // Individual SDC sharing (organization session or SuperAdmin): one email per selected holder, with only that
 // holder's own SDC PDF. Never changes shared_with_org.
 export const holderSdcSharesAPI = {

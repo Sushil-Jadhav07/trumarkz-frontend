@@ -16,6 +16,7 @@ import { batchSdcSpaceId } from '@/utils/dhiway';
 import { normalizeCertificatesByUser, certificateEntriesByUser, certificateEntryFor, certificateDisplay } from '@/utils/sdcCertificates';
 import { ShareResultNote } from '@/components/shared/ShareResultNote';
 import { HolderSdcSharing } from '@/components/shared/HolderSdcSharing';
+import { SdcEmailShare } from '@/components/shared/SdcEmailShare';
 import { OrgAuthorizationBanner } from '@/components/shared/OrgAuthorizationBanner';
 import { SendToVerifierModal } from '@/components/shared/SendToVerifierModal';
 import { canSendToVerifier, resendErrorMessage, resendResultNote } from '@/utils/smartSend';
@@ -1464,6 +1465,11 @@ export const BatchControlCenter = () => {
         {/* ── Individual SDC sharing — once SDC generation has run; works whether or not the batch is shared ── */}
         {sdcGenerated && isHumanBatch(batchDetail?.batch_type || selectedBatch.batchType) && (
           <HolderSdcSharing batchId={selectedBatch.id} audience="admin" className="mb-4" confirmedUserIds={Object.keys(batchSdcByRecordId)} />
+        )}
+
+        {/* ── Share SDC via Email — any Human batch (emails the generated SDC PDFs to typed addresses) ── */}
+        {batchDetail && isHumanBatch(batchDetail.batch_type || selectedBatch.batchType) && (
+          <SdcEmailShare batchId={selectedBatch.id} audience="admin" className="mb-4" />
         )}
 
         {/* ── Report access (Human batches only — Product/Warranty stay public) ── */}
